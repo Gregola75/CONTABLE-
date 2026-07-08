@@ -7,6 +7,7 @@ Funciona directamente en el móvil o el ordenador, **sin servidores y sin cuotas
 ## ✨ Qué hace
 
 - **📄 Facturas**: haces una foto de la factura o ticket del proveedor y la app lee la imagen (OCR en español) e intenta detectar automáticamente el **proveedor, el NIF/CIF, la fecha y el total**. Tú revisas los datos, eliges la categoría (mercancía, luz, alquiler…) y se guarda junto con la foto.
+- **🏪 Mis proveedores**: puedes dar de alta tus proveedores habituales a mano (nombre, NIF y categoría habitual). Al procesar la foto de una factura, la app comprueba si el proveedor **ya está en tu lista** (por NIF o por nombre, aunque cambien tildes o mayúsculas) y te avisa: «✅ Proveedor reconocido» o «🆕 Proveedor nuevo». Si es reconocido, rellena solo el NIF y la categoría; si es nuevo, puede añadirlo automáticamente a tu lista al guardar la factura.
 - **💰 Cierres diarios**: cada día subes la foto del ticket de cierre (Z) de la caja y la app detecta el **total de ventas** (y efectivo/tarjeta si aparecen). También puedes anotar el cierre a mano sin foto.
 - **🔍 Consultar**: busca facturas y cierres **por fechas, por proveedor o por tipo**, en vista de lista o de **galería de fotos**. Tocando cualquier registro ves la imagen original y todos los datos.
 - **📊 Informe trimestral**: eliges año y trimestre y genera el informe para la gestoría con:

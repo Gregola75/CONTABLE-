@@ -311,6 +311,42 @@ input:focus, select:focus { outline: none; border-color: var(--verde-medio); }
 
 .hidden { display: none !important; }
 
+/* Reconocimiento de proveedor */
+.prov-status {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: .85rem;
+  font-weight: 600;
+}
+.prov-status.ok { background: var(--verde-claro); color: var(--verde); }
+.prov-status.nuevo { background: #fff7e0; color: #8a6d00; }
+
+.check-linea {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: .85rem;
+  font-weight: 500;
+  color: var(--texto);
+  cursor: pointer;
+}
+.check-linea input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--verde-medio);
+  flex-shrink: 0;
+}
+
+/* Formulario de proveedores */
+.prov-form {
+  margin-top: 12px;
+  padding: 12px;
+  background: var(--gris-claro);
+  border-radius: 10px;
+}
+
 /* Estadísticas ajustes */
 .stat-linea { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--gris-claro); font-size: .92rem; }
 

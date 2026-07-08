@@ -54,6 +54,11 @@
       <label for="f-proveedor">Proveedor / Servicio</label>
       <input type="text" id="f-proveedor" list="proveedores-list" placeholder="Nombre del proveedor">
       <datalist id="proveedores-list"></datalist>
+      <div id="f-prov-status" class="prov-status hidden"></div>
+      <label id="f-agregar-prov-wrap" class="check-linea hidden">
+        <input type="checkbox" id="f-agregar-prov" checked>
+        <span>Añadir este proveedor a mi lista al guardar</span>
+      </label>
     </div>
     <div class="form-group">
       <label for="f-nif">NIF / CIF (opcional)</label>
@@ -101,6 +106,44 @@
   <div class="card">
     <h2>Últimas facturas</h2>
     <div id="facturas-recientes" class="lista"></div>
+  </div>
+
+  <div class="card">
+    <h2>🏪 Mis proveedores</h2>
+    <p class="hint">Da de alta tus proveedores habituales. Cuando hagas la foto de una factura, la app te dirá si el proveedor ya está en tu lista o si es nuevo.</p>
+    <button class="btn btn-secondary" id="prov-nuevo">➕ Añadir proveedor</button>
+    <div id="prov-form" class="prov-form hidden">
+      <div class="form-group">
+        <label for="p-nombre">Nombre del proveedor</label>
+        <input type="text" id="p-nombre" placeholder="Ej.: Distribuciones García S.L.">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="p-nif">NIF / CIF (opcional)</label>
+          <input type="text" id="p-nif" placeholder="B12345678">
+        </div>
+        <div class="form-group">
+          <label for="p-categoria">Categoría habitual</label>
+          <select id="p-categoria">
+            <option value="Mercancía">Mercancía / Género</option>
+            <option value="Alquiler">Alquiler</option>
+            <option value="Luz">Luz</option>
+            <option value="Agua">Agua</option>
+            <option value="Teléfono/Internet">Teléfono / Internet</option>
+            <option value="Seguros">Seguros</option>
+            <option value="Personal">Personal</option>
+            <option value="Reparaciones">Reparaciones</option>
+            <option value="Limpieza">Limpieza</option>
+            <option value="Otros">Otros</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-primary" id="prov-guardar">💾 Guardar proveedor</button>
+        <button class="btn btn-ghost" id="prov-cancelar">Cancelar</button>
+      </div>
+    </div>
+    <div id="prov-lista" class="lista" style="margin-top:10px"></div>
   </div>
 </section>
 

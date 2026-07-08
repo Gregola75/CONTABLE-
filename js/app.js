@@ -8,6 +8,7 @@
 
   let facturaPendiente = null; // { imagen: Blob, ocrTexto }
   let cierrePendiente = null;
+  let provEditando = null; // proveedor en edición (o null si es alta nueva)
   let informeActual = null;
   let vistaFotos = false;
   let ultimosResultados = [];
@@ -49,6 +50,164 @@
     });
   });
 
+  /* ---------- PROVEEDORES: alta manual y reconocimiento ---------- */
+
+  /* Normaliza un nombre para comparar: minúsculas, sin tildes ni signos. */
+  function normalizarNombre(s) {
+    return String(s || '')
+      .toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9ñ ]+/gi, ' ')
+      .replace(/\b(s\s?l\s?u?|s\s?a\s?u?|s\s?c|c\s?b|s\s?coop)\b/g, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+  }
+
+  /* Busca si un nombre/NIF corresponde a un proveedor dado de alta.
+     Devuelve el proveedor o null. */
+  async function reconocerProveedor(nombre, nif) {
+    const lista = await DB.provTodos();
+    const nifLimpio = String(nif || '').replace(/[\s\-\.]/g, '').toUpperCase();
+    if (nifLimpio) {
+      const porNif = lista.find(p => p.nif && p.nif.replace(/[\s\-\.]/g, '').toUpperCase() === nifLimpio);
+      if (porNif) return porNif;
+    }
+    const n = normalizarNombre(nombre);
+    if (n.length < 3) return null;
+    return lista.find(p => {
+      const pn = normalizarNombre(p.nombre);
+      if (!pn) return false;
+      return pn === n || (pn.length >= 4 && n.includes(pn)) || (n.length >= 4 && pn.includes(n));
+    }) || null;
+  }
+
+  /* Pinta el aviso "reconocido / nuevo" bajo el campo proveedor. */
+  async function actualizarEstadoProveedor() {
+    const nombre = $('#f-proveedor').value.trim();
+    const nif = $('#f-nif').value.trim();
+    const estado = $('#f-prov-status');
+    const wrap = $('#f-agregar-prov-wrap');
+
+    if (!nombre) {
+      estado.classList.add('hidden');
+      wrap.classList.add('hidden');
+      return;
+    }
+    const prov = await reconocerProveedor(nombre, nif);
+    estado.classList.remove('hidden');
+    if (prov) {
+      estado.className = 'prov-status ok';
+      estado.textContent = `✅ Proveedor reconocido: ${prov.nombre}`;
+      wrap.classList.add('hidden');
+      // Completar datos que falten con la ficha del proveedor
+      if (!nif && prov.nif) $('#f-nif').value = prov.nif;
+      if (prov.categoria) $('#f-categoria').value = prov.categoria;
+      if (normalizarNombre(nombre) !== normalizarNombre(prov.nombre)) {
+        $('#f-proveedor').value = prov.nombre;
+      }
+    } else {
+      estado.className = 'prov-status nuevo';
+      estado.textContent = '🆕 Proveedor nuevo: no está en tu lista.';
+      wrap.classList.remove('hidden');
+    }
+  }
+
+  $('#f-proveedor').addEventListener('change', actualizarEstadoProveedor);
+  $('#f-nif').addEventListener('change', actualizarEstadoProveedor);
+
+  function abrirFormProveedor(prov = null) {
+    provEditando = prov;
+    $('#p-nombre').value = prov ? prov.nombre : '';
+    $('#p-nif').value = prov ? (prov.nif || '') : '';
+    $('#p-categoria').value = prov ? (prov.categoria || 'Mercancía') : 'Mercancía';
+    $('#prov-form').classList.remove('hidden');
+    $('#p-nombre').focus();
+  }
+
+  $('#prov-nuevo').addEventListener('click', () => abrirFormProveedor());
+  $('#prov-cancelar').addEventListener('click', () => {
+    provEditando = null;
+    $('#prov-form').classList.add('hidden');
+  });
+
+  $('#prov-guardar').addEventListener('click', async () => {
+    const nombre = $('#p-nombre').value.trim();
+    if (!nombre) { toast('⚠️ Pon el nombre del proveedor.'); return; }
+
+    // Evitar duplicados (salvo que estemos editando ese mismo proveedor)
+    const existente = await reconocerProveedor(nombre, $('#p-nif').value.trim());
+    if (existente && (!provEditando || existente.id !== provEditando.id)) {
+      toast(`⚠️ Ese proveedor ya existe en tu lista: ${existente.nombre}`);
+      return;
+    }
+
+    await DB.provGuardar({
+      ...(provEditando ? { id: provEditando.id, creado: provEditando.creado } : { creado: new Date().toISOString() }),
+      nombre,
+      nif: $('#p-nif').value.trim().toUpperCase(),
+      categoria: $('#p-categoria').value
+    });
+
+    provEditando = null;
+    $('#prov-form').classList.add('hidden');
+    toast('💾 Proveedor guardado.');
+    pintarProveedores();
+    cargarProveedores();
+  });
+
+  async function pintarProveedores() {
+    const lista = await DB.provTodos();
+    const div = $('#prov-lista');
+    if (!lista.length) {
+      div.innerHTML = '<p class="vacio">Aún no tienes proveedores dados de alta.</p>';
+      return;
+    }
+    div.innerHTML = lista.map(p => `
+      <div class="item" data-pid="${p.id}">
+        <div class="item-thumb placeholder">🏪</div>
+        <div class="item-info">
+          <div class="item-titulo">${escapar(p.nombre)}</div>
+          <div class="item-sub">${escapar(p.nif || 'Sin NIF')} · ${escapar(p.categoria || '')}</div>
+        </div>
+        <button class="btn btn-small prov-borrar" data-pid="${p.id}" title="Eliminar">🗑️</button>
+      </div>`).join('');
+
+    div.querySelectorAll('.item').forEach(el => {
+      el.addEventListener('click', (e) => {
+        if (e.target.closest('.prov-borrar')) return;
+        const p = lista.find(x => x.id === +el.dataset.pid);
+        if (p) abrirFormProveedor(p);
+      });
+    });
+    div.querySelectorAll('.prov-borrar').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const p = lista.find(x => x.id === +btn.dataset.pid);
+        if (p && confirm(`¿Eliminar "${p.nombre}" de tu lista de proveedores?\n(Las facturas ya guardadas no se tocan.)`)) {
+          await DB.provBorrar(p.id);
+          toast('🗑️ Proveedor eliminado.');
+          pintarProveedores();
+          cargarProveedores();
+        }
+      });
+    });
+  }
+
+  /* Si el proveedor de la factura es nuevo y la casilla está marcada,
+     se da de alta automáticamente. */
+  async function altaProveedorSiNuevo(nombre, nif, categoria) {
+    if (!nombre || nombre === 'Sin proveedor') return;
+    if (!$('#f-agregar-prov').checked) return;
+    const existente = await reconocerProveedor(nombre, nif);
+    if (existente) return; // ya está dado de alta
+    await DB.provGuardar({
+      nombre, nif: (nif || '').toUpperCase(), categoria,
+      creado: new Date().toISOString()
+    });
+    toast(`🏪 "${nombre}" añadido a tu lista de proveedores.`);
+    pintarProveedores();
+  }
+
   /* ---------- FACTURAS ---------- */
 
   async function procesarFactura(file) {
@@ -82,6 +241,9 @@
     $('#factura-form-card').classList.remove('hidden');
     $('#factura-form-card').scrollIntoView({ behavior: 'smooth' });
 
+    // Comprobar si el proveedor detectado ya está dado de alta
+    await actualizarEstadoProveedor();
+
     if (datos.proveedor || datos.total != null) {
       toast('✅ Datos detectados. Revísalos antes de guardar.');
     } else {
@@ -98,12 +260,19 @@
     if (!fecha) { toast('⚠️ Falta la fecha.'); return; }
     if (isNaN(total) || total <= 0) { toast('⚠️ Pon el total de la factura.'); return; }
 
+    const proveedor = $('#f-proveedor').value.trim() || 'Sin proveedor';
+    const nif = $('#f-nif').value.trim();
+    const categoria = $('#f-categoria').value;
+
+    // Si es un proveedor nuevo y la casilla está marcada, darlo de alta
+    await altaProveedorSiNuevo(proveedor, nif, categoria);
+
     await DB.guardar({
       tipo: 'factura',
       fecha,
-      proveedor: $('#f-proveedor').value.trim() || 'Sin proveedor',
-      nif: $('#f-nif').value.trim(),
-      categoria: $('#f-categoria').value,
+      proveedor,
+      nif,
+      categoria,
       total: Math.round(total * 100) / 100,
       notas: $('#f-notas').value.trim(),
       imagen: facturaPendiente ? facturaPendiente.imagen : null,
@@ -113,6 +282,8 @@
 
     facturaPendiente = null;
     $('#factura-form-card').classList.add('hidden');
+    $('#f-prov-status').classList.add('hidden');
+    $('#f-agregar-prov-wrap').classList.add('hidden');
     toast('💾 Factura guardada.');
     pintarRecientes();
     cargarProveedores();
@@ -121,6 +292,8 @@
   $('#factura-cancelar').addEventListener('click', () => {
     facturaPendiente = null;
     $('#factura-form-card').classList.add('hidden');
+    $('#f-prov-status').classList.add('hidden');
+    $('#f-agregar-prov-wrap').classList.add('hidden');
   });
 
   /* ---------- CIERRES ---------- */
@@ -445,5 +618,6 @@
 
   iniciarSelectorAnio();
   pintarRecientes();
+  pintarProveedores();
   cargarProveedores();
 })();
