@@ -395,6 +395,23 @@
     <p class="hint">Cálculo orientativo para que sepas lo que te puede tocar pagar. <strong>No se incluye en el CSV ni en la impresión</strong> que envías a la gestoría. La cifra definitiva la calcula siempre tu gestoría.</p>
     <div id="prevision-contenido"></div>
   </div>
+
+  <div class="card">
+    <h2>📈 Gasto por proveedor en el tiempo</h2>
+    <p class="hint">Cuánto te gastas con cada proveedor: total, media por factura y media al mes. Toca un proveedor para ver su evolución mes a mes.</p>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="e-periodo">Periodo</label>
+        <select id="e-periodo">
+          <option value="12m">Últimos 12 meses</option>
+          <option value="anio">Este año</option>
+          <option value="todo">Todo el historial</option>
+        </select>
+      </div>
+    </div>
+    <button class="btn btn-primary" id="e-generar">📈 Calcular</button>
+    <div id="e-resultado" style="margin-top:14px"></div>
+  </div>
 </section>
 
 <!-- ==================== AJUSTES ==================== -->

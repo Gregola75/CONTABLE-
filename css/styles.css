@@ -492,6 +492,65 @@ select { appearance: none; -webkit-appearance: none; }
   border-radius: 10px;
 }
 
+/* Gasto por proveedor en el tiempo */
+.stat-prov {
+  border: 1px solid var(--borde);
+  border-radius: 10px;
+  background: var(--panel-2);
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+.stat-prov-cab {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px;
+  cursor: pointer;
+}
+.stat-prov-cab:active { background: #26262c; }
+.stat-prov-nombre { font-weight: 700; font-size: .9rem; }
+.stat-prov-nif { font-size: .72rem; color: var(--texto-sec); }
+.stat-prov-total { font-weight: 800; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.stat-prov-medias {
+  padding: 0 12px 10px;
+  font-size: .78rem;
+  color: var(--texto-sec);
+}
+.stat-meses {
+  padding: 4px 12px 12px;
+  border-top: 1px solid var(--borde);
+}
+.fila-mes {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.fila-mes .mes-etq {
+  width: 62px;
+  flex-shrink: 0;
+  font-size: .7rem;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+  color: var(--texto-sec);
+}
+.fila-mes .barra { flex: 1; min-width: 0; }
+.fila-mes .barra-fill {
+  height: 10px;
+  min-width: 2px;
+  background: var(--plata-osc);
+  border-radius: 0 4px 4px 0;
+}
+.fila-mes .mes-val {
+  width: 84px;
+  flex-shrink: 0;
+  text-align: right;
+  font-size: .76rem;
+  color: var(--texto);
+  font-variant-numeric: tabular-nums;
+}
+
 /* Estadísticas ajustes */
 .stat-linea { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--borde); font-size: .9rem; }
 

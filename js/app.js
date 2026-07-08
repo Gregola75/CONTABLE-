@@ -881,6 +881,70 @@
 
   $('#i-imprimir').addEventListener('click', () => window.print());
 
+  /* ---------- Gasto por proveedor en el tiempo ---------- */
+
+  function rangoPeriodo(periodo) {
+    const hoy = new Date();
+    const p = (n) => String(n).padStart(2, '0');
+    if (periodo === 'anio') {
+      return { desde: `${hoy.getFullYear()}-01-01`, hasta: null };
+    }
+    if (periodo === '12m') {
+      const d = new Date(hoy.getFullYear(), hoy.getMonth() - 11, 1);
+      return { desde: `${d.getFullYear()}-${p(d.getMonth() + 1)}-01`, hasta: null };
+    }
+    return { desde: null, hasta: null }; // todo el historial
+  }
+
+  function mesCorto(yyyymm) {
+    const [a, m] = yyyymm.split('-');
+    return INFORME.MESES[+m - 1].slice(0, 3) + ' ' + a.slice(2);
+  }
+
+  $('#e-generar').addEventListener('click', async () => {
+    const { desde, hasta } = rangoPeriodo($('#e-periodo').value);
+    const stats = await INFORME.estadisticas(desde, hasta);
+    const div = $('#e-resultado');
+
+    if (!stats.length) {
+      div.innerHTML = '<p class="vacio">No hay facturas en ese periodo.</p>';
+      return;
+    }
+
+    div.innerHTML = stats.map((s, i) => {
+      const maxMes = Math.max(...s.meses.map(m => s.porMes[m]));
+      const filas = s.meses.map(m => `
+        <div class="fila-mes">
+          <span class="mes-etq">${mesCorto(m)}</span>
+          <div class="barra"><div class="barra-fill" style="width:${Math.max(2, Math.round(s.porMes[m] / maxMes * 100))}%"></div></div>
+          <span class="mes-val">${INFORME.eur(s.porMes[m])}</span>
+        </div>`).join('');
+
+      return `
+        <div class="stat-prov">
+          <div class="stat-prov-cab" data-i="${i}">
+            <div style="min-width:0">
+              <div class="stat-prov-nombre">${escapar(s.nombre)}</div>
+              ${s.nif ? `<div class="stat-prov-nif">${escapar(s.nif)}</div>` : ''}
+            </div>
+            <div class="stat-prov-total">${INFORME.eur(s.total)}</div>
+          </div>
+          <div class="stat-prov-medias">
+            ${s.facturas} factura${s.facturas === 1 ? '' : 's'} ·
+            media <strong>${INFORME.eur(s.mediaFactura)}</strong> por factura ·
+            media <strong>${INFORME.eur(s.mediaMes)}</strong> al mes
+          </div>
+          <div class="stat-meses hidden" id="stat-meses-${i}">${filas}</div>
+        </div>`;
+    }).join('');
+
+    div.querySelectorAll('.stat-prov-cab').forEach(cab => {
+      cab.addEventListener('click', () => {
+        $('#stat-meses-' + cab.dataset.i).classList.toggle('hidden');
+      });
+    });
+  });
+
   /* ---------- AJUSTES ---------- */
 
   async function pintarStats() {

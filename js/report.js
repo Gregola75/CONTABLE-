@@ -156,6 +156,42 @@ const INFORME = (() => {
     `;
   }
 
+  /* Estadísticas de gasto por proveedor a lo largo del tiempo.
+     Devuelve, por proveedor: total, nº facturas, media por factura,
+     media mensual y desglose por mes. */
+  async function estadisticas(desde, hasta) {
+    const filtros = { tipo: 'factura' };
+    if (desde) filtros.desde = desde;
+    if (hasta) filtros.hasta = hasta;
+    const facturas = await DB.buscar(filtros);
+
+    const por = {};
+    facturas.forEach(r => {
+      const clave = (r.proveedor || 'Sin proveedor').trim() || 'Sin proveedor';
+      if (!por[clave]) por[clave] = { total: 0, facturas: 0, nif: r.nif || '', porMes: {} };
+      const p = por[clave];
+      p.total += (r.total || 0);
+      p.facturas += 1;
+      if (!p.nif && r.nif) p.nif = r.nif;
+      const mes = r.fecha.slice(0, 7); // YYYY-MM
+      p.porMes[mes] = (p.porMes[mes] || 0) + (r.total || 0);
+    });
+
+    return Object.entries(por).map(([nombre, p]) => {
+      const meses = Object.keys(p.porMes).sort();
+      return {
+        nombre,
+        nif: p.nif,
+        total: Math.round(p.total * 100) / 100,
+        facturas: p.facturas,
+        porMes: p.porMes,
+        meses,
+        mediaFactura: Math.round((p.total / p.facturas) * 100) / 100,
+        mediaMes: Math.round((p.total / meses.length) * 100) / 100
+      };
+    }).sort((a, b) => b.total - a.total);
+  }
+
   function renderHTML(inf) {
     const filasIngresos = inf.meses.map(m => `
       <tr>
@@ -267,5 +303,5 @@ const INFORME = (() => {
     return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
-  return { generar, prevision, renderPrevisionHTML, renderHTML, generarCSV, descargarCSV, eur, formatear, MESES };
+  return { generar, prevision, renderPrevisionHTML, renderHTML, generarCSV, descargarCSV, estadisticas, eur, formatear, MESES };
 })();
