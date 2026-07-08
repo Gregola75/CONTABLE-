@@ -468,7 +468,11 @@
     } else {
       $('#cierre-preview').classList.add('hidden');
     }
+    $('#c-alcance').value = 'dia';
+    $('#c-fecha-wrap').classList.remove('hidden');
+    $('#c-mes-wrap').classList.add('hidden');
     $('#c-fecha').value = datos.fecha || hoyISO();
+    $('#c-mes').value = hoyISO().slice(0, 7);
     $('#c-total').value = datos.total != null ? datos.total : '';
     $('#c-efectivo').value = datos.efectivo != null ? datos.efectivo : '';
     $('#c-tarjeta').value = datos.tarjeta != null ? datos.tarjeta : '';
@@ -484,16 +488,39 @@
   $('#cierre-file').addEventListener('change', (e) => { procesarCierre(e.target.files[0]); e.target.value = ''; });
   $('#cierre-manual').addEventListener('click', () => procesarCierre(null));
 
+  /* Cambiar entre cierre de un día y total de un mes completo */
+  $('#c-alcance').addEventListener('change', () => {
+    const esMes = $('#c-alcance').value === 'mes';
+    $('#c-fecha-wrap').classList.toggle('hidden', esMes);
+    $('#c-mes-wrap').classList.toggle('hidden', !esMes);
+  });
+
   $('#cierre-guardar').addEventListener('click', async () => {
     const total = parseFloat($('#c-total').value);
-    const fecha = $('#c-fecha').value;
-    if (!fecha) { toast('⚠️ Falta la fecha.'); return; }
-    if (isNaN(total) || total < 0) { toast('⚠️ Pon el total de ventas del día.'); return; }
+    const esMes = $('#c-alcance').value === 'mes';
+    if (isNaN(total) || total < 0) { toast('⚠️ Pon el total de ventas.'); return; }
 
-    // Avisar si ya hay un cierre para esa fecha
-    const existentes = await DB.buscar({ tipo: 'cierre', desde: fecha, hasta: fecha });
-    if (existentes.length && !confirm(`Ya hay un cierre guardado para el ${fmtFecha(fecha)}. ¿Guardar otro de todas formas?`)) {
-      return;
+    let fecha;
+    if (esMes) {
+      const mes = $('#c-mes').value; // YYYY-MM
+      if (!mes) { toast('⚠️ Elige el mes.'); return; }
+      fecha = mes + '-01';
+
+      // Avisos para no contar ingresos dos veces
+      const delMes = await DB.buscar({ tipo: 'cierre', desde: mes + '-01', hasta: mes + '-31' });
+      const yaMensual = delMes.find(r => r.mensual);
+      if (yaMensual && !confirm('Ya hay un total mensual guardado para ese mes. ¿Guardar otro de todas formas?')) return;
+      const diarios = delMes.filter(r => !r.mensual);
+      if (diarios.length && !confirm(`⚠️ Ese mes ya tiene ${diarios.length} cierres diarios guardados. Si añades también el total del mes, los ingresos se contarían DOS VECES en el informe. ¿Seguro que quieres guardarlo?`)) return;
+    } else {
+      fecha = $('#c-fecha').value;
+      if (!fecha) { toast('⚠️ Falta la fecha.'); return; }
+
+      // Avisar si ya hay un cierre para esa fecha
+      const existentes = await DB.buscar({ tipo: 'cierre', desde: fecha, hasta: fecha });
+      if (existentes.length && !confirm(`Ya hay un cierre guardado para el ${fmtFecha(fecha)}. ¿Guardar otro de todas formas?`)) {
+        return;
+      }
     }
 
     const efectivo = parseFloat($('#c-efectivo').value);
@@ -502,6 +529,7 @@
     await DB.guardar({
       tipo: 'cierre',
       fecha,
+      mensual: esMes,
       proveedor: '',
       total: Math.round(total * 100) / 100,
       efectivo: isNaN(efectivo) ? null : Math.round(efectivo * 100) / 100,
@@ -525,10 +553,16 @@
 
   /* ---------- Listas y detalle ---------- */
 
+  function mesEnLetras(fechaISO) {
+    return INFORME.MESES[parseInt(fechaISO.slice(5, 7), 10) - 1] + ' ' + fechaISO.slice(0, 4);
+  }
+
   function itemHTML(r) {
     const esFactura = r.tipo === 'factura';
-    const titulo = esFactura ? (r.proveedor || 'Sin proveedor') : 'Cierre de caja';
-    const sub = fmtFecha(r.fecha) + (esFactura && r.categoria ? ' · ' + r.categoria : '');
+    const titulo = esFactura ? (r.proveedor || 'Sin proveedor') : (r.mensual ? 'Ventas del mes' : 'Cierre de caja');
+    const sub = r.mensual
+      ? mesEnLetras(r.fecha) + ' · mes completo'
+      : fmtFecha(r.fecha) + (esFactura && r.categoria ? ' · ' + r.categoria : '');
     return `
       <div class="item" data-id="${r.id}">
         ${r._thumb
@@ -574,8 +608,8 @@
     const esFactura = r.tipo === 'factura';
     const img = r.imagen instanceof Blob ? URL.createObjectURL(r.imagen) : null;
     const lineas = [
-      ['Tipo', esFactura ? 'Factura (gasto)' : 'Cierre de caja (ingreso)'],
-      ['Fecha', fmtFecha(r.fecha)],
+      ['Tipo', esFactura ? 'Factura (gasto)' : (r.mensual ? 'Ventas de un mes completo (ingreso)' : 'Cierre de caja (ingreso)')],
+      r.mensual ? ['Mes', mesEnLetras(r.fecha)] : ['Fecha', fmtFecha(r.fecha)],
       esFactura ? ['Proveedor', r.proveedor || '—'] : null,
       esFactura && r.nif ? ['NIF/CIF', r.nif] : null,
       esFactura ? ['Categoría', r.categoria || '—'] : null,
@@ -591,7 +625,7 @@
     ].filter(Boolean);
 
     $('#modal-body').innerHTML = `
-      <h2 style="margin-bottom:8px">${esFactura ? '📄 ' + escapar(r.proveedor || 'Factura') : '💰 Cierre ' + fmtFecha(r.fecha)}</h2>
+      <h2 style="margin-bottom:8px">${esFactura ? '📄 ' + escapar(r.proveedor || 'Factura') : '💰 ' + (r.mensual ? 'Ventas de ' + mesEnLetras(r.fecha) : 'Cierre ' + fmtFecha(r.fecha))}</h2>
       ${img ? `<img class="modal-img" src="${img}" alt="Imagen del documento">` : ''}
       ${lineas.map(([k, v]) => `<div class="detalle-linea"><span class="etiqueta">${k}</span><span>${escapar(String(v))}</span></div>`).join('')}
       <div class="form-actions">

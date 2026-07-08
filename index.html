@@ -227,10 +227,21 @@
   <div id="cierre-form-card" class="card hidden">
     <h2>Revisar cierre</h2>
     <img id="cierre-preview" class="preview" alt="Cierre">
+    <div class="form-group">
+      <label for="c-alcance">¿Qué anotas?</label>
+      <select id="c-alcance">
+        <option value="dia">Cierre de un día</option>
+        <option value="mes">Total de un mes completo</option>
+      </select>
+    </div>
     <div class="form-row">
-      <div class="form-group">
+      <div class="form-group" id="c-fecha-wrap">
         <label for="c-fecha">Fecha</label>
         <input type="date" id="c-fecha">
+      </div>
+      <div class="form-group hidden" id="c-mes-wrap">
+        <label for="c-mes">Mes</label>
+        <input type="month" id="c-mes">
       </div>
       <div class="form-group">
         <label for="c-total">Total ventas (€)</label>
