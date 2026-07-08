@@ -37,8 +37,8 @@
         <input type="file" id="factura-camera" accept="image/*" capture="environment" hidden>
       </label>
       <label class="btn btn-secondary btn-big">
-        🖼️ Elegir imagen
-        <input type="file" id="factura-file" accept="image/*" hidden>
+        📎 Cargar imagen o PDF del dispositivo
+        <input type="file" id="factura-file" accept="image/*,application/pdf,.pdf" hidden>
       </label>
     </div>
     <div id="factura-progress" class="progress hidden">
@@ -95,6 +95,22 @@
     <div class="form-group">
       <label for="f-base">Base imponible (€) <small>total sin IVA</small></label>
       <input type="number" id="f-base" step="0.01" min="0" placeholder="0.00">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="f-rettipo">Retención IRPF <small>(alquiler…)</small></label>
+        <select id="f-rettipo">
+          <option value="">Sin retención</option>
+          <option value="19">19 % (alquiler del local)</option>
+          <option value="15">15 % (profesionales)</option>
+          <option value="7">7 % (nuevos profesionales)</option>
+          <option value="1">1 %</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="f-retcuota">Importe retención (€)</label>
+        <input type="number" id="f-retcuota" step="0.01" min="0" placeholder="0.00">
+      </div>
     </div>
     <div class="form-group">
       <label for="f-categoria">Categoría</label>
@@ -180,8 +196,8 @@
         <input type="file" id="cierre-camera" accept="image/*" capture="environment" hidden>
       </label>
       <label class="btn btn-secondary btn-big">
-        🖼️ Elegir imagen
-        <input type="file" id="cierre-file" accept="image/*" hidden>
+        📎 Cargar imagen o PDF del dispositivo
+        <input type="file" id="cierre-file" accept="image/*,application/pdf,.pdf" hidden>
       </label>
     </div>
     <button class="btn btn-ghost" id="cierre-manual">✍️ Anotar cierre sin foto</button>

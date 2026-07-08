@@ -51,7 +51,8 @@ const INFORME = (() => {
     const facturasDetalle = registros.filter(r => r.tipo === 'factura').map(r => ({
       total: r.total || 0,
       baseImponible: (typeof r.baseImponible === 'number') ? r.baseImponible : null,
-      ivaCuota: (typeof r.ivaCuota === 'number') ? r.ivaCuota : null
+      ivaCuota: (typeof r.ivaCuota === 'number') ? r.ivaCuota : null,
+      retCuota: (typeof r.retCuota === 'number') ? r.retCuota : null
     }));
 
     return { anio, trimestre, desde, hasta, meses, ingresosPorMes, gastosPorProveedor, totalIngresos, totalGastos, facturasDetalle };
@@ -70,11 +71,19 @@ const INFORME = (() => {
     // IVA soportado: cuota detectada en cada factura; si no la hay, se estima
     let ivaSoportado = 0;
     let baseGastos = 0;
+    let retenciones = 0;
     let facturasEstimadas = 0;
     (inf.facturasDetalle || []).forEach(f => {
+      const ret = f.retCuota || 0;
+      retenciones += ret;
       if (f.ivaCuota !== null) {
         ivaSoportado += f.ivaCuota;
-        baseGastos += (f.baseImponible !== null) ? f.baseImponible : (f.total - f.ivaCuota);
+        // El total pagado ya lleva la retención descontada: base = total − IVA + retención
+        baseGastos += (f.baseImponible !== null) ? f.baseImponible : (f.total - f.ivaCuota + ret);
+      } else if (ret > 0) {
+        // Con retención pero sin IVA detectado: base = total + retención (sin estimar IVA)
+        baseGastos += (f.baseImponible !== null) ? f.baseImponible : (f.total + ret);
+        facturasEstimadas++;
       } else if (rd > 0) {
         const b = f.total / (1 + rd);
         ivaSoportado += f.total - b;
@@ -97,9 +106,10 @@ const INFORME = (() => {
       baseGastos: r2(baseGastos),
       ivaSoportado: r2(ivaSoportado),
       ivaResultado: r2(ivaResultado),
+      retenciones: r2(retenciones),
       beneficio: r2(beneficio),
       irpfEstimado: irpfEstimado === null ? null : r2(irpfEstimado),
-      totalPrevisto: r2(Math.max(0, ivaResultado) + (irpfEstimado || 0)),
+      totalPrevisto: r2(Math.max(0, ivaResultado) + retenciones + (irpfEstimado || 0)),
       facturasEstimadas,
       numFacturas: (inf.facturasDetalle || []).length
     };
@@ -123,6 +133,11 @@ const INFORME = (() => {
               ${prev.ivaResultado >= 0 ? 'a pagar ' + eur(prev.ivaResultado) : 'a compensar ' + eur(-prev.ivaResultado)}
             </td>
           </tr>
+          ${prev.retenciones > 0 ? `
+          <tr class="total">
+            <td>Retenciones a ingresar (alquiler/profesionales, aprox. modelo 115/111)</td>
+            <td class="num" style="color:#b23a3a">${eur(prev.retenciones)}</td>
+          </tr>` : ''}
           ${prev.irpfEstimado !== null ? `
           <tr><td>Beneficio del trimestre (sin IVA)</td><td class="num">${eur(prev.beneficio)}</td></tr>
           <tr class="total">

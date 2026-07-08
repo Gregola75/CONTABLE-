@@ -176,6 +176,8 @@ const OCR = (() => {
     let hayCuota = false;
 
     for (const linea of lineas) {
+      // Las líneas de retención (IRPF) no son IVA: se tratan aparte
+      if (/retenci|irpf/i.test(linea)) continue;
       if (/total\s*iva|iva\s*incluido/i.test(linea) && !reTipo.test(linea)) continue;
 
       // Línea de base imponible
@@ -257,6 +259,38 @@ const OCR = (() => {
     return { baseImponible: base, ivaTipo, ivaCuota };
   }
 
+  /* Detecta la retención de IRPF (típica en el alquiler del local: 19 %,
+     o en facturas de profesionales: 15 %/7 %).
+     Devuelve { retTipo, retCuota } (null si no hay). */
+  function detectarRetencion(texto, total) {
+    const lineas = texto.split('\n');
+    const reImporte = /(\d{1,3}(?:[.,]\d{3})*[.,]\d{2}|\d+[.,]\d{2})/g;
+    const reTipo = /(\d{1,2}(?:[.,]\d{1,2})?)\s*%/;
+    let retTipo = null;
+    let retCuota = null;
+
+    for (const linea of lineas) {
+      if (!/retenci|ret\.\s|irpf/i.test(linea)) continue;
+      const mt = linea.match(reTipo);
+      let tipo = null;
+      if (mt) {
+        tipo = parseFloat(mt[1].replace(',', '.'));
+        if (isNaN(tipo) || tipo <= 0 || tipo > 25) tipo = null;
+      }
+      const nums = extraerImportes(linea, reImporte).filter(n => tipo === null || Math.abs(n - tipo) > 0.001);
+      if (tipo !== null && retTipo === null) retTipo = tipo;
+      if (nums.length && retCuota === null) {
+        // La cuota de retención suele ser el importe menor de la línea
+        const menor = Math.min(...nums);
+        if (total == null || menor < total) retCuota = menor;
+      }
+    }
+
+    // Si hay tipo pero no cuota y conocemos base ≈ podemos dejarlo a mano
+    if (retCuota !== null) retCuota = Math.round(retCuota * 100) / 100;
+    return { retTipo, retCuota };
+  }
+
   function extraerImportes(linea, reImporte) {
     const nums = [];
     let m;
@@ -317,6 +351,7 @@ const OCR = (() => {
   function analizarFactura(texto, proveedoresConocidos = []) {
     const total = detectarTotal(texto);
     const iva = detectarIVA(texto, total);
+    const ret = detectarRetencion(texto, total);
     return {
       proveedor: detectarProveedor(texto, proveedoresConocidos),
       nif: detectarNIF(texto),
@@ -324,7 +359,9 @@ const OCR = (() => {
       total,
       baseImponible: iva.baseImponible,
       ivaTipo: iva.ivaTipo,
-      ivaCuota: iva.ivaCuota
+      ivaCuota: iva.ivaCuota,
+      retTipo: ret.retTipo,
+      retCuota: ret.retCuota
     };
   }
 

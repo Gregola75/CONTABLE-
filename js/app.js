@@ -89,6 +89,48 @@
     });
   });
 
+  /* ---------- PDF: convertir la primera página en imagen ---------- */
+
+  let pdfJsCargado = null;
+
+  function cargarPdfJs() {
+    if (!pdfJsCargado) {
+      pdfJsCargado = new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js';
+        s.onload = () => {
+          window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+            'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+          resolve(window.pdfjsLib);
+        };
+        s.onerror = () => { pdfJsCargado = null; reject(new Error('No se pudo cargar el lector de PDF (¿sin conexión?).')); };
+        document.head.appendChild(s);
+      });
+    }
+    return pdfJsCargado;
+  }
+
+  /* Devuelve un Blob de imagen a partir del archivo: si es PDF,
+     convierte la primera página; si ya es imagen, lo devuelve tal cual. */
+  async function archivoAImagen(file) {
+    const esPDF = file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
+    if (!esPDF) return file;
+
+    const pdfjs = await cargarPdfJs();
+    const datos = await file.arrayBuffer();
+    const pdf = await pdfjs.getDocument({ data: datos }).promise;
+    const pagina = await pdf.getPage(1);
+    const viewport = pagina.getViewport({ scale: 2 });
+    const canvas = document.createElement('canvas');
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    await pagina.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+    if (pdf.numPages > 1) {
+      toast(`ℹ️ El PDF tiene ${pdf.numPages} páginas; se usa la primera.`);
+    }
+    return new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+  }
+
   /* ---------- PROVEEDORES: alta manual y reconocimiento ---------- */
 
   /* Normaliza un nombre para comparar: minúsculas, sin tildes ni signos. */
@@ -253,7 +295,16 @@
     if (!file) return;
     $('#factura-progress').classList.remove('hidden');
     $('#factura-form-card').classList.add('hidden');
-    $('#factura-progress-text').textContent = 'Leyendo la imagen… puede tardar unos segundos';
+    $('#factura-progress-text').textContent = 'Leyendo el documento… puede tardar unos segundos';
+
+    try {
+      file = await archivoAImagen(file);
+    } catch (e) {
+      console.error(e);
+      $('#factura-progress').classList.add('hidden');
+      toast('⚠️ ' + (e.message || 'No se pudo abrir el PDF.'));
+      return;
+    }
 
     let texto = '';
     try {
@@ -278,6 +329,8 @@
     $('#f-ivatipo').value = datos.ivaTipo != null ? String(datos.ivaTipo) : '';
     $('#f-ivacuota').value = datos.ivaCuota != null ? datos.ivaCuota : '';
     $('#f-base').value = datos.baseImponible != null ? datos.baseImponible : '';
+    $('#f-rettipo').value = datos.retTipo != null && [19, 15, 7, 1].includes(datos.retTipo) ? String(datos.retTipo) : '';
+    $('#f-retcuota').value = datos.retCuota != null ? datos.retCuota : '';
     $('#f-notas').value = '';
     $('#f-ocr-text').textContent = texto || '(no se detectó texto)';
     $('#factura-form-card').classList.remove('hidden');
@@ -313,6 +366,16 @@
   $('#f-ivatipo').addEventListener('change', () => recalcularIVA(true));
   $('#f-total').addEventListener('change', () => recalcularIVA(false));
 
+  /* Autocálculo de la retención: cuota = base imponible × tipo % */
+  $('#f-rettipo').addEventListener('change', () => {
+    const tipo = parseFloat($('#f-rettipo').value);
+    const base = parseFloat($('#f-base').value);
+    if (isNaN(tipo)) { $('#f-retcuota').value = ''; return; }
+    if (!isNaN(base) && base > 0) {
+      $('#f-retcuota').value = (Math.round(base * tipo) / 100).toFixed(2);
+    }
+  });
+
   $('#factura-guardar').addEventListener('click', async () => {
     const total = parseFloat($('#f-total').value);
     const fecha = $('#f-fecha').value;
@@ -329,6 +392,8 @@
     const ivaCuota = parseFloat($('#f-ivacuota').value);
     const base = parseFloat($('#f-base').value);
     const tipoStr = $('#f-ivatipo').value;
+    const retCuota = parseFloat($('#f-retcuota').value);
+    const retTipoStr = $('#f-rettipo').value;
 
     await DB.guardar({
       tipo: 'factura',
@@ -340,6 +405,8 @@
       baseImponible: isNaN(base) ? null : Math.round(base * 100) / 100,
       ivaTipo: tipoStr === '' ? null : (tipoStr === 'varios' ? 'varios' : +tipoStr),
       ivaCuota: isNaN(ivaCuota) ? null : Math.round(ivaCuota * 100) / 100,
+      retTipo: retTipoStr === '' ? null : +retTipoStr,
+      retCuota: isNaN(retCuota) || retCuota <= 0 ? null : Math.round(retCuota * 100) / 100,
       notas: $('#f-notas').value.trim(),
       imagen: facturaPendiente ? facturaPendiente.imagen : null,
       ocrTexto: facturaPendiente ? facturaPendiente.ocrTexto : '',
@@ -367,6 +434,17 @@
   async function procesarCierre(file) {
     $('#cierre-progress').classList.remove('hidden');
     $('#cierre-form-card').classList.add('hidden');
+
+    if (file) {
+      try {
+        file = await archivoAImagen(file);
+      } catch (e) {
+        console.error(e);
+        $('#cierre-progress').classList.add('hidden');
+        toast('⚠️ ' + (e.message || 'No se pudo abrir el PDF.'));
+        return;
+      }
+    }
 
     let texto = '';
     if (file) {
@@ -505,6 +583,7 @@
       esFactura && typeof r.baseImponible === 'number' ? ['Base imponible', INFORME.eur(r.baseImponible)] : null,
       esFactura && r.ivaTipo != null ? ['Tipo IVA', r.ivaTipo === 'varios' ? 'Varios tipos' : r.ivaTipo + ' %'] : null,
       esFactura && typeof r.ivaCuota === 'number' ? ['Cuota IVA', INFORME.eur(r.ivaCuota)] : null,
+      esFactura && typeof r.retCuota === 'number' ? ['Retención IRPF' + (r.retTipo ? ` (${r.retTipo} %)` : ''), INFORME.eur(r.retCuota)] : null,
       !esFactura && r.efectivo != null ? ['Efectivo', INFORME.eur(r.efectivo)] : null,
       !esFactura && r.tarjeta != null ? ['Tarjeta', INFORME.eur(r.tarjeta)] : null,
       r.notas ? ['Notas', r.notas] : null,
