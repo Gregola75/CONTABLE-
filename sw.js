@@ -1,11 +1,12 @@
 /* CONTABLE — service worker: permite abrir la app sin conexión
    (los datos ya viven en el dispositivo; esto cachea la propia app). */
 
-const CACHE = 'contable-v4';
+const CACHE = 'contable-v5';
 const ARCHIVOS = [
   './',
   './index.html',
   './css/styles.css',
+  './js/seguridad.js',
   './js/db.js',
   './js/ocr.js',
   './js/report.js',

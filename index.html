@@ -11,6 +11,20 @@
 </head>
 <body>
 
+<!-- Pantalla de bloqueo por PIN -->
+<div id="lock-screen" class="lock hidden">
+  <div class="lock-box">
+    <div class="lock-icono">🔐</div>
+    <h1>CONTABLE</h1>
+    <p>Introduce tu PIN para entrar</p>
+    <input type="password" id="lock-pin" inputmode="numeric" maxlength="8" autocomplete="off" placeholder="••••">
+    <button class="btn btn-primary btn-big" id="lock-entrar">Entrar</button>
+    <button class="btn btn-secondary btn-big hidden" id="lock-huella">👆 Entrar con huella</button>
+    <p id="lock-error" class="lock-error hidden"></p>
+    <button class="btn btn-ghost" id="lock-olvido">He olvidado mi PIN</button>
+  </div>
+</div>
+
 <header class="app-header">
   <h1>📒 CONTABLE</h1>
   <p class="subtitle">Control de gastos y facturación del local</p>
@@ -334,8 +348,22 @@
 <!-- ==================== AJUSTES ==================== -->
 <section id="tab-ajustes" class="tab-panel">
   <div class="card">
+    <h2>🔐 Seguridad</h2>
+    <p class="hint">Tus datos nunca salen de este dispositivo. Con el PIN, nadie que coja tu teléfono podrá abrir la app ni ver tus facturas.</p>
+    <div id="sec-estado" class="stat-linea"></div>
+    <div class="form-actions">
+      <button class="btn btn-primary" id="sec-activar">🔒 Activar PIN de acceso</button>
+      <button class="btn btn-secondary hidden" id="sec-huella-on">👆 Activar desbloqueo con huella</button>
+      <button class="btn btn-secondary hidden" id="sec-huella-off">👆 Quitar desbloqueo con huella</button>
+      <button class="btn btn-secondary hidden" id="sec-cambiar">✏️ Cambiar PIN</button>
+      <button class="btn btn-danger hidden" id="sec-desactivar">Quitar el PIN</button>
+      <button class="btn btn-ghost hidden" id="sec-bloquear">🔒 Bloquear ahora</button>
+    </div>
+  </div>
+
+  <div class="card">
     <h2>Copia de seguridad</h2>
-    <p class="hint">Tus datos se guardan solo en este dispositivo. Haz copias de seguridad de vez en cuando y guárdalas en otro sitio (Drive, correo, ordenador…).</p>
+    <p class="hint">Tus datos se guardan solo en este dispositivo. Haz copias de seguridad de vez en cuando y guárdalas en otro sitio (Drive, correo, ordenador…). Puedes protegerlas con contraseña: así nadie podrá abrirlas aunque llegue al archivo.</p>
     <div class="form-actions">
       <button class="btn btn-primary" id="backup-exportar">⬇️ Descargar copia de seguridad</button>
       <label class="btn btn-secondary">
@@ -399,6 +427,7 @@
 <div id="toast" class="toast hidden"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="js/seguridad.js"></script>
 <script src="js/db.js"></script>
 <script src="js/ocr.js"></script>
 <script src="js/report.js"></script>

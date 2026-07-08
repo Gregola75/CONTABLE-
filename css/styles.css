@@ -311,6 +311,41 @@ input:focus, select:focus { outline: none; border-color: var(--verde-medio); }
 
 .hidden { display: none !important; }
 
+/* Pantalla de bloqueo */
+.lock {
+  position: fixed;
+  inset: 0;
+  background: var(--verde);
+  z-index: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.lock-box {
+  background: var(--blanco);
+  border-radius: 16px;
+  padding: 28px 22px;
+  width: 100%;
+  max-width: 340px;
+  text-align: center;
+  box-shadow: 0 8px 30px rgba(0,0,0,.35);
+}
+.lock-icono { font-size: 2.6rem; margin-bottom: 6px; }
+.lock-box h1 { color: var(--verde); font-size: 1.3rem; letter-spacing: 1px; }
+.lock-box p { color: var(--gris); font-size: .9rem; margin: 8px 0 14px; }
+.lock-box input {
+  text-align: center;
+  font-size: 1.6rem;
+  letter-spacing: 8px;
+  margin-bottom: 12px;
+}
+.lock-error {
+  color: var(--rojo) !important;
+  font-weight: 600;
+  margin-top: 10px !important;
+}
+
 /* Previsión interna de impuestos */
 .card.prevision {
   border: 2px dashed #d9a400;

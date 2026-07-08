@@ -84,7 +84,7 @@
       $$('.tab-panel').forEach(p => p.classList.remove('active'));
       btn.classList.add('active');
       $('#tab-' + btn.dataset.tab).classList.add('active');
-      if (btn.dataset.tab === 'ajustes') pintarStats();
+      if (btn.dataset.tab === 'ajustes') { pintarStats(); pintarSeguridad(); }
       if (btn.dataset.tab === 'consultar') buscar();
     });
   });
@@ -724,16 +724,30 @@
   }
 
   $('#backup-exportar').addEventListener('click', async () => {
+    const contrasena = prompt(
+      'Contraseña para proteger la copia (recomendado).\n' +
+      'Déjalo vacío para guardarla sin contraseña:');
+    if (contrasena === null) return;
+
     toast('Preparando copia de seguridad…');
     const datos = await DB.exportarTodo();
-    const blob = new Blob([JSON.stringify(datos)], { type: 'application/json' });
+    let contenido;
+    if (contrasena.trim()) {
+      const cifrado = await SEGURIDAD.cifrarTexto(JSON.stringify(datos), contrasena.trim());
+      contenido = JSON.stringify(cifrado);
+    } else {
+      contenido = JSON.stringify(datos);
+    }
+    const blob = new Blob([contenido], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = `contable_copia_${hoyISO()}.json`;
     document.body.appendChild(a);
     a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
-    toast('⬇️ Copia de seguridad descargada. Guárdala en un lugar seguro.');
+    toast(contrasena.trim()
+      ? '⬇️ Copia cifrada descargada. Recuerda la contraseña: sin ella no se puede abrir.'
+      : '⬇️ Copia descargada SIN contraseña. Guárdala en un lugar seguro.');
   });
 
   $('#backup-importar').addEventListener('change', async (e) => {
@@ -743,7 +757,13 @@
     if (!confirm('Se añadirán los registros de la copia a los actuales. ¿Continuar?')) return;
     try {
       const texto = await file.text();
-      const n = await DB.importarTodo(JSON.parse(texto));
+      let datos = JSON.parse(texto);
+      if (datos && datos.cifrado) {
+        const contrasena = prompt('Esta copia está protegida. Introduce su contraseña:');
+        if (contrasena === null) return;
+        datos = JSON.parse(await SEGURIDAD.descifrarTexto(datos, contrasena.trim()));
+      }
+      const n = await DB.importarTodo(datos);
       toast(`✅ Copia restaurada: ${n} registros añadidos.`);
       pintarRecientes();
       pintarStats();
@@ -751,6 +771,168 @@
     } catch (err) {
       console.error(err);
       toast('⚠️ ' + (err.message || 'No se pudo restaurar la copia.'));
+    }
+  });
+
+  /* ---------- SEGURIDAD: PIN de acceso ---------- */
+
+  let intentosFallidos = 0;
+  let ocultadoDesde = null;
+  const BLOQUEO_TRAS_MS = 60 * 1000; // volver a pedir PIN tras 1 min en segundo plano
+
+  function mostrarBloqueo() {
+    if (!SEGURIDAD.pinActivado()) return;
+    $('#lock-screen').classList.remove('hidden');
+    $('#lock-pin').value = '';
+    $('#lock-error').classList.add('hidden');
+    const conHuella = SEGURIDAD.biometriaActivada();
+    $('#lock-huella').classList.toggle('hidden', !conHuella);
+    if (conHuella) {
+      // Ofrecer la huella directamente al abrir
+      setTimeout(intentarHuella, 250);
+    } else {
+      setTimeout(() => $('#lock-pin').focus(), 100);
+    }
+  }
+
+  async function intentarHuella() {
+    if (!SEGURIDAD.biometriaActivada()) return;
+    const ok = await SEGURIDAD.verificarBiometria();
+    if (ok) {
+      intentosFallidos = 0;
+      $('#lock-screen').classList.add('hidden');
+    } else {
+      $('#lock-error').textContent = 'No se pudo verificar la huella. Usa el PIN o inténtalo de nuevo.';
+      $('#lock-error').classList.remove('hidden');
+    }
+  }
+
+  $('#lock-huella').addEventListener('click', intentarHuella);
+
+  async function intentarDesbloquear() {
+    const pin = $('#lock-pin').value.trim();
+    if (!pin) return;
+    if (intentosFallidos >= 5) {
+      $('#lock-error').textContent = 'Demasiados intentos. Espera 30 segundos.';
+      $('#lock-error').classList.remove('hidden');
+      return;
+    }
+    const ok = await SEGURIDAD.verificarPIN(pin);
+    if (ok) {
+      intentosFallidos = 0;
+      $('#lock-screen').classList.add('hidden');
+    } else {
+      intentosFallidos++;
+      $('#lock-pin').value = '';
+      $('#lock-error').textContent = `PIN incorrecto (intento ${intentosFallidos} de 5).`;
+      $('#lock-error').classList.remove('hidden');
+      if (intentosFallidos >= 5) {
+        setTimeout(() => { intentosFallidos = 0; }, 30000);
+      }
+    }
+  }
+
+  $('#lock-entrar').addEventListener('click', intentarDesbloquear);
+  $('#lock-pin').addEventListener('keydown', (e) => { if (e.key === 'Enter') intentarDesbloquear(); });
+
+  $('#lock-olvido').addEventListener('click', () => {
+    const seguro = confirm(
+      'Sin el PIN no se puede entrar.\n\n' +
+      'La única salida es BORRAR TODOS los datos de la app en este dispositivo ' +
+      'y empezar de cero (luego podrías restaurar una copia de seguridad si la tienes).\n\n' +
+      '¿Quieres borrar todos los datos?');
+    if (!seguro) return;
+    if (!confirm('⚠️ ÚLTIMA CONFIRMACIÓN: se borrarán todas las facturas, cierres y proveedores de este dispositivo. ¿Continuar?')) return;
+    indexedDB.deleteDatabase('contable-db');
+    localStorage.clear();
+    location.reload();
+  });
+
+  /* Pedir un PIN nuevo con confirmación. Devuelve el PIN o null. */
+  function pedirPINNuevo() {
+    const pin = prompt('Elige un PIN de 4 a 8 dígitos:');
+    if (pin === null) return null;
+    if (!/^\d{4,8}$/.test(pin)) { alert('El PIN debe tener entre 4 y 8 dígitos (solo números).'); return null; }
+    const repite = prompt('Repite el PIN para confirmar:');
+    if (repite !== pin) { alert('Los PIN no coinciden. Inténtalo de nuevo.'); return null; }
+    return pin;
+  }
+
+  async function exigirPINActual() {
+    const actual = prompt('Introduce tu PIN actual:');
+    if (actual === null) return false;
+    if (!(await SEGURIDAD.verificarPIN(actual.trim()))) { alert('PIN incorrecto.'); return false; }
+    return true;
+  }
+
+  async function pintarSeguridad() {
+    const activo = SEGURIDAD.pinActivado();
+    const bio = SEGURIDAD.biometriaActivada();
+    $('#sec-estado').innerHTML = activo
+      ? `<span>Estado</span><strong style="color:var(--verde-medio)">🔒 PIN activado${bio ? ' + huella' : ''}</strong>`
+      : '<span>Estado</span><strong style="color:var(--rojo)">🔓 Sin PIN — cualquiera con tu teléfono puede entrar</strong>';
+    $('#sec-activar').classList.toggle('hidden', activo);
+    $('#sec-cambiar').classList.toggle('hidden', !activo);
+    $('#sec-desactivar').classList.toggle('hidden', !activo);
+    $('#sec-bloquear').classList.toggle('hidden', !activo);
+
+    const disponible = activo && await SEGURIDAD.biometriaDisponible();
+    $('#sec-huella-on').classList.toggle('hidden', !(disponible && !bio));
+    $('#sec-huella-off').classList.toggle('hidden', !(activo && bio));
+  }
+
+  $('#sec-huella-on').addEventListener('click', async () => {
+    try {
+      await SEGURIDAD.activarBiometria();
+      pintarSeguridad();
+      toast('👆 Huella activada. Podrás entrar con la huella o con el PIN.');
+    } catch (e) {
+      console.error(e);
+      toast('⚠️ No se pudo activar la huella. Comprueba que el teléfono la tiene configurada.');
+    }
+  });
+
+  $('#sec-huella-off').addEventListener('click', async () => {
+    if (!(await exigirPINActual())) return;
+    SEGURIDAD.desactivarBiometria();
+    pintarSeguridad();
+    toast('Huella desactivada. Solo se pedirá el PIN.');
+  });
+
+  $('#sec-activar').addEventListener('click', async () => {
+    const pin = pedirPINNuevo();
+    if (!pin) return;
+    await SEGURIDAD.establecerPIN(pin);
+    pintarSeguridad();
+    toast('🔒 PIN activado. Se pedirá al abrir la app.');
+    alert('PIN activado.\n\nIMPORTANTE: memorízalo bien. Si lo olvidas, la única salida es borrar los datos y restaurar una copia de seguridad.');
+  });
+
+  $('#sec-cambiar').addEventListener('click', async () => {
+    if (!(await exigirPINActual())) return;
+    const pin = pedirPINNuevo();
+    if (!pin) return;
+    await SEGURIDAD.establecerPIN(pin);
+    toast('✏️ PIN cambiado.');
+  });
+
+  $('#sec-desactivar').addEventListener('click', async () => {
+    if (!(await exigirPINActual())) return;
+    SEGURIDAD.desactivarPIN();
+    SEGURIDAD.desactivarBiometria();
+    pintarSeguridad();
+    toast('🔓 PIN desactivado.');
+  });
+
+  $('#sec-bloquear').addEventListener('click', mostrarBloqueo);
+
+  /* Bloquear al volver tras un rato en segundo plano */
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      ocultadoDesde = Date.now();
+    } else if (ocultadoDesde && Date.now() - ocultadoDesde > BLOQUEO_TRAS_MS) {
+      mostrarBloqueo();
+      ocultadoDesde = null;
     }
   });
 
@@ -771,8 +953,10 @@
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
 
+  mostrarBloqueo(); // si hay PIN, la app arranca bloqueada
   iniciarSelectorAnio();
   pintarConfig();
+  pintarSeguridad();
   pintarRecientes();
   pintarProveedores();
   cargarProveedores();
