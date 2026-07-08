@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#1a5c3a">
+<title>CONTABLE — Control de gastos y facturación</title>
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="css/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📒</text></svg>">
+</head>
+<body>
+
+<header class="app-header">
+  <h1>📒 CONTABLE</h1>
+  <p class="subtitle">Control de gastos y facturación del local</p>
+</header>
+
+<nav class="tabs">
+  <button class="tab active" data-tab="facturas">📄 Facturas</button>
+  <button class="tab" data-tab="cierres">💰 Cierres</button>
+  <button class="tab" data-tab="consultar">🔍 Consultar</button>
+  <button class="tab" data-tab="informe">📊 Informe</button>
+  <button class="tab" data-tab="ajustes">⚙️</button>
+</nav>
+
+<main>
+
+<!-- ==================== FACTURAS ==================== -->
+<section id="tab-facturas" class="tab-panel active">
+  <div class="card">
+    <h2>Nueva factura de gasto</h2>
+    <p class="hint">Haz una foto de la factura o ticket del proveedor. El sistema intentará detectar el proveedor, la fecha y el total automáticamente.</p>
+    <div class="photo-buttons">
+      <label class="btn btn-primary btn-big">
+        📷 Hacer foto
+        <input type="file" id="factura-camera" accept="image/*" capture="environment" hidden>
+      </label>
+      <label class="btn btn-secondary btn-big">
+        🖼️ Elegir imagen
+        <input type="file" id="factura-file" accept="image/*" hidden>
+      </label>
+    </div>
+    <div id="factura-progress" class="progress hidden">
+      <div class="spinner"></div>
+      <span id="factura-progress-text">Leyendo la imagen…</span>
+    </div>
+  </div>
+
+  <div id="factura-form-card" class="card hidden">
+    <h2>Revisar datos detectados</h2>
+    <img id="factura-preview" class="preview" alt="Factura">
+    <div class="form-group">
+      <label for="f-proveedor">Proveedor / Servicio</label>
+      <input type="text" id="f-proveedor" list="proveedores-list" placeholder="Nombre del proveedor">
+      <datalist id="proveedores-list"></datalist>
+    </div>
+    <div class="form-group">
+      <label for="f-nif">NIF / CIF (opcional)</label>
+      <input type="text" id="f-nif" placeholder="B12345678">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="f-fecha">Fecha</label>
+        <input type="date" id="f-fecha">
+      </div>
+      <div class="form-group">
+        <label for="f-total">Total (€)</label>
+        <input type="number" id="f-total" step="0.01" min="0" placeholder="0.00">
+      </div>
+    </div>
+    <div class="form-group">
+      <label for="f-categoria">Categoría</label>
+      <select id="f-categoria">
+        <option value="Mercancía">Mercancía / Género</option>
+        <option value="Alquiler">Alquiler</option>
+        <option value="Luz">Luz</option>
+        <option value="Agua">Agua</option>
+        <option value="Teléfono/Internet">Teléfono / Internet</option>
+        <option value="Seguros">Seguros</option>
+        <option value="Personal">Personal</option>
+        <option value="Reparaciones">Reparaciones</option>
+        <option value="Limpieza">Limpieza</option>
+        <option value="Otros">Otros</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="f-notas">Notas (opcional)</label>
+      <input type="text" id="f-notas" placeholder="Ej.: pedido semanal">
+    </div>
+    <details class="ocr-details">
+      <summary>Ver texto detectado en la imagen</summary>
+      <pre id="f-ocr-text"></pre>
+    </details>
+    <div class="form-actions">
+      <button class="btn btn-primary btn-big" id="factura-guardar">💾 Guardar factura</button>
+      <button class="btn btn-ghost" id="factura-cancelar">Cancelar</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Últimas facturas</h2>
+    <div id="facturas-recientes" class="lista"></div>
+  </div>
+</section>
+
+<!-- ==================== CIERRES ==================== -->
+<section id="tab-cierres" class="tab-panel">
+  <div class="card">
+    <h2>Cierre diario de caja</h2>
+    <p class="hint">Haz una foto del ticket de cierre (Z) del día. El sistema intentará detectar el total de ventas.</p>
+    <div class="photo-buttons">
+      <label class="btn btn-primary btn-big">
+        📷 Foto del cierre
+        <input type="file" id="cierre-camera" accept="image/*" capture="environment" hidden>
+      </label>
+      <label class="btn btn-secondary btn-big">
+        🖼️ Elegir imagen
+        <input type="file" id="cierre-file" accept="image/*" hidden>
+      </label>
+    </div>
+    <button class="btn btn-ghost" id="cierre-manual">✍️ Anotar cierre sin foto</button>
+    <div id="cierre-progress" class="progress hidden">
+      <div class="spinner"></div>
+      <span id="cierre-progress-text">Leyendo la imagen…</span>
+    </div>
+  </div>
+
+  <div id="cierre-form-card" class="card hidden">
+    <h2>Revisar cierre</h2>
+    <img id="cierre-preview" class="preview" alt="Cierre">
+    <div class="form-row">
+      <div class="form-group">
+        <label for="c-fecha">Fecha</label>
+        <input type="date" id="c-fecha">
+      </div>
+      <div class="form-group">
+        <label for="c-total">Total ventas (€)</label>
+        <input type="number" id="c-total" step="0.01" min="0" placeholder="0.00">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="c-efectivo">Efectivo (€) <small>opcional</small></label>
+        <input type="number" id="c-efectivo" step="0.01" min="0" placeholder="0.00">
+      </div>
+      <div class="form-group">
+        <label for="c-tarjeta">Tarjeta (€) <small>opcional</small></label>
+        <input type="number" id="c-tarjeta" step="0.01" min="0" placeholder="0.00">
+      </div>
+    </div>
+    <div class="form-group">
+      <label for="c-notas">Notas (opcional)</label>
+      <input type="text" id="c-notas" placeholder="Ej.: día de mercado">
+    </div>
+    <details class="ocr-details">
+      <summary>Ver texto detectado en la imagen</summary>
+      <pre id="c-ocr-text"></pre>
+    </details>
+    <div class="form-actions">
+      <button class="btn btn-primary btn-big" id="cierre-guardar">💾 Guardar cierre</button>
+      <button class="btn btn-ghost" id="cierre-cancelar">Cancelar</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Últimos cierres</h2>
+    <div id="cierres-recientes" class="lista"></div>
+  </div>
+</section>
+
+<!-- ==================== CONSULTAR ==================== -->
+<section id="tab-consultar" class="tab-panel">
+  <div class="card">
+    <h2>Buscar</h2>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="q-tipo">Tipo</label>
+        <select id="q-tipo">
+          <option value="todos">Todo</option>
+          <option value="factura">Facturas (gastos)</option>
+          <option value="cierre">Cierres (ingresos)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="q-proveedor">Proveedor</label>
+        <input type="text" id="q-proveedor" list="proveedores-list" placeholder="Todos">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="q-desde">Desde</label>
+        <input type="date" id="q-desde">
+      </div>
+      <div class="form-group">
+        <label for="q-hasta">Hasta</label>
+        <input type="date" id="q-hasta">
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-primary" id="q-buscar">🔍 Buscar</button>
+      <button class="btn btn-ghost" id="q-limpiar">Limpiar</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="view-toggle">
+      <button class="btn btn-small active" id="vista-lista">☰ Lista</button>
+      <button class="btn btn-small" id="vista-fotos">🖼️ Fotos</button>
+    </div>
+    <div id="q-resumen" class="resumen-busqueda"></div>
+    <div id="q-resultados" class="lista"></div>
+  </div>
+</section>
+
+<!-- ==================== INFORME ==================== -->
+<section id="tab-informe" class="tab-panel">
+  <div class="card">
+    <h2>Informe trimestral para la gestoría</h2>
+    <p class="hint">Elige el trimestre. El informe incluye los <strong>ingresos por mes</strong> y los <strong>gastos por proveedor o servicio</strong>.</p>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="i-anio">Año</label>
+        <select id="i-anio"></select>
+      </div>
+      <div class="form-group">
+        <label for="i-trimestre">Trimestre</label>
+        <select id="i-trimestre">
+          <option value="1">1º trimestre (ene–mar)</option>
+          <option value="2">2º trimestre (abr–jun)</option>
+          <option value="3">3º trimestre (jul–sep)</option>
+          <option value="4">4º trimestre (oct–dic)</option>
+        </select>
+      </div>
+    </div>
+    <button class="btn btn-primary btn-big" id="i-generar">📊 Generar informe</button>
+  </div>
+
+  <div id="informe-resultado" class="card hidden">
+    <div id="informe-contenido"></div>
+    <div class="form-actions">
+      <button class="btn btn-primary btn-big" id="i-descargar-csv">⬇️ Descargar para Excel (CSV)</button>
+      <button class="btn btn-secondary" id="i-imprimir">🖨️ Imprimir / Guardar PDF</button>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== AJUSTES ==================== -->
+<section id="tab-ajustes" class="tab-panel">
+  <div class="card">
+    <h2>Copia de seguridad</h2>
+    <p class="hint">Tus datos se guardan solo en este dispositivo. Haz copias de seguridad de vez en cuando y guárdalas en otro sitio (Drive, correo, ordenador…).</p>
+    <div class="form-actions">
+      <button class="btn btn-primary" id="backup-exportar">⬇️ Descargar copia de seguridad</button>
+      <label class="btn btn-secondary">
+        ⬆️ Restaurar copia
+        <input type="file" id="backup-importar" accept=".json" hidden>
+      </label>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Datos guardados</h2>
+    <div id="ajustes-stats"></div>
+  </div>
+  <div class="card">
+    <h2>Acerca de</h2>
+    <p class="hint">CONTABLE — aplicación de control de gastos e ingresos para pequeños negocios. Los datos nunca salen de tu dispositivo. La lectura automática de las fotos (OCR) puede fallar: revisa siempre los datos antes de guardar.</p>
+  </div>
+</section>
+
+</main>
+
+<!-- Modal detalle -->
+<div id="modal" class="modal hidden">
+  <div class="modal-content">
+    <button class="modal-close" id="modal-cerrar">✕</button>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="js/db.js"></script>
+<script src="js/ocr.js"></script>
+<script src="js/report.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
