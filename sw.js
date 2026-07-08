@@ -1,7 +1,7 @@
 /* CONTABLE — service worker: permite abrir la app sin conexión
    (los datos ya viven en el dispositivo; esto cachea la propia app). */
 
-const CACHE = 'contable-v8';
+const CACHE = 'contable-v9';
 const ARCHIVOS = [
   './',
   './index.html',
@@ -11,7 +11,11 @@ const ARCHIVOS = [
   './js/ocr.js',
   './js/report.js',
   './js/app.js',
-  './manifest.json'
+  './manifest.json',
+  './icons/icon-192.png',
+  './icons/icon-512.png',
+  './icons/icon-maskable-192.png',
+  './icons/icon-maskable-512.png'
 ];
 
 self.addEventListener('install', (e) => {
