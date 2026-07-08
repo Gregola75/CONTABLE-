@@ -47,7 +47,97 @@ const INFORME = (() => {
     const totalIngresos = meses.reduce((s, m) => s + ingresosPorMes[m].total, 0);
     const totalGastos = Object.values(gastosPorProveedor).reduce((s, g) => s + g.total, 0);
 
-    return { anio, trimestre, desde, hasta, meses, ingresosPorMes, gastosPorProveedor, totalIngresos, totalGastos };
+    // Detalle de IVA de cada factura (solo para la previsión interna)
+    const facturasDetalle = registros.filter(r => r.tipo === 'factura').map(r => ({
+      total: r.total || 0,
+      baseImponible: (typeof r.baseImponible === 'number') ? r.baseImponible : null,
+      ivaCuota: (typeof r.ivaCuota === 'number') ? r.ivaCuota : null
+    }));
+
+    return { anio, trimestre, desde, hasta, meses, ingresosPorMes, gastosPorProveedor, totalIngresos, totalGastos, facturasDetalle };
+  }
+
+  /* Previsión interna de impuestos del trimestre (orientativa, no se exporta).
+     cfg: { ivaVentas, ivaGastos, irpfActivo, irpf } */
+  function prevision(inf, cfg) {
+    const rv = (cfg.ivaVentas || 0) / 100;
+    const rd = (cfg.ivaGastos || 0) / 100;
+
+    // IVA repercutido: el IVA incluido en las ventas de los cierres
+    const baseIngresos = rv > 0 ? inf.totalIngresos / (1 + rv) : inf.totalIngresos;
+    const ivaRepercutido = inf.totalIngresos - baseIngresos;
+
+    // IVA soportado: cuota detectada en cada factura; si no la hay, se estima
+    let ivaSoportado = 0;
+    let baseGastos = 0;
+    let facturasEstimadas = 0;
+    (inf.facturasDetalle || []).forEach(f => {
+      if (f.ivaCuota !== null) {
+        ivaSoportado += f.ivaCuota;
+        baseGastos += (f.baseImponible !== null) ? f.baseImponible : (f.total - f.ivaCuota);
+      } else if (rd > 0) {
+        const b = f.total / (1 + rd);
+        ivaSoportado += f.total - b;
+        baseGastos += b;
+        facturasEstimadas++;
+      } else {
+        baseGastos += f.total;
+        facturasEstimadas++;
+      }
+    });
+
+    const ivaResultado = ivaRepercutido - ivaSoportado;
+    const beneficio = baseIngresos - baseGastos;
+    const irpfEstimado = cfg.irpfActivo ? Math.max(0, beneficio) * ((cfg.irpf || 0) / 100) : null;
+
+    const r2 = (n) => Math.round(n * 100) / 100;
+    return {
+      baseIngresos: r2(baseIngresos),
+      ivaRepercutido: r2(ivaRepercutido),
+      baseGastos: r2(baseGastos),
+      ivaSoportado: r2(ivaSoportado),
+      ivaResultado: r2(ivaResultado),
+      beneficio: r2(beneficio),
+      irpfEstimado: irpfEstimado === null ? null : r2(irpfEstimado),
+      totalPrevisto: r2(Math.max(0, ivaResultado) + (irpfEstimado || 0)),
+      facturasEstimadas,
+      numFacturas: (inf.facturasDetalle || []).length
+    };
+  }
+
+  function renderPrevisionHTML(prev, cfg) {
+    const avisoEstimadas = prev.facturasEstimadas > 0
+      ? `<p class="hint">⚠️ En ${prev.facturasEstimadas} de ${prev.numFacturas} facturas no se detectó el IVA y se ha estimado al ${cfg.ivaGastos} %. Puedes corregirlo abriendo cada factura.</p>`
+      : '';
+
+    return `
+      <table class="informe-tabla">
+        <tbody>
+          <tr><td>Ventas sin IVA (base)</td><td class="num">${eur(prev.baseIngresos)}</td></tr>
+          <tr><td>IVA cobrado en ventas (repercutido, ${cfg.ivaVentas} %)</td><td class="num">${eur(prev.ivaRepercutido)}</td></tr>
+          <tr><td>Gastos sin IVA (base)</td><td class="num">${eur(prev.baseGastos)}</td></tr>
+          <tr><td>IVA pagado en compras (soportado)</td><td class="num">−${eur(prev.ivaSoportado)}</td></tr>
+          <tr class="total">
+            <td>IVA del trimestre (aprox. modelo 303)</td>
+            <td class="num" style="color:${prev.ivaResultado >= 0 ? '#b23a3a' : '#2e8b57'}">
+              ${prev.ivaResultado >= 0 ? 'a pagar ' + eur(prev.ivaResultado) : 'a compensar ' + eur(-prev.ivaResultado)}
+            </td>
+          </tr>
+          ${prev.irpfEstimado !== null ? `
+          <tr><td>Beneficio del trimestre (sin IVA)</td><td class="num">${eur(prev.beneficio)}</td></tr>
+          <tr class="total">
+            <td>IRPF a cuenta (aprox. modelo 130, ${cfg.irpf} %)</td>
+            <td class="num" style="color:#b23a3a">${eur(prev.irpfEstimado)}</td>
+          </tr>` : ''}
+          <tr class="total">
+            <td>💶 TOTAL PREVISTO A RESERVAR</td>
+            <td class="num" style="color:#b23a3a;font-size:1.05rem">${eur(prev.totalPrevisto)}</td>
+          </tr>
+        </tbody>
+      </table>
+      ${avisoEstimadas}
+      <p class="hint">Es una aproximación: no tiene en cuenta retenciones, gastos deducibles especiales, recargos ni tu situación personal. Confírmalo siempre con tu gestoría.</p>
+    `;
   }
 
   function renderHTML(inf) {
@@ -161,5 +251,5 @@ const INFORME = (() => {
     return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
-  return { generar, renderHTML, generarCSV, descargarCSV, eur, formatear, MESES };
+  return { generar, prevision, renderPrevisionHTML, renderHTML, generarCSV, descargarCSV, eur, formatear, MESES };
 })();

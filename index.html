@@ -74,6 +74,28 @@
         <input type="number" id="f-total" step="0.01" min="0" placeholder="0.00">
       </div>
     </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="f-ivatipo">Tipo de IVA</label>
+        <select id="f-ivatipo">
+          <option value="">No detectado</option>
+          <option value="21">21 % (general)</option>
+          <option value="10">10 % (reducido)</option>
+          <option value="4">4 % (superreducido)</option>
+          <option value="5">5 %</option>
+          <option value="0">0 % (exento)</option>
+          <option value="varios">Varios tipos</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="f-ivacuota">Cuota IVA (€)</label>
+        <input type="number" id="f-ivacuota" step="0.01" min="0" placeholder="0.00">
+      </div>
+    </div>
+    <div class="form-group">
+      <label for="f-base">Base imponible (€) <small>total sin IVA</small></label>
+      <input type="number" id="f-base" step="0.01" min="0" placeholder="0.00">
+    </div>
     <div class="form-group">
       <label for="f-categoria">Categoría</label>
       <select id="f-categoria">
@@ -285,6 +307,12 @@
       <button class="btn btn-secondary" id="i-imprimir">🖨️ Imprimir / Guardar PDF</button>
     </div>
   </div>
+
+  <div id="prevision-card" class="card prevision hidden">
+    <h2>🔒 Previsión de impuestos (solo interna)</h2>
+    <p class="hint">Cálculo orientativo para que sepas lo que te puede tocar pagar. <strong>No se incluye en el CSV ni en la impresión</strong> que envías a la gestoría. La cifra definitiva la calcula siempre tu gestoría.</p>
+    <div id="prevision-contenido"></div>
+  </div>
 </section>
 
 <!-- ==================== AJUSTES ==================== -->
@@ -300,6 +328,38 @@
       </label>
     </div>
   </div>
+  <div class="card">
+    <h2>🧾 Impuestos (para la previsión interna)</h2>
+    <p class="hint">Estos datos solo se usan para calcular tu previsión interna de impuestos. Si tienes dudas de qué tipo de IVA aplican tus ventas, pregunta a tu gestoría una vez y déjalo configurado.</p>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="cfg-iva-ventas">IVA de tus ventas</label>
+        <select id="cfg-iva-ventas">
+          <option value="21">21 % (general)</option>
+          <option value="10">10 % (hostelería, alimentación…)</option>
+          <option value="4">4 % (superreducido)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="cfg-iva-gastos">IVA por defecto en gastos sin desglose</label>
+        <select id="cfg-iva-gastos">
+          <option value="21">21 %</option>
+          <option value="10">10 %</option>
+          <option value="4">4 %</option>
+          <option value="0">0 % (no estimar)</option>
+        </select>
+      </div>
+    </div>
+    <label class="check-linea">
+      <input type="checkbox" id="cfg-irpf-activo" checked>
+      <span>Estimar también el pago a cuenta de IRPF (modelo 130)</span>
+    </label>
+    <div class="form-group" id="cfg-irpf-wrap" style="margin-top:8px">
+      <label for="cfg-irpf">Porcentaje de IRPF sobre el beneficio</label>
+      <input type="number" id="cfg-irpf" min="0" max="50" step="1" value="20">
+    </div>
+  </div>
+
   <div class="card">
     <h2>Datos guardados</h2>
     <div id="ajustes-stats"></div>

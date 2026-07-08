@@ -37,6 +37,45 @@
     return INFORME.formatear(iso);
   }
 
+  /* ---------- Configuración de impuestos (previsión interna) ---------- */
+
+  const CFG_DEFECTO = { ivaVentas: 21, ivaGastos: 21, irpfActivo: true, irpf: 20 };
+
+  function leerConfig() {
+    try {
+      return { ...CFG_DEFECTO, ...JSON.parse(localStorage.getItem('contable-config') || '{}') };
+    } catch { return { ...CFG_DEFECTO }; }
+  }
+
+  function guardarConfig(cfg) {
+    localStorage.setItem('contable-config', JSON.stringify(cfg));
+  }
+
+  function pintarConfig() {
+    const cfg = leerConfig();
+    $('#cfg-iva-ventas').value = String(cfg.ivaVentas);
+    $('#cfg-iva-gastos').value = String(cfg.ivaGastos);
+    $('#cfg-irpf-activo').checked = cfg.irpfActivo;
+    $('#cfg-irpf').value = cfg.irpf;
+    $('#cfg-irpf-wrap').style.display = cfg.irpfActivo ? '' : 'none';
+  }
+
+  function actualizarConfig() {
+    const cfg = {
+      ivaVentas: +$('#cfg-iva-ventas').value,
+      ivaGastos: +$('#cfg-iva-gastos').value,
+      irpfActivo: $('#cfg-irpf-activo').checked,
+      irpf: Math.max(0, Math.min(50, +$('#cfg-irpf').value || 0))
+    };
+    guardarConfig(cfg);
+    $('#cfg-irpf-wrap').style.display = cfg.irpfActivo ? '' : 'none';
+    toast('💾 Configuración de impuestos guardada.');
+  }
+
+  ['#cfg-iva-ventas', '#cfg-iva-gastos', '#cfg-irpf-activo', '#cfg-irpf'].forEach(sel => {
+    $(sel).addEventListener('change', actualizarConfig);
+  });
+
   /* ---------- Pestañas ---------- */
 
   $$('.tab').forEach(btn => {
@@ -236,6 +275,9 @@
     $('#f-nif').value = datos.nif || '';
     $('#f-fecha').value = datos.fecha || hoyISO();
     $('#f-total').value = datos.total != null ? datos.total : '';
+    $('#f-ivatipo').value = datos.ivaTipo != null ? String(datos.ivaTipo) : '';
+    $('#f-ivacuota').value = datos.ivaCuota != null ? datos.ivaCuota : '';
+    $('#f-base').value = datos.baseImponible != null ? datos.baseImponible : '';
     $('#f-notas').value = '';
     $('#f-ocr-text').textContent = texto || '(no se detectó texto)';
     $('#factura-form-card').classList.remove('hidden');
@@ -254,6 +296,23 @@
   $('#factura-camera').addEventListener('change', (e) => { procesarFactura(e.target.files[0]); e.target.value = ''; });
   $('#factura-file').addEventListener('change', (e) => { procesarFactura(e.target.files[0]); e.target.value = ''; });
 
+  /* Autocálculo del IVA: al cambiar el total o el tipo, se recalculan
+     la base y la cuota (sin pisar valores escritos a mano por el usuario). */
+  function recalcularIVA(forzar = false) {
+    const total = parseFloat($('#f-total').value);
+    const tipo = parseFloat($('#f-ivatipo').value);
+    if (isNaN(total) || total <= 0 || isNaN(tipo)) return;
+    const cuotaVacia = $('#f-ivacuota').value === '';
+    const baseVacia = $('#f-base').value === '';
+    if (!forzar && !cuotaVacia && !baseVacia) return;
+    const base = total / (1 + tipo / 100);
+    if (forzar || baseVacia) $('#f-base').value = (Math.round(base * 100) / 100).toFixed(2);
+    if (forzar || cuotaVacia) $('#f-ivacuota').value = (Math.round((total - base) * 100) / 100).toFixed(2);
+  }
+
+  $('#f-ivatipo').addEventListener('change', () => recalcularIVA(true));
+  $('#f-total').addEventListener('change', () => recalcularIVA(false));
+
   $('#factura-guardar').addEventListener('click', async () => {
     const total = parseFloat($('#f-total').value);
     const fecha = $('#f-fecha').value;
@@ -267,6 +326,10 @@
     // Si es un proveedor nuevo y la casilla está marcada, darlo de alta
     await altaProveedorSiNuevo(proveedor, nif, categoria);
 
+    const ivaCuota = parseFloat($('#f-ivacuota').value);
+    const base = parseFloat($('#f-base').value);
+    const tipoStr = $('#f-ivatipo').value;
+
     await DB.guardar({
       tipo: 'factura',
       fecha,
@@ -274,6 +337,9 @@
       nif,
       categoria,
       total: Math.round(total * 100) / 100,
+      baseImponible: isNaN(base) ? null : Math.round(base * 100) / 100,
+      ivaTipo: tipoStr === '' ? null : (tipoStr === 'varios' ? 'varios' : +tipoStr),
+      ivaCuota: isNaN(ivaCuota) ? null : Math.round(ivaCuota * 100) / 100,
       notas: $('#f-notas').value.trim(),
       imagen: facturaPendiente ? facturaPendiente.imagen : null,
       ocrTexto: facturaPendiente ? facturaPendiente.ocrTexto : '',
@@ -436,6 +502,9 @@
       esFactura && r.nif ? ['NIF/CIF', r.nif] : null,
       esFactura ? ['Categoría', r.categoria || '—'] : null,
       ['Total', INFORME.eur(r.total)],
+      esFactura && typeof r.baseImponible === 'number' ? ['Base imponible', INFORME.eur(r.baseImponible)] : null,
+      esFactura && r.ivaTipo != null ? ['Tipo IVA', r.ivaTipo === 'varios' ? 'Varios tipos' : r.ivaTipo + ' %'] : null,
+      esFactura && typeof r.ivaCuota === 'number' ? ['Cuota IVA', INFORME.eur(r.ivaCuota)] : null,
       !esFactura && r.efectivo != null ? ['Efectivo', INFORME.eur(r.efectivo)] : null,
       !esFactura && r.tarjeta != null ? ['Tarjeta', INFORME.eur(r.tarjeta)] : null,
       r.notas ? ['Notas', r.notas] : null,
@@ -546,6 +615,13 @@
     informeActual = await INFORME.generar(anio, trimestre);
     $('#informe-contenido').innerHTML = INFORME.renderHTML(informeActual);
     $('#informe-resultado').classList.remove('hidden');
+
+    // Previsión interna de impuestos (no va en el CSV ni en la impresión)
+    const cfg = leerConfig();
+    const prev = INFORME.prevision(informeActual, cfg);
+    $('#prevision-contenido').innerHTML = INFORME.renderPrevisionHTML(prev, cfg);
+    $('#prevision-card').classList.remove('hidden');
+
     $('#informe-resultado').scrollIntoView({ behavior: 'smooth' });
   });
 
@@ -617,6 +693,7 @@
   }
 
   iniciarSelectorAnio();
+  pintarConfig();
   pintarRecientes();
   pintarProveedores();
   cargarProveedores();

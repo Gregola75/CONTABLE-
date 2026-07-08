@@ -161,6 +161,113 @@ const OCR = (() => {
     return null;
   }
 
+  /* Detecta el desglose de IVA de una factura: base imponible, tipo (%) y cuota.
+     Devuelve { baseImponible, ivaTipo, ivaCuota } (null en lo que no encuentre). */
+  function detectarIVA(texto, total) {
+    const lineas = texto.split('\n');
+    const reImporte = /(\d{1,3}(?:[.,]\d{3})*[.,]\d{2}|\d+[.,]\d{2})/g;
+    const reTipo = /(\d{1,2}(?:[.,]\d{1,2})?)\s*%/;
+    const esLineaIVA = (l) => /\biva\b|i\.\s?v\.\s?a/i.test(l);
+
+    let base = null;
+    let basePareja = 0; // suma de bases encontradas junto a su cuota (facturas con varios tipos)
+    const tipos = new Set();
+    let cuotaTotal = 0;
+    let hayCuota = false;
+
+    for (const linea of lineas) {
+      if (/total\s*iva|iva\s*incluido/i.test(linea) && !reTipo.test(linea)) continue;
+
+      // Línea de base imponible
+      if (/base\s*(imponible)?/i.test(linea) && base === null) {
+        const nums = extraerImportes(linea, reImporte);
+        if (nums.length) base = Math.max(...nums);
+      }
+
+      const mt = linea.match(reTipo);
+      if (!esLineaIVA(linea) && !mt) continue;
+      if (!esLineaIVA(linea) && !/\biva\b/i.test(texto)) continue;
+      if (!mt && !esLineaIVA(linea)) continue;
+
+      let tipo = null;
+      if (mt) {
+        tipo = parseFloat(mt[1].replace(',', '.'));
+        if (isNaN(tipo) || tipo < 0 || tipo > 30) tipo = null;
+      }
+      if (tipo === null && !esLineaIVA(linea)) continue;
+
+      // Importes de la línea, quitando el número que es el propio porcentaje
+      let nums = extraerImportes(linea, reImporte).filter(n => tipo === null || Math.abs(n - tipo) > 0.001);
+      if (!nums.length) { if (tipo !== null) tipos.add(tipo); continue; }
+
+      if (tipo !== null && nums.length >= 2) {
+        // Buscar pareja base/cuota coherente: cuota ≈ base × tipo%
+        let pareja = null;
+        for (const b of nums) {
+          for (const c of nums) {
+            if (b === c) continue;
+            if (Math.abs(b * tipo / 100 - c) <= Math.max(0.06, b * 0.02)) { pareja = [b, c]; break; }
+          }
+          if (pareja) break;
+        }
+        if (pareja) {
+          basePareja += pareja[0];
+          cuotaTotal += pareja[1];
+          hayCuota = true;
+          tipos.add(tipo);
+          continue;
+        }
+      }
+
+      // Un solo importe: se toma como cuota si es pequeño respecto al total
+      const menor = Math.min(...nums);
+      if (total == null || menor <= total * 0.35) {
+        cuotaTotal += menor;
+        hayCuota = true;
+        if (tipo !== null) tipos.add(tipo);
+      } else if (tipo !== null) {
+        tipos.add(tipo);
+      }
+    }
+
+    let ivaTipo = tipos.size === 1 ? [...tipos][0] : (tipos.size > 1 ? 'varios' : null);
+    let ivaCuota = hayCuota ? Math.round(cuotaTotal * 100) / 100 : null;
+
+    // Las bases encontradas junto a sus cuotas son más fiables que la línea "BASE"
+    if (basePareja > 0) base = Math.round(basePareja * 100) / 100;
+
+    // Si conocemos el tipo pero no la cuota, calcularla a partir del total
+    if (ivaCuota === null && typeof ivaTipo === 'number' && total != null) {
+      const b = total / (1 + ivaTipo / 100);
+      ivaCuota = Math.round((total - b) * 100) / 100;
+      if (base === null) base = Math.round(b * 100) / 100;
+    }
+    // Si hay base y cuota pero no tipo, deducirlo
+    if (ivaTipo === null && base && ivaCuota) {
+      const t = Math.round((ivaCuota / base) * 100);
+      if ([4, 5, 10, 21].includes(t)) ivaTipo = t;
+    }
+    // Coherencia: la cuota nunca puede superar el total
+    if (total != null && ivaCuota !== null && ivaCuota >= total) { ivaCuota = null; }
+    if (total != null && base !== null && base >= total + 0.01) { base = null; }
+    if (base === null && total != null && ivaCuota !== null) {
+      base = Math.round((total - ivaCuota) * 100) / 100;
+    }
+
+    return { baseImponible: base, ivaTipo, ivaCuota };
+  }
+
+  function extraerImportes(linea, reImporte) {
+    const nums = [];
+    let m;
+    const re = new RegExp(reImporte.source, 'g');
+    while ((m = re.exec(linea)) !== null) {
+      const n = normalizarNumero(m[1]);
+      if (n !== null && n >= 0 && n <= 100000) nums.push(n);
+    }
+    return nums;
+  }
+
   function detectarNIF(texto) {
     // CIF: letra + 7 dígitos + dígito/letra | NIF: 8 dígitos + letra
     const reCIF = /\b([ABCDEFGHJKLMNPQRSUVW])[\s\-\.]?(\d{7})[\s\-\.]?([0-9A-J])\b/i;
@@ -208,11 +315,16 @@ const OCR = (() => {
 
   /* Analiza el texto completo de una factura. */
   function analizarFactura(texto, proveedoresConocidos = []) {
+    const total = detectarTotal(texto);
+    const iva = detectarIVA(texto, total);
     return {
       proveedor: detectarProveedor(texto, proveedoresConocidos),
       nif: detectarNIF(texto),
       fecha: detectarFecha(texto),
-      total: detectarTotal(texto)
+      total,
+      baseImponible: iva.baseImponible,
+      ivaTipo: iva.ivaTipo,
+      ivaCuota: iva.ivaCuota
     };
   }
 

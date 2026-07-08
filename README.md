@@ -16,6 +16,8 @@ Funciona directamente en el móvil o el ordenador, **sin servidores y sin cuotas
   - Resultado del trimestre (ingresos − gastos)
 
   Se descarga como **CSV que abre Excel** (formato español, con tildes correctas) o se puede **imprimir / guardar en PDF**.
+- **🧾 IVA**: al leer una factura también detecta la **base imponible, el tipo de IVA (21/10/4 %) y la cuota**, incluso con varios tipos en la misma factura. Si el ticket no trae desglose, se puede calcular automáticamente eligiendo el tipo.
+- **🔒 Previsión de impuestos (solo interna)**: junto al informe del trimestre, la app muestra una tarjeta aparte con lo que **aproximadamente** te tocará pagar: IVA del trimestre (IVA cobrado en ventas menos IVA pagado en compras, estilo modelo 303) y opcionalmente el pago a cuenta de IRPF (modelo 130). Esta previsión **no se incluye en el CSV ni en la impresión** que se envía a la gestoría — es solo para ti, para reservar el dinero. Los tipos de IVA de tus ventas y el % de IRPF se configuran en Ajustes.
 - **⚙️ Copia de seguridad**: exporta todos los datos (fotos incluidas) a un archivo que puedes guardar en Drive, correo, etc., y restaurarlo en otro dispositivo.
 
 ## 🚀 Cómo ponerla en marcha
