@@ -1,6 +1,6 @@
 {
-  "name": "CONTABLE — Control de gastos y facturación",
-  "short_name": "CONTABLE",
+  "name": "WanderContable — Control de gastos y facturación",
+  "short_name": "WanderContable",
   "description": "Control de gastos, facturas y cierres diarios del local. Informe trimestral para la gestoría.",
   "start_url": ".",
   "display": "standalone",

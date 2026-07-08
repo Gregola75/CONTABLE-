@@ -119,7 +119,7 @@ const SEGURIDAD = (() => {
     const cred = await navigator.credentials.create({
       publicKey: {
         challenge: crypto.getRandomValues(new Uint8Array(32)),
-        rp: { name: 'CONTABLE', id: location.hostname },
+        rp: { name: 'WanderContable', id: location.hostname },
         user: {
           id: crypto.getRandomValues(new Uint8Array(16)),
           name: 'contable',

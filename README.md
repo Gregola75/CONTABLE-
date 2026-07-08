@@ -1,4 +1,4 @@
-# 📒 CONTABLE — Control de gastos y facturación del local
+# WanderContable — Control de gastos y facturación del local
 
 Aplicación web para llevar el control de **gastos (facturas de proveedores)** e **ingresos (cierres diarios de caja)** de un pequeño negocio, pensada para preparar la información que se envía a la gestoría cada trimestre.
 

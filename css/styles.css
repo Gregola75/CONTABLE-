@@ -38,9 +38,9 @@ body {
   border-bottom: 1px solid var(--borde);
 }
 .app-header h1 {
-  font-size: 1.45rem;
+  font-size: 1.15rem;
   font-weight: 800;
-  letter-spacing: 5px;
+  letter-spacing: 3px;
   text-transform: uppercase;
   background: linear-gradient(135deg, #f4f5f7 20%, #8f96a3 60%, #d7dbe2 90%);
   -webkit-background-clip: text;
@@ -424,9 +424,9 @@ select { appearance: none; -webkit-appearance: none; }
 }
 .lock-icono { font-size: 2.4rem; margin-bottom: 8px; }
 .lock-box h1 {
-  font-size: 1.25rem;
+  font-size: 1.05rem;
   font-weight: 800;
-  letter-spacing: 5px;
+  letter-spacing: 3px;
   text-transform: uppercase;
   background: linear-gradient(135deg, #f4f5f7 20%, #8f96a3 60%, #d7dbe2 90%);
   -webkit-background-clip: text;
