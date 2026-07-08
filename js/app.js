@@ -591,7 +591,7 @@
     ].filter(Boolean);
 
     $('#modal-body').innerHTML = `
-      <h2 style="color:#1a5c3a;margin-bottom:8px">${esFactura ? '📄 ' + escapar(r.proveedor || 'Factura') : '💰 Cierre ' + fmtFecha(r.fecha)}</h2>
+      <h2 style="margin-bottom:8px">${esFactura ? '📄 ' + escapar(r.proveedor || 'Factura') : '💰 Cierre ' + fmtFecha(r.fecha)}</h2>
       ${img ? `<img class="modal-img" src="${img}" alt="Imagen del documento">` : ''}
       ${lineas.map(([k, v]) => `<div class="detalle-linea"><span class="etiqueta">${k}</span><span>${escapar(String(v))}</span></div>`).join('')}
       <div class="form-actions">
@@ -869,8 +869,8 @@
     const activo = SEGURIDAD.pinActivado();
     const bio = SEGURIDAD.biometriaActivada();
     $('#sec-estado').innerHTML = activo
-      ? `<span>Estado</span><strong style="color:var(--verde-medio)">🔒 PIN activado${bio ? ' + huella' : ''}</strong>`
-      : '<span>Estado</span><strong style="color:var(--rojo)">🔓 Sin PIN — cualquiera con tu teléfono puede entrar</strong>';
+      ? `<span>Estado</span><strong class="txt-ok">🔒 PIN activado${bio ? ' + huella' : ''}</strong>`
+      : '<span>Estado</span><strong class="txt-bad">🔓 Sin PIN — cualquiera con tu teléfono puede entrar</strong>';
     $('#sec-activar').classList.toggle('hidden', activo);
     $('#sec-cambiar').classList.toggle('hidden', !activo);
     $('#sec-desactivar').classList.toggle('hidden', !activo);

@@ -129,24 +129,24 @@ const INFORME = (() => {
           <tr><td>IVA pagado en compras (soportado)</td><td class="num">−${eur(prev.ivaSoportado)}</td></tr>
           <tr class="total">
             <td>IVA del trimestre (aprox. modelo 303)</td>
-            <td class="num" style="color:${prev.ivaResultado >= 0 ? '#b23a3a' : '#2e8b57'}">
+            <td class="num ${prev.ivaResultado >= 0 ? 'txt-bad' : 'txt-ok'}">
               ${prev.ivaResultado >= 0 ? 'a pagar ' + eur(prev.ivaResultado) : 'a compensar ' + eur(-prev.ivaResultado)}
             </td>
           </tr>
           ${prev.retenciones > 0 ? `
           <tr class="total">
             <td>Retenciones a ingresar (alquiler/profesionales, aprox. modelo 115/111)</td>
-            <td class="num" style="color:#b23a3a">${eur(prev.retenciones)}</td>
+            <td class="num txt-bad">${eur(prev.retenciones)}</td>
           </tr>` : ''}
           ${prev.irpfEstimado !== null ? `
           <tr><td>Beneficio del trimestre (sin IVA)</td><td class="num">${eur(prev.beneficio)}</td></tr>
           <tr class="total">
             <td>IRPF a cuenta (aprox. modelo 130, ${cfg.irpf} %)</td>
-            <td class="num" style="color:#b23a3a">${eur(prev.irpfEstimado)}</td>
+            <td class="num txt-bad">${eur(prev.irpfEstimado)}</td>
           </tr>` : ''}
           <tr class="total">
             <td>💶 TOTAL PREVISTO A RESERVAR</td>
-            <td class="num" style="color:#b23a3a;font-size:1.05rem">${eur(prev.totalPrevisto)}</td>
+            <td class="num txt-bad" style="font-size:1.05rem">${eur(prev.totalPrevisto)}</td>
           </tr>
         </tbody>
       </table>
@@ -168,7 +168,7 @@ const INFORME = (() => {
 
     const filasGastos = proveedoresOrdenados.map(([nombre, g]) => `
       <tr>
-        <td>${escapar(nombre)}${g.nif ? `<br><small style="color:#6b7280">${escapar(g.nif)}</small>` : ''}</td>
+        <td>${escapar(nombre)}${g.nif ? `<br><small class="txt-sec">${escapar(g.nif)}</small>` : ''}</td>
         <td>${escapar(g.categoria)}</td>
         <td class="num">${g.facturas}</td>
         <td class="num">${eur(g.total)}</td>
@@ -177,8 +177,8 @@ const INFORME = (() => {
     const balance = inf.totalIngresos - inf.totalGastos;
 
     return `
-      <h2 style="color:#1a5c3a">Informe ${inf.trimestre}º trimestre ${inf.anio}</h2>
-      <p style="font-size:.85rem;color:#6b7280">Periodo: ${formatear(inf.desde)} a ${formatear(inf.hasta)} · Generado el ${formatear(hoyISO())}</p>
+      <h2 class="informe-titulo" style="font-size:1.05rem">Informe ${inf.trimestre}º trimestre ${inf.anio}</h2>
+      <p class="txt-sec" style="font-size:.85rem">Periodo: ${formatear(inf.desde)} a ${formatear(inf.hasta)} · Generado el ${formatear(hoyISO())}</p>
 
       <h3 class="informe-titulo">📈 Ingresos por mes</h3>
       <table class="informe-tabla">
@@ -201,8 +201,8 @@ const INFORME = (() => {
 
       <div class="informe-balance">
         <strong>Resultado del trimestre:</strong>
-        <span style="color:${balance >= 0 ? '#2e8b57' : '#b23a3a'};font-weight:700"> ${eur(balance)}</span>
-        <br><small style="color:#6b7280">(ingresos ${eur(inf.totalIngresos)} − gastos ${eur(inf.totalGastos)})</small>
+        <span class="${balance >= 0 ? 'txt-ok' : 'txt-bad'}" style="font-weight:800"> ${eur(balance)}</span>
+        <br><small class="txt-sec">(ingresos ${eur(inf.totalIngresos)} − gastos ${eur(inf.totalGastos)})</small>
       </div>
     `;
   }

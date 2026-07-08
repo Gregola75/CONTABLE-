@@ -1,7 +1,7 @@
 /* CONTABLE — service worker: permite abrir la app sin conexión
    (los datos ya viven en el dispositivo; esto cachea la propia app). */
 
-const CACHE = 'contable-v5';
+const CACHE = 'contable-v6';
 const ARCHIVOS = [
   './',
   './index.html',
@@ -32,8 +32,9 @@ self.addEventListener('fetch', (e) => {
     caches.match(e.request).then(res => {
       if (res) return res;
       return fetch(e.request).then(resp => {
-        // Cachear también el motor de OCR (Tesseract) tras la primera descarga
-        if (resp.ok && (e.request.url.includes('jsdelivr') || e.request.url.includes('tesseract'))) {
+        // Cachear también el motor de OCR (Tesseract) y las fuentes tras la primera descarga
+        if (resp.ok && (e.request.url.includes('jsdelivr') || e.request.url.includes('tesseract') ||
+            e.request.url.includes('fonts.googleapis') || e.request.url.includes('fonts.gstatic'))) {
           const clon = resp.clone();
           caches.open(CACHE).then(c => c.put(e.request, clon));
         }
