@@ -111,6 +111,23 @@
         <input type="number" id="f-ivacuota" step="0.01" min="0" placeholder="0.00">
       </div>
     </div>
+    <div id="f-varios-wrap" class="prov-form hidden">
+      <p class="hint">Factura con varios tipos de IVA: apunta la cuota de cada tipo (están en el desglose de la factura) y la app suma el total.</p>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="f-iva21">Cuota 21 % (€)</label>
+          <input type="number" id="f-iva21" step="0.01" min="0" placeholder="0.00">
+        </div>
+        <div class="form-group">
+          <label for="f-iva10">Cuota 10 % (€)</label>
+          <input type="number" id="f-iva10" step="0.01" min="0" placeholder="0.00">
+        </div>
+        <div class="form-group">
+          <label for="f-iva4">Cuota 4 % (€)</label>
+          <input type="number" id="f-iva4" step="0.01" min="0" placeholder="0.00">
+        </div>
+      </div>
+    </div>
     <div class="form-group">
       <label for="f-base">Base imponible (€) <small>total sin IVA</small></label>
       <input type="number" id="f-base" step="0.01" min="0" placeholder="0.00">

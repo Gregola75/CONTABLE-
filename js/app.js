@@ -9,6 +9,7 @@
   let facturaPendiente = null; // { imagen: Blob, ocrTexto }
   let cierrePendiente = null;
   let provEditando = null; // proveedor en edición (o null si es alta nueva)
+  let registroEditando = null; // factura/cierre guardado que se está corrigiendo
   let informeActual = null;
   let vistaFotos = false;
   let ultimosResultados = [];
@@ -341,7 +342,9 @@
     const conocidos = await DB.proveedores();
     const datos = OCR.analizarFactura(texto, conocidos);
 
+    registroEditando = null; // foto nueva = registro nuevo
     facturaPendiente = { imagen: file, ocrTexto: texto };
+    $('#factura-preview').classList.remove('hidden');
     $('#factura-preview').src = urlImagen(file);
     $('#f-proveedor').value = datos.proveedor || '';
     $('#f-nif').value = datos.nif || '';
@@ -353,6 +356,10 @@
     $('#f-rettipo').value = datos.retTipo != null && [19, 15, 7, 1].includes(datos.retTipo) ? String(datos.retTipo) : '';
     $('#f-retcuota').value = datos.retCuota != null ? datos.retCuota : '';
     $('#f-notas').value = '';
+    $('#f-iva21').value = '';
+    $('#f-iva10').value = '';
+    $('#f-iva4').value = '';
+    $('#f-varios-wrap').classList.toggle('hidden', datos.ivaTipo !== 'varios');
     $('#f-ocr-text').textContent = texto || '(no se detectó texto)';
     $('#factura-form-card').classList.remove('hidden');
     $('#factura-form-card').scrollIntoView({ behavior: 'smooth' });
@@ -384,8 +391,27 @@
     if (forzar || cuotaVacia) $('#f-ivacuota').value = (Math.round((total - base) * 100) / 100).toFixed(2);
   }
 
-  $('#f-ivatipo').addEventListener('change', () => recalcularIVA(true));
+  $('#f-ivatipo').addEventListener('change', () => {
+    const esVarios = $('#f-ivatipo').value === 'varios';
+    $('#f-varios-wrap').classList.toggle('hidden', !esVarios);
+    if (!esVarios) recalcularIVA(true);
+  });
   $('#f-total').addEventListener('change', () => recalcularIVA(false));
+
+  /* Con varios tipos de IVA: sumar las cuotas de cada tramo */
+  ['#f-iva21', '#f-iva10', '#f-iva4'].forEach(sel => {
+    $(sel).addEventListener('input', () => {
+      const suma = ['#f-iva21', '#f-iva10', '#f-iva4']
+        .reduce((s, x) => s + (parseFloat($(x).value) || 0), 0);
+      if (suma > 0) {
+        $('#f-ivacuota').value = (Math.round(suma * 100) / 100).toFixed(2);
+        const total = parseFloat($('#f-total').value);
+        if (!isNaN(total) && total > 0) {
+          $('#f-base').value = (Math.round((total - suma) * 100) / 100).toFixed(2);
+        }
+      }
+    });
+  });
 
   /* Autocálculo de la retención: cuota = base imponible × tipo % */
   $('#f-rettipo').addEventListener('change', () => {
@@ -416,7 +442,16 @@
     const retCuota = parseFloat($('#f-retcuota').value);
     const retTipoStr = $('#f-rettipo').value;
 
+    const desglose = tipoStr === 'varios' ? {
+      v21: parseFloat($('#f-iva21').value) || null,
+      v10: parseFloat($('#f-iva10').value) || null,
+      v4: parseFloat($('#f-iva4').value) || null
+    } : null;
+
     await DB.guardar({
+      ...(registroEditando && registroEditando.tipo === 'factura'
+        ? { id: registroEditando.id, creado: registroEditando.creado }
+        : { creado: new Date().toISOString() }),
       tipo: 'factura',
       fecha,
       proveedor,
@@ -426,24 +461,28 @@
       baseImponible: isNaN(base) ? null : Math.round(base * 100) / 100,
       ivaTipo: tipoStr === '' ? null : (tipoStr === 'varios' ? 'varios' : +tipoStr),
       ivaCuota: isNaN(ivaCuota) ? null : Math.round(ivaCuota * 100) / 100,
+      ivaDesglose: desglose,
       retTipo: retTipoStr === '' ? null : +retTipoStr,
       retCuota: isNaN(retCuota) || retCuota <= 0 ? null : Math.round(retCuota * 100) / 100,
       notas: $('#f-notas').value.trim(),
       imagen: facturaPendiente ? facturaPendiente.imagen : null,
-      ocrTexto: facturaPendiente ? facturaPendiente.ocrTexto : '',
-      creado: new Date().toISOString()
+      ocrTexto: facturaPendiente ? facturaPendiente.ocrTexto : ''
     });
 
+    const eraEdicion = !!registroEditando;
+    registroEditando = null;
     facturaPendiente = null;
     $('#factura-form-card').classList.add('hidden');
     $('#f-prov-status').classList.add('hidden');
     $('#f-agregar-prov-wrap').classList.add('hidden');
-    toast('💾 Factura guardada.');
+    toast(eraEdicion ? '✏️ Factura corregida.' : '💾 Factura guardada.');
+    buscar();
     pintarRecientes();
     cargarProveedores();
   });
 
   $('#factura-cancelar').addEventListener('click', () => {
+    registroEditando = null;
     facturaPendiente = null;
     $('#factura-form-card').classList.add('hidden');
     $('#f-prov-status').classList.add('hidden');
@@ -481,6 +520,7 @@
     $('#cierre-progress').classList.add('hidden');
 
     const datos = file ? OCR.analizarCierre(texto) : {};
+    registroEditando = null; // anotación nueva = registro nuevo
     cierrePendiente = { imagen: file || null, ocrTexto: texto };
 
     if (file) {
@@ -527,8 +567,10 @@
       if (!mes) { toast('⚠️ Elige el mes.'); return; }
       fecha = mes + '-01';
 
-      // Avisos para no contar ingresos dos veces
-      const delMes = await DB.buscar({ tipo: 'cierre', desde: mes + '-01', hasta: mes + '-31' });
+      // Avisos para no contar ingresos dos veces (sin contar el propio registro en edición)
+      const idActual = registroEditando ? registroEditando.id : null;
+      const delMes = (await DB.buscar({ tipo: 'cierre', desde: mes + '-01', hasta: mes + '-31' }))
+        .filter(r => r.id !== idActual);
       const yaMensual = delMes.find(r => r.mensual);
       if (yaMensual && !confirm('Ya hay un total mensual guardado para ese mes. ¿Guardar otro de todas formas?')) return;
       const diarios = delMes.filter(r => !r.mensual);
@@ -537,8 +579,10 @@
       fecha = $('#c-fecha').value;
       if (!fecha) { toast('⚠️ Falta la fecha.'); return; }
 
-      // Avisar si ya hay un cierre para esa fecha
-      const existentes = await DB.buscar({ tipo: 'cierre', desde: fecha, hasta: fecha });
+      // Avisar si ya hay un cierre para esa fecha (sin contar el propio registro en edición)
+      const idActual = registroEditando ? registroEditando.id : null;
+      const existentes = (await DB.buscar({ tipo: 'cierre', desde: fecha, hasta: fecha }))
+        .filter(r => r.id !== idActual);
       if (existentes.length && !confirm(`Ya hay un cierre guardado para el ${fmtFecha(fecha)}. ¿Guardar otro de todas formas?`)) {
         return;
       }
@@ -548,6 +592,9 @@
     const tarjeta = parseFloat($('#c-tarjeta').value);
 
     await DB.guardar({
+      ...(registroEditando && registroEditando.tipo === 'cierre'
+        ? { id: registroEditando.id, creado: registroEditando.creado }
+        : { creado: new Date().toISOString() }),
       tipo: 'cierre',
       fecha,
       mensual: esMes,
@@ -557,17 +604,20 @@
       tarjeta: isNaN(tarjeta) ? null : Math.round(tarjeta * 100) / 100,
       notas: $('#c-notas').value.trim(),
       imagen: cierrePendiente ? cierrePendiente.imagen : null,
-      ocrTexto: cierrePendiente ? cierrePendiente.ocrTexto : '',
-      creado: new Date().toISOString()
+      ocrTexto: cierrePendiente ? cierrePendiente.ocrTexto : ''
     });
 
+    const eraEdicion = !!registroEditando;
+    registroEditando = null;
     cierrePendiente = null;
     $('#cierre-form-card').classList.add('hidden');
-    toast('💾 Cierre guardado.');
+    toast(eraEdicion ? '✏️ Cierre corregido.' : '💾 Cierre guardado.');
     pintarRecientes();
+    buscar();
   });
 
   $('#cierre-cancelar').addEventListener('click', () => {
+    registroEditando = null;
     cierrePendiente = null;
     $('#cierre-form-card').classList.add('hidden');
   });
@@ -650,10 +700,16 @@
       ${img ? `<img class="modal-img" src="${img}" alt="Imagen del documento">` : ''}
       ${lineas.map(([k, v]) => `<div class="detalle-linea"><span class="etiqueta">${k}</span><span>${escapar(String(v))}</span></div>`).join('')}
       <div class="form-actions">
+        <button class="btn btn-primary" id="detalle-editar">✏️ Editar / corregir datos</button>
         <button class="btn btn-danger" id="detalle-borrar">🗑️ Eliminar este registro</button>
       </div>`;
 
     $('#modal').classList.remove('hidden');
+
+    $('#detalle-editar').addEventListener('click', () => {
+      cerrarModal();
+      editarRegistro(r);
+    });
 
     $('#detalle-borrar').addEventListener('click', async () => {
       if (confirm('¿Seguro que quieres eliminar este registro? No se puede deshacer.')) {
@@ -664,6 +720,66 @@
         buscar();
       }
     });
+  }
+
+  /* Abre el formulario correspondiente con los datos de un registro
+     guardado para corregirlos. Al guardar se actualiza, no se duplica. */
+  function editarRegistro(r) {
+    registroEditando = r;
+    const irA = (tab) => document.querySelector(`.tab[data-tab="${tab}"]`).click();
+
+    if (r.tipo === 'factura') {
+      irA('facturas');
+      facturaPendiente = { imagen: r.imagen || null, ocrTexto: r.ocrTexto || '' };
+      if (r.imagen instanceof Blob) {
+        $('#factura-preview').classList.remove('hidden');
+        $('#factura-preview').src = URL.createObjectURL(r.imagen);
+      } else {
+        $('#factura-preview').classList.add('hidden');
+      }
+      $('#f-proveedor').value = r.proveedor || '';
+      $('#f-nif').value = r.nif || '';
+      $('#f-fecha').value = r.fecha || hoyISO();
+      $('#f-total').value = r.total != null ? r.total : '';
+      $('#f-categoria').value = r.categoria || 'Mercancía';
+      $('#f-ivatipo').value = r.ivaTipo != null ? String(r.ivaTipo) : '';
+      $('#f-ivacuota').value = r.ivaCuota != null ? r.ivaCuota : '';
+      $('#f-base').value = r.baseImponible != null ? r.baseImponible : '';
+      $('#f-rettipo').value = r.retTipo != null ? String(r.retTipo) : '';
+      $('#f-retcuota').value = r.retCuota != null ? r.retCuota : '';
+      $('#f-notas').value = r.notas || '';
+      const d = r.ivaDesglose || {};
+      $('#f-iva21').value = d.v21 != null ? d.v21 : '';
+      $('#f-iva10').value = d.v10 != null ? d.v10 : '';
+      $('#f-iva4').value = d.v4 != null ? d.v4 : '';
+      $('#f-varios-wrap').classList.toggle('hidden', r.ivaTipo !== 'varios');
+      $('#f-ocr-text').textContent = r.ocrTexto || '(sin texto detectado)';
+      $('#factura-form-card').classList.remove('hidden');
+      actualizarEstadoProveedor();
+      $('#factura-form-card').scrollIntoView({ behavior: 'smooth' });
+    } else {
+      irA('cierres');
+      cierrePendiente = { imagen: r.imagen || null, ocrTexto: r.ocrTexto || '' };
+      if (r.imagen instanceof Blob) {
+        $('#cierre-preview').classList.remove('hidden');
+        $('#cierre-preview').src = URL.createObjectURL(r.imagen);
+      } else {
+        $('#cierre-preview').classList.add('hidden');
+      }
+      $('#c-alcance').value = r.mensual ? 'mes' : 'dia';
+      $('#c-fecha-wrap').classList.toggle('hidden', !!r.mensual);
+      $('#c-mes-wrap').classList.toggle('hidden', !r.mensual);
+      $('#c-fecha').value = r.fecha || hoyISO();
+      $('#c-mes').value = (r.fecha || hoyISO()).slice(0, 7);
+      $('#c-total').value = r.total != null ? r.total : '';
+      $('#c-efectivo').value = r.efectivo != null ? r.efectivo : '';
+      $('#c-tarjeta').value = r.tarjeta != null ? r.tarjeta : '';
+      $('#c-notas').value = r.notas || '';
+      $('#c-ocr-text').textContent = r.ocrTexto || '(sin foto)';
+      $('#cierre-form-card').classList.remove('hidden');
+      $('#cierre-form-card').scrollIntoView({ behavior: 'smooth' });
+    }
+    toast('✏️ Corrige lo que haga falta y pulsa Guardar.');
   }
 
   function cerrarModal() { $('#modal').classList.add('hidden'); }

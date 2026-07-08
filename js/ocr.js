@@ -270,7 +270,10 @@ const OCR = (() => {
     let retCuota = null;
 
     for (const linea of lineas) {
-      if (!/retenci|ret\.\s|irpf/i.test(linea)) continue;
+      // Solo palabras claras: "retención" o "IRPF". Evita falsos positivos como
+      // "RET. ENVASES" (retorno de envases) o el recargo de equivalencia.
+      if (!/retenci|irpf/i.test(linea)) continue;
+      if (/envas|recargo|equival/i.test(linea)) continue;
       const mt = linea.match(reTipo);
       let tipo = null;
       if (mt) {
