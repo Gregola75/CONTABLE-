@@ -169,12 +169,12 @@
     <button class="btn btn-secondary" id="prov-nuevo">➕ Añadir proveedor</button>
     <div id="prov-form" class="prov-form hidden">
       <div class="form-group">
-        <label for="p-nombre">Nombre del proveedor</label>
+        <label for="p-nombre">Nombre del proveedor *</label>
         <input type="text" id="p-nombre" placeholder="Ej.: Distribuciones García S.L.">
       </div>
       <div class="form-row">
         <div class="form-group">
-          <label for="p-nif">NIF / CIF (opcional)</label>
+          <label for="p-nif">NIF / CIF *</label>
           <input type="text" id="p-nif" placeholder="B12345678">
         </div>
         <div class="form-group">
@@ -193,6 +193,25 @@
           </select>
         </div>
       </div>
+      <div class="form-group">
+        <label for="p-quien">¿Quién es? <small>para acordarte de qué proveedor se trata</small></label>
+        <input type="text" id="p-quien" placeholder="Ej.: el de las bebidas, viene los martes">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="p-telefono">Teléfono <small>opcional</small></label>
+          <input type="tel" id="p-telefono" placeholder="600 000 000">
+        </div>
+        <div class="form-group">
+          <label for="p-email">Email <small>opcional</small></label>
+          <input type="email" id="p-email" placeholder="pedidos@…">
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="p-direccion">Dirección <small>opcional</small></label>
+        <input type="text" id="p-direccion" placeholder="C/ Mayor 12, Sevilla">
+      </div>
+      <p class="hint">* Campos obligatorios</p>
       <div class="form-actions">
         <button class="btn btn-primary" id="prov-guardar">💾 Guardar proveedor</button>
         <button class="btn btn-ghost" id="prov-cancelar">Cancelar</button>

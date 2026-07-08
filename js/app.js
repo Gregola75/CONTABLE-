@@ -178,7 +178,7 @@
     estado.classList.remove('hidden');
     if (prov) {
       estado.className = 'prov-status ok';
-      estado.textContent = `✅ Proveedor reconocido: ${prov.nombre}`;
+      estado.textContent = `✅ Proveedor reconocido: ${prov.nombre}${prov.quien ? ` (${prov.quien})` : ''}`;
       wrap.classList.add('hidden');
       // Completar datos que falten con la ficha del proveedor
       if (!nif && prov.nif) $('#f-nif').value = prov.nif;
@@ -201,8 +201,18 @@
     $('#p-nombre').value = prov ? prov.nombre : '';
     $('#p-nif').value = prov ? (prov.nif || '') : '';
     $('#p-categoria').value = prov ? (prov.categoria || 'Mercancía') : 'Mercancía';
+    $('#p-quien').value = prov ? (prov.quien || '') : '';
+    $('#p-telefono').value = prov ? (prov.telefono || '') : '';
+    $('#p-email').value = prov ? (prov.email || '') : '';
+    $('#p-direccion').value = prov ? (prov.direccion || '') : '';
     $('#prov-form').classList.remove('hidden');
     $('#p-nombre').focus();
+  }
+
+  /* Comprobación ligera del formato de NIF/CIF español. */
+  function formatoNIFValido(nif) {
+    const limpio = nif.replace(/[\s\-\.]/g, '').toUpperCase();
+    return /^[A-Z]\d{7}[0-9A-J]$/.test(limpio) || /^\d{8}[A-Z]$/.test(limpio) || /^[XYZ]\d{7}[A-Z]$/.test(limpio);
   }
 
   $('#prov-nuevo').addEventListener('click', () => abrirFormProveedor());
@@ -213,10 +223,16 @@
 
   $('#prov-guardar').addEventListener('click', async () => {
     const nombre = $('#p-nombre').value.trim();
-    if (!nombre) { toast('⚠️ Pon el nombre del proveedor.'); return; }
+    const nif = $('#p-nif').value.trim().toUpperCase();
+    if (!nombre) { toast('⚠️ El nombre es obligatorio.'); return; }
+    if (!nif) { toast('⚠️ El NIF/CIF es obligatorio.'); return; }
+    if (!formatoNIFValido(nif) &&
+        !confirm(`El NIF/CIF "${nif}" no tiene el formato habitual (ej.: B12345678). ¿Guardarlo igualmente?`)) {
+      return;
+    }
 
     // Evitar duplicados (salvo que estemos editando ese mismo proveedor)
-    const existente = await reconocerProveedor(nombre, $('#p-nif').value.trim());
+    const existente = await reconocerProveedor(nombre, nif);
     if (existente && (!provEditando || existente.id !== provEditando.id)) {
       toast(`⚠️ Ese proveedor ya existe en tu lista: ${existente.nombre}`);
       return;
@@ -225,8 +241,12 @@
     await DB.provGuardar({
       ...(provEditando ? { id: provEditando.id, creado: provEditando.creado } : { creado: new Date().toISOString() }),
       nombre,
-      nif: $('#p-nif').value.trim().toUpperCase(),
-      categoria: $('#p-categoria').value
+      nif,
+      categoria: $('#p-categoria').value,
+      quien: $('#p-quien').value.trim(),
+      telefono: $('#p-telefono').value.trim(),
+      email: $('#p-email').value.trim(),
+      direccion: $('#p-direccion').value.trim()
     });
 
     provEditando = null;
@@ -248,7 +268,8 @@
         <div class="item-thumb placeholder">🏪</div>
         <div class="item-info">
           <div class="item-titulo">${escapar(p.nombre)}</div>
-          <div class="item-sub">${escapar(p.nif || 'Sin NIF')} · ${escapar(p.categoria || '')}</div>
+          <div class="item-sub">${escapar(p.nif || 'Sin NIF')} · ${escapar(p.categoria || '')}${p.telefono ? ' · 📞 ' + escapar(p.telefono) : ''}</div>
+          ${p.quien ? `<div class="item-sub">💬 ${escapar(p.quien)}</div>` : ''}
         </div>
         <button class="btn btn-small prov-borrar" data-pid="${p.id}" title="Eliminar">🗑️</button>
       </div>`).join('');
