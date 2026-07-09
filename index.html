@@ -69,6 +69,7 @@
   <div id="factura-form-card" class="card hidden">
     <h2>Revisar datos detectados</h2>
     <img id="factura-preview" class="preview" alt="Factura">
+    <p class="preview-hint">🔍 Toca la imagen para ampliarla y leer bien el IVA</p>
     <div class="form-group">
       <label for="f-proveedor">Proveedor / Servicio</label>
       <div class="combo">
@@ -269,6 +270,7 @@
   <div id="cierre-form-card" class="card hidden">
     <h2>Revisar cierre</h2>
     <img id="cierre-preview" class="preview" alt="Cierre">
+    <p class="preview-hint">🔍 Toca la imagen para ampliarla</p>
     <div class="form-group">
       <label for="c-alcance">¿Qué anotas?</label>
       <select id="c-alcance">
@@ -507,6 +509,15 @@
     <button class="modal-close" id="modal-cerrar">✕</button>
     <div id="modal-body"></div>
   </div>
+</div>
+
+<!-- Visor de imagen a pantalla completa con zoom -->
+<div id="visor" class="visor hidden">
+  <button class="visor-cerrar" id="visor-cerrar" aria-label="Cerrar">✕</button>
+  <div class="visor-area" id="visor-area">
+    <img id="visor-img" alt="Documento ampliado" draggable="false">
+  </div>
+  <p class="visor-ayuda">Pellizca o toca dos veces para ampliar · arrastra para moverte</p>
 </div>
 
 <div id="toast" class="toast hidden"></div>

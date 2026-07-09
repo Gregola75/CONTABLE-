@@ -121,7 +121,11 @@
     const datos = await file.arrayBuffer();
     const pdf = await pdfjs.getDocument({ data: datos }).promise;
     const pagina = await pdf.getPage(1);
-    const viewport = pagina.getViewport({ scale: 2 });
+    // Resolución alta (hasta ~2600 px) para que al ampliar la imagen
+    // se lea bien la letra pequeña del desglose de IVA
+    const base = pagina.getViewport({ scale: 1 });
+    const escala = Math.max(2, Math.min(3, 2600 / Math.max(base.width, base.height)));
+    const viewport = pagina.getViewport({ scale: escala });
     const canvas = document.createElement('canvas');
     canvas.width = viewport.width;
     canvas.height = viewport.height;
@@ -709,6 +713,10 @@
 
     $('#modal').classList.remove('hidden');
 
+    // La imagen del detalle también se puede ampliar para leer el IVA
+    const imgModal = $('#modal-body .modal-img');
+    if (imgModal) imgModal.addEventListener('click', () => abrirVisor(imgModal.src));
+
     $('#detalle-editar').addEventListener('click', () => {
       cerrarModal();
       editarRegistro(r);
@@ -788,6 +796,116 @@
   function cerrarModal() { $('#modal').classList.add('hidden'); }
   $('#modal-cerrar').addEventListener('click', cerrarModal);
   $('#modal').addEventListener('click', (e) => { if (e.target.id === 'modal') cerrarModal(); });
+
+  /* ---------- Visor con zoom: para leer la letra pequeña (IVA…) ---------- */
+
+  const visorArea = $('#visor-area');
+  const visorImg = $('#visor-img');
+  let vEscala = 1, vTx = 0, vTy = 0;
+  const vPunteros = new Map(); // punteros activos (dedos/ratón)
+  let vPellizco = null;        // estado al empezar un gesto de pellizco
+  let vUltimoTap = 0;
+
+  function visorAplicar() {
+    visorImg.style.transform = `translate(${vTx}px, ${vTy}px) scale(${vEscala})`;
+  }
+
+  function abrirVisor(src) {
+    if (!src) return;
+    visorImg.src = src;
+    vEscala = 1; vTx = 0; vTy = 0;
+    visorAplicar();
+    $('#visor').classList.remove('hidden');
+  }
+
+  function cerrarVisor() {
+    $('#visor').classList.add('hidden');
+    vPunteros.clear();
+    vPellizco = null;
+  }
+
+  $('#visor-cerrar').addEventListener('click', cerrarVisor);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') cerrarVisor(); });
+
+  function vCentro() {
+    const r = visorArea.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  }
+
+  /* Zoom hacia un punto de la pantalla manteniendo ese punto quieto. */
+  function visorZoomHacia(px, py, nuevaEscala) {
+    const c = vCentro();
+    const s = Math.max(1, Math.min(6, nuevaEscala));
+    vTx = (px - c.x) - (s / vEscala) * (px - c.x - vTx);
+    vTy = (py - c.y) - (s / vEscala) * (py - c.y - vTy);
+    vEscala = s;
+    if (s === 1) { vTx = 0; vTy = 0; }
+    visorAplicar();
+  }
+
+  visorArea.addEventListener('pointerdown', (e) => {
+    visorArea.setPointerCapture(e.pointerId);
+    vPunteros.set(e.pointerId, { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY });
+    if (vPunteros.size === 2) {
+      const [a, b] = [...vPunteros.values()];
+      vPellizco = {
+        dist: Math.hypot(a.x - b.x, a.y - b.y),
+        mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
+        escala: vEscala, tx: vTx, ty: vTy
+      };
+    }
+  });
+
+  visorArea.addEventListener('pointermove', (e) => {
+    const p = vPunteros.get(e.pointerId);
+    if (!p) return;
+    const antesX = p.x, antesY = p.y;
+    p.x = e.clientX; p.y = e.clientY;
+    if (vPunteros.size === 2 && vPellizco) {
+      // Pellizco: escalar respecto al punto medio de los dos dedos
+      const [a, b] = [...vPunteros.values()];
+      const dist = Math.hypot(a.x - b.x, a.y - b.y);
+      const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      const c = vCentro();
+      const s = Math.max(1, Math.min(6, vPellizco.escala * (dist / vPellizco.dist)));
+      vTx = (mid.x - c.x) - (s / vPellizco.escala) * (vPellizco.mid.x - c.x - vPellizco.tx);
+      vTy = (mid.y - c.y) - (s / vPellizco.escala) * (vPellizco.mid.y - c.y - vPellizco.ty);
+      vEscala = s;
+      visorAplicar();
+    } else if (vPunteros.size === 1) {
+      vTx += p.x - antesX;
+      vTy += p.y - antesY;
+      visorAplicar();
+    }
+  });
+
+  function vSoltar(e) {
+    const p = vPunteros.get(e.pointerId);
+    vPunteros.delete(e.pointerId);
+    if (vPunteros.size < 2) vPellizco = null;
+    // Doble toque (sin apenas movimiento): acercar / volver al tamaño normal
+    if (e.type === 'pointerup' && p && vPunteros.size === 0) {
+      const seMovio = Math.hypot(e.clientX - p.x0, e.clientY - p.y0) > 12;
+      const ahora = Date.now();
+      if (!seMovio && ahora - vUltimoTap < 320) {
+        visorZoomHacia(e.clientX, e.clientY, vEscala > 1 ? 1 : 2.5);
+        vUltimoTap = 0;
+      } else {
+        vUltimoTap = seMovio ? 0 : ahora;
+      }
+    }
+  }
+  visorArea.addEventListener('pointerup', vSoltar);
+  visorArea.addEventListener('pointercancel', vSoltar);
+
+  // Rueda del ratón (si se usa en ordenador)
+  visorArea.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    visorZoomHacia(e.clientX, e.clientY, vEscala * (e.deltaY < 0 ? 1.2 : 1 / 1.2));
+  }, { passive: false });
+
+  $('#factura-preview').addEventListener('click', () => abrirVisor($('#factura-preview').src));
+  $('#cierre-preview').addEventListener('click', () => abrirVisor($('#cierre-preview').src));
 
   /* ---------- CONSULTAR ---------- */
 

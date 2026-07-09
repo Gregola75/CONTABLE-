@@ -198,7 +198,8 @@ const OCR = (() => {
     let cuotaTotal = 0;
     let hayCuota = false;
 
-    for (const linea of lineas) {
+    for (let i = 0; i < lineas.length; i++) {
+      const linea = lineas[i];
       // Las líneas de retención (IRPF) no son IVA: se tratan aparte
       if (/retenci|irpf/i.test(linea)) continue;
       if (/total\s*iva|iva\s*incluido/i.test(linea) && !reTipo.test(linea)) continue;
@@ -223,6 +224,14 @@ const OCR = (() => {
 
       // Importes de la línea, quitando el número que es el propio porcentaje
       let nums = extraerImportes(linea, reImporte).filter(n => tipo === null || Math.abs(n - tipo) > 0.001);
+      if (!nums.length && tipo !== null && esLineaIVA(linea)) {
+        // Desglose en tabla por columnas: la base y la cuota pueden caer
+        // en la línea siguiente a la etiqueta "IVA 21%"
+        const sig = lineas[i + 1] || '';
+        if (!/retenci|irpf|total/i.test(sig) && !reTipo.test(sig)) {
+          nums = extraerImportes(sig, reImporte).filter(n => Math.abs(n - tipo) > 0.001);
+        }
+      }
       if (!nums.length) { if (tipo !== null) tipos.add(tipo); continue; }
 
       if (tipo !== null && nums.length >= 2) {
