@@ -71,8 +71,11 @@
     <img id="factura-preview" class="preview" alt="Factura">
     <div class="form-group">
       <label for="f-proveedor">Proveedor / Servicio</label>
-      <input type="text" id="f-proveedor" list="proveedores-list" placeholder="Nombre del proveedor">
-      <datalist id="proveedores-list"></datalist>
+      <div class="combo">
+        <input type="text" id="f-proveedor" placeholder="Nombre del proveedor" autocomplete="off">
+        <button type="button" class="combo-toggle" aria-label="Ver mis proveedores">▾</button>
+        <div class="combo-lista hidden"></div>
+      </div>
       <div id="f-prov-status" class="prov-status hidden"></div>
       <label id="f-agregar-prov-wrap" class="check-linea hidden">
         <input type="checkbox" id="f-agregar-prov" checked>
@@ -331,7 +334,11 @@
       </div>
       <div class="form-group">
         <label for="q-proveedor">Proveedor</label>
-        <input type="text" id="q-proveedor" list="proveedores-list" placeholder="Todos">
+        <div class="combo">
+          <input type="text" id="q-proveedor" placeholder="Todos" autocomplete="off">
+          <button type="button" class="combo-toggle" aria-label="Ver mis proveedores">▾</button>
+          <div class="combo-lista hidden"></div>
+        </div>
       </div>
     </div>
     <div class="form-row">

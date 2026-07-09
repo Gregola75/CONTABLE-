@@ -70,50 +70,64 @@ const OCR = (() => {
     return isNaN(n) ? null : Math.round(n * 100) / 100;
   }
 
-  function detectarFecha(texto) {
-    const hoy = new Date();
-    const patrones = [
-      // 12/03/2026, 12-03-26, 12.03.2026
-      /(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4}|\d{2})/g,
-      // 2026-03-12
-      /(\d{4})-(\d{2})-(\d{2})/g
-    ];
-    const candidatas = [];
-
+  /* Extrae todas las fechas de una línea (formatos numéricos y con mes en letras). */
+  function fechasDeLinea(linea, hoy) {
+    const meses = { enero:1, febrero:2, marzo:3, abril:4, mayo:5, junio:6, julio:7, agosto:8,
+      septiembre:9, setiembre:9, octubre:10, noviembre:11, diciembre:12,
+      ene:1, feb:2, mar:3, abr:4, may:5, jun:6, jul:7, ago:8, sep:9, sept:9, oct:10, nov:11, dic:12 };
+    const encontradas = [];
     let m;
     const reISO = /(\d{4})-(\d{2})-(\d{2})/g;
-    while ((m = reISO.exec(texto)) !== null) {
+    while ((m = reISO.exec(linea)) !== null) {
       const f = new Date(+m[1], +m[2] - 1, +m[3]);
-      if (esFechaRazonable(f, hoy)) candidatas.push(f);
+      if (esFechaRazonable(f, hoy)) encontradas.push(f);
     }
     const reEU = /(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4}|\d{2})(?!\d)/g;
-    while ((m = reEU.exec(texto)) !== null) {
+    while ((m = reEU.exec(linea)) !== null) {
       let [, d, mes, a] = m;
       d = +d; mes = +mes; a = +a;
       if (a < 100) a += 2000;
+      // Algunas facturas vienen en formato MM/DD: si el "mes" es imposible, probar al revés
+      if (mes > 12 && d >= 1 && d <= 12) { const t = d; d = mes; mes = t; }
       if (d >= 1 && d <= 31 && mes >= 1 && mes <= 12) {
         const f = new Date(a, mes - 1, d);
-        if (esFechaRazonable(f, hoy)) candidatas.push(f);
+        if (esFechaRazonable(f, hoy)) encontradas.push(f);
       }
     }
-    // Fechas con mes en letras: 12 de marzo de 2026 / 12 MAR 2026
-    const meses = { enero:1, febrero:2, marzo:3, abril:4, mayo:5, junio:6, julio:7, agosto:8,
-      septiembre:9, setiembre:9, octubre:10, noviembre:11, diciembre:12,
-      ene:1, feb:2, mar:3, abr:4, may:5, jun:6, jul:7, ago:8, sep:9, oct:10, nov:11, dic:12 };
-    const reTxt = /(\d{1,2})\s*(?:de\s+)?([a-záéíóú]{3,12})\.?\s*(?:de\s+)?(\d{4})/gi;
-    while ((m = reTxt.exec(texto)) !== null) {
+    // Fechas con mes en letras: 12 de marzo de 2026 / 12 MAR 2026 / 12-mar-2026
+    const reTxt = /(\d{1,2})[\s\-\.]*(?:de\s+)?([a-záéíóú]{3,12})\.?[\s\-\.]*(?:de[l]?\s+)?(\d{4}|\d{2})(?!\d)/gi;
+    while ((m = reTxt.exec(linea)) !== null) {
       const mes = meses[m[2].toLowerCase()];
       if (mes) {
-        const f = new Date(+m[3], mes - 1, +m[1]);
-        if (esFechaRazonable(f, hoy)) candidatas.push(f);
+        let a = +m[3];
+        if (a < 100) a += 2000;
+        const f = new Date(a, mes - 1, +m[1]);
+        if (esFechaRazonable(f, hoy)) encontradas.push(f);
       }
+    }
+    return encontradas;
+  }
+
+  function detectarFecha(texto) {
+    const hoy = new Date();
+    const candidatas = []; // { f, peso }
+
+    // Cada empresa coloca la fecha en un sitio: se puntúa por el contexto
+    // de la línea en vez de quedarse con la primera que aparezca.
+    for (const linea of texto.split('\n')) {
+      const esVencimiento = /vencimient|caducidad|v[aá]lido\s*hasta|entrega|pr[oó]ximo|cobro/i.test(linea);
+      const esEmision = /fecha|emisi[oó]n|emitida|expedici[oó]n|expedida|fra\.?|f\.\s*factura/i.test(linea);
+      const peso = esVencimiento ? -1 : (esEmision ? 2 : 0);
+      for (const f of fechasDeLinea(linea, hoy)) candidatas.push({ f, peso });
     }
 
     if (!candidatas.length) return null;
+    const maxPeso = Math.max(...candidatas.map(c => c.peso));
+    const pool = candidatas.filter(c => c.peso === maxPeso).map(c => c.f);
     // Preferir la más reciente que no sea futura (las facturas suelen ser de hoy o días atrás)
-    candidatas.sort((a, b) => b - a);
-    const noFuturas = candidatas.filter(f => f <= hoy);
-    const elegida = noFuturas[0] || candidatas[candidatas.length - 1];
+    pool.sort((a, b) => b - a);
+    const noFuturas = pool.filter(f => f <= hoy);
+    const elegida = noFuturas[0] || pool[pool.length - 1];
     return aISO(elegida);
   }
 
@@ -132,33 +146,42 @@ const OCR = (() => {
   function detectarTotal(texto) {
     const lineas = texto.split('\n');
     const reImporte = /(\d{1,3}(?:[.,]\d{3})*[.,]\d{2}|\d+[.,]\d{2})\s*€?/g;
-    const clavesTotal = /total|importe|a\s*pagar|t0tal|suma/i;
-    const clavesEvitar = /subtotal|base|iva|cambio|entregado|dto|descuento|ahorro/i;
+    // Cada empresa etiqueta el total a su manera: se puntúan las etiquetas
+    // de más específica a más genérica y gana la de mayor puntuación.
+    const clavesFuertes = /total\s*(factura|a\s*pagar|a\s*abonar|importe|general|documento)|importe\s*total|gran\s*total|total\s*(€|eur)|a\s*pagar|l[ií]quido\s*(a\s*percibir)?|total\s*iva\s*inclu/i;
+    const clavesTotal = /\btotal\b|t0tal|tota1|importe|suma/i;
+    const clavesEvitar = /subtotal|sub\s*total|base|\biva\b|i\.\s?v\.\s?a|cuota|cambio|entregado|entrega|dto|descuento|ahorro|devoluci|vuelta|efectivo|tarjeta|retenci|irpf|unid|cant|precio/i;
 
-    let candidatosTotal = [];
-    let todos = [];
+    const candidatos = []; // { n, peso }
 
-    for (const linea of lineas) {
-      let m;
-      const re = new RegExp(reImporte.source, 'g');
-      while ((m = re.exec(linea)) !== null) {
-        const n = normalizarNumero(m[1]);
-        if (n === null || n <= 0 || n > 100000) continue;
-        todos.push(n);
-        if (clavesTotal.test(linea) && !clavesEvitar.test(linea)) {
-          candidatosTotal.push(n);
+    for (let i = 0; i < lineas.length; i++) {
+      const linea = lineas[i];
+      const evitar = clavesEvitar.test(linea) && !/total\s*iva\s*inclu|iva\s*incluido/i.test(linea);
+      let peso = 0;
+      if (!evitar) {
+        if (clavesFuertes.test(linea)) peso = 5;
+        else if (clavesTotal.test(linea)) peso = 3;
+      }
+      const nums = extraerImportes(linea, reImporte).filter(n => n > 0);
+      if (nums.length) {
+        for (const n of nums) candidatos.push({ n, peso });
+      } else if (peso >= 3) {
+        // Etiqueta "TOTAL" sola: en muchos diseños el importe cae en la línea siguiente
+        const sig = lineas[i + 1] || '';
+        if (!clavesEvitar.test(sig)) {
+          for (const n of extraerImportes(sig, reImporte).filter(x => x > 0)) {
+            candidatos.push({ n, peso: peso - 1 });
+          }
         }
       }
     }
 
-    if (candidatosTotal.length) {
-      // En líneas con "TOTAL", el importe correcto suele ser el mayor de ellas
-      return Math.max(...candidatosTotal);
-    }
-    if (todos.length) {
-      return Math.max(...todos);
-    }
-    return null;
+    if (!candidatos.length) return null;
+    const maxPeso = Math.max(...candidatos.map(c => c.peso));
+    // Con etiqueta clara: el mayor importe de esas líneas.
+    // Sin ninguna etiqueta: el mayor importe del documento (suele ser el total).
+    const pool = maxPeso > 0 ? candidatos.filter(c => c.peso === maxPeso) : candidatos;
+    return Math.max(...pool.map(c => c.n));
   }
 
   /* Detecta el desglose de IVA de una factura: base imponible, tipo (%) y cuota.
@@ -305,49 +328,164 @@ const OCR = (() => {
     return nums;
   }
 
-  function detectarNIF(texto) {
-    // CIF: letra + 7 dígitos + dígito/letra | NIF: 8 dígitos + letra
-    const reCIF = /\b([ABCDEFGHJKLMNPQRSUVW])[\s\-\.]?(\d{7})[\s\-\.]?([0-9A-J])\b/i;
-    const reNIF = /\b(\d{8})[\s\-\.]?([A-Z])\b/;
-    let m = texto.match(reCIF);
-    if (m) return (m[1] + m[2] + m[3]).toUpperCase();
-    m = texto.match(reNIF);
-    if (m) return m[1] + m[2].toUpperCase();
-    return '';
+  function limpiarNIF(nif) {
+    return String(nif || '').replace(/[\s\-\.]/g, '').toUpperCase();
   }
 
+  /* Devuelve TODOS los NIF/CIF/NIE del texto, primero los que van junto
+     a la palabra "CIF"/"NIF" (los más fiables). */
+  function detectarNIFs(texto) {
+    // CIF: letra + 7 dígitos + dígito/letra | NIF: 8 dígitos + letra | NIE: X/Y/Z + 7 dígitos + letra
+    const patrones = [
+      /\b([ABCDEFGHJKLMNPQRSUVW])[\s\-\.]?(\d{7})[\s\-\.]?([0-9A-J])\b/gi,
+      /\b([XYZ])[\s\-\.]?(\d{7})[\s\-\.]?([A-Z])\b/gi,
+      /\b(\d{8})[\s\-\.]?([A-Z])\b/g
+    ];
+    const encontrados = [];
+    for (const linea of texto.split('\n')) {
+      const juntoAClave = /\b(c\.?\s?i\.?\s?f|n\.?\s?i\.?\s?f|vat)\b/i.test(linea);
+      for (const patron of patrones) {
+        let m;
+        const re = new RegExp(patron.source, patron.flags);
+        while ((m = re.exec(linea)) !== null) {
+          encontrados.push({ nif: limpiarNIF(m.slice(1).join('')), juntoAClave });
+        }
+      }
+    }
+    encontrados.sort((a, b) => (b.juntoAClave ? 1 : 0) - (a.juntoAClave ? 1 : 0));
+    return [...new Set(encontrados.map(e => e.nif))];
+  }
+
+  function detectarNIF(texto) {
+    return detectarNIFs(texto)[0] || '';
+  }
+
+  /* ---------- Comparación difusa de nombres (tolera fallos del OCR) ---------- */
+
+  function levenshtein(a, b) {
+    const n = a.length, m = b.length;
+    if (!n) return m;
+    if (!m) return n;
+    let prev = Array.from({ length: m + 1 }, (_, j) => j);
+    for (let i = 1; i <= n; i++) {
+      const fila = [i];
+      for (let j = 1; j <= m; j++) {
+        fila[j] = Math.min(prev[j] + 1, fila[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      }
+      prev = fila;
+    }
+    return prev[m];
+  }
+
+  /* Clave para comparar: minúsculas, sin tildes, con las confusiones típicas
+     del OCR unificadas (0↔O, 1↔L, 5↔S, 8↔B) y sin la forma societaria. */
+  function claveDifusa(s) {
+    return String(s || '').toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/0/g, 'o').replace(/1/g, 'l').replace(/5/g, 's').replace(/8/g, 'b')
+      .replace(/[^a-zñ ]+/g, ' ')
+      .replace(/\b(s\s?l\s?u?|s\s?a\s?u?|s\s?l\s?l|s\s?c(oop)?|c\s?b)\b/g, ' ')
+      .replace(/\s+/g, ' ').trim();
+  }
+
+  /* Parecido entre dos claves difusas: 1 = idénticas, 0 = nada que ver. */
+  function similitud(a, b) {
+    if (!a || !b) return 0;
+    if (a === b) return 1;
+    const corto = a.length <= b.length ? a : b;
+    if (corto.length >= 4 && (a.includes(b) || b.includes(a))) return 0.93;
+    return 1 - levenshtein(a, b) / Math.max(a.length, b.length);
+  }
+
+  /* Parecido por palabras: qué parte de las palabras del nombre conocido
+     aparecen (aunque sea con algún fallo de letra) en la línea. */
+  function similitudTokens(clave, lineaClave) {
+    const palabras = clave.split(' ').filter(t => t.length >= 3);
+    if (!palabras.length) return 0;
+    const enLinea = lineaClave.split(' ').filter(t => t.length >= 3);
+    if (!enLinea.length) return 0;
+    let aciertos = 0, aciertoLargo = false;
+    for (const p of palabras) {
+      if (enLinea.some(t => similitud(p, t) >= 0.8)) {
+        aciertos++;
+        if (p.length >= 4) aciertoLargo = true;
+      }
+    }
+    if (!aciertoLargo) return 0; // exigir al menos una palabra significativa
+    return (aciertos / palabras.length) * 0.9;
+  }
+
+  /* Detección del proveedor. `conocidos` admite nombres (strings) y fichas
+     completas { nombre, nif } de los proveedores dados de alta. */
   function detectarProveedor(texto, conocidos = []) {
+    const fichas = conocidos
+      .map(c => (typeof c === 'string' ? { nombre: c, nif: '' } : c))
+      .filter(c => c && c.nombre);
     const lineas = texto.split('\n').map(l => l.trim()).filter(l => l.length >= 3);
 
-    // 1) Si alguna línea coincide con un proveedor ya guardado, usarlo
-    for (const linea of lineas.slice(0, 15)) {
-      for (const p of conocidos) {
-        if (p.length >= 4 && linea.toLowerCase().includes(p.toLowerCase())) return p;
-      }
+    // 1) Por NIF/CIF: lo más fiable, funciona sea cual sea el diseño de la factura
+    const nifsTexto = detectarNIFs(texto);
+    for (const nif of nifsTexto) {
+      const p = fichas.find(f => f.nif && limpiarNIF(f.nif) === nif);
+      if (p) return p.nombre;
     }
 
-    // 2) Línea con forma societaria (S.L., S.A., etc.)
-    const reSociedad = /\b(S\.?\s?L\.?U?|S\.?\s?A\.?U?|S\.?\s?C\.?|C\.?\s?B\.?|S\.?\s?COOP\.?|SLU|SAU)\b\.?$/i;
-    for (const linea of lineas.slice(0, 12)) {
-      if (reSociedad.test(linea) && linea.length <= 50) {
-        return limpiarNombre(linea);
+    // 2) Por nombre conocido, con comparación difusa línea a línea
+    //    (el OCR confunde letras: "GARC1A" también debe reconocerse)
+    let mejorNombre = '', mejorPunt = 0;
+    const tope = Math.min(lineas.length, 25);
+    const clavesLineas = lineas.slice(0, tope).map(claveDifusa);
+    for (const f of fichas) {
+      const clave = claveDifusa(f.nombre);
+      if (clave.length < 4) continue;
+      for (let i = 0; i < tope; i++) {
+        if (!clavesLineas[i]) continue;
+        let punt = similitud(clave, clavesLineas[i]);
+        if (punt < 0.8) punt = Math.max(punt, similitudTokens(clave, clavesLineas[i]));
+        punt -= i * 0.004; // ligera preferencia por la cabecera del documento
+        if (punt > mejorPunt) { mejorPunt = punt; mejorNombre = f.nombre; }
       }
     }
+    if (mejorPunt >= 0.78) return mejorNombre;
 
-    // 3) Primera línea "con pinta de nombre": mayoritariamente letras, sin muchos números
-    for (const linea of lineas.slice(0, 6)) {
+    // 3) Proveedor no dado de alta: puntuar las líneas de cabecera y quedarse
+    //    con la que más "pinta de nombre de empresa" tenga
+    const reSociedad = /\b(s\.?\s?l\.?\s?u?|s\.?\s?a\.?\s?u?|s\.?\s?coop|s\.?\s?c\b|c\.?\s?b\b|s\.?\s?l\.?\s?l)\b/i;
+    const reDescarta = /factura|ticket|tique|simplificad|albar[aá]n|presupuesto|fecha|hora|tel[eé]f|tfno|fax|www|@|http|cod\.?\s*postal|cliente|mesa|camarero|caja|n[ºo°]\s|total|importe|base|unidad|precio|cant\.?|descripci|concepto|forma\s*de\s*pago|efectivo|tarjeta|vencimient|p[aá]gina|registro\s*mercantil/i;
+    const reDireccion = /\b(c\/|cl\.|calle|avda|avenida|plaza|pza|ctra|carretera|pol[ií]gono|pol\.|camino|paseo|urb\.|local|nave)\b/i;
+
+    let mejorLinea = '', mejorScore = 0;
+    const topeCabecera = Math.min(lineas.length, 12);
+    for (let i = 0; i < topeCabecera; i++) {
+      const linea = lineas[i];
+      if (linea.length < 4 || linea.length > 55) continue;
+      if (reDescarta.test(linea) || reDireccion.test(linea)) continue;
       const letras = (linea.match(/[a-záéíóúñü]/gi) || []).length;
       const digitos = (linea.match(/\d/g) || []).length;
-      if (letras >= 4 && letras > digitos * 2 && linea.length <= 40 &&
-          !/factura|ticket|simplificada|fecha|tel[eé]fono|c\/|calle|avda|cif|nif/i.test(linea)) {
-        return limpiarNombre(linea);
-      }
+      if (letras < 4 || digitos > letras) continue;
+
+      let score = 1;
+      if (reSociedad.test(linea)) score += 4; // forma societaria: casi seguro que es el nombre
+      if (i === 0) score += 2;
+      else if (i <= 2) score += 1.5;
+      else if (i <= 5) score += 0.5;
+      if (letras >= 4 && linea === linea.toUpperCase()) score += 1; // las cabeceras suelen ir en mayúsculas
+      if (digitos === 0) score += 0.5;
+      const siguiente = lineas[i + 1] || '';
+      if (reDireccion.test(siguiente) || /\b(cif|nif)\b/i.test(siguiente)) score += 1.5; // debajo del nombre suele venir la dirección o el CIF
+      if (/\b(cif|nif)\s*[:\.]/i.test(linea)) score -= 2;
+
+      if (score > mejorScore) { mejorScore = score; mejorLinea = linea; }
     }
-    return '';
+    return mejorLinea ? limpiarNombre(mejorLinea) : '';
   }
 
   function limpiarNombre(s) {
-    return s.replace(/[*#|_~=]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
+    return s
+      .replace(/\b(c\.?i\.?f|n\.?i\.?f)\.?\s*:?\s*[A-Z0-9\-\.\s]*$/i, ' ') // quitar "CIF: B123…" pegado al nombre
+      .replace(/[*#|_~=]+/g, ' ')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
   }
 
   /* Analiza el texto completo de una factura. */

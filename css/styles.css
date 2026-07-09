@@ -453,6 +453,52 @@ select { appearance: none; -webkit-appearance: none; }
 }
 .card.prevision h2 { color: var(--oro); }
 
+/* Desplegable de proveedores (sustituye al datalist, que falla en móvil) */
+.combo { position: relative; }
+.combo input { padding-right: 48px; }
+.combo-toggle {
+  position: absolute;
+  top: 0; right: 0;
+  height: 100%;
+  width: 44px;
+  border: none;
+  border-left: 1.5px solid var(--borde);
+  background: transparent;
+  color: var(--texto-sec);
+  font-size: 1rem;
+  cursor: pointer;
+  border-radius: 0 10px 10px 0;
+}
+.combo-toggle:active { background: rgba(215,219,226,.08); }
+.combo-lista {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0; right: 0;
+  background: var(--panel-2);
+  border: 1.5px solid var(--plata-osc);
+  border-radius: 10px;
+  max-height: 240px;
+  overflow-y: auto;
+  z-index: 90;
+  box-shadow: 0 8px 24px rgba(0,0,0,.55);
+}
+.combo-item {
+  display: block;
+  width: 100%;
+  padding: 12px 14px;
+  border: none;
+  border-bottom: 1px solid var(--borde);
+  background: transparent;
+  color: var(--texto);
+  font-family: inherit;
+  font-size: .95rem;
+  text-align: left;
+  cursor: pointer;
+}
+.combo-item:last-child { border-bottom: none; }
+.combo-item:active { background: #26262c; }
+.combo-vacio { padding: 12px 14px; color: var(--texto-sec); font-size: .85rem; }
+
 /* Reconocimiento de proveedor */
 .prov-status {
   margin-top: 6px;

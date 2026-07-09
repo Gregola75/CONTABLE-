@@ -339,7 +339,10 @@
     }
     $('#factura-progress').classList.add('hidden');
 
-    const conocidos = await DB.proveedores();
+    // Fichas completas (con NIF) primero: permiten reconocer al proveedor
+    // por su NIF aunque el nombre venga distinto en la factura
+    const [fichas, nombres] = await Promise.all([DB.provTodos(), DB.proveedores()]);
+    const conocidos = [...fichas, ...nombres];
     const datos = OCR.analizarFactura(texto, conocidos);
 
     registroEditando = null; // foto nueva = registro nuevo
@@ -1173,9 +1176,56 @@
 
   /* ---------- Comunes ---------- */
 
+  /* Nombres para los desplegables de proveedor (facturas y buscador). */
+  let nombresProveedores = [];
+
   async function cargarProveedores() {
-    const lista = await DB.proveedores();
-    $('#proveedores-list').innerHTML = lista.map(p => `<option value="${escapar(p)}">`).join('');
+    nombresProveedores = await DB.proveedores();
+  }
+
+  function normalizarBusqueda(s) {
+    return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  }
+
+  /* Desplegable propio de proveedores: el <datalist> nativo no se abre
+     bien en muchos móviles y solo sugiere por el principio del texto. */
+  function crearComboProveedores(idInput) {
+    const input = $(idInput);
+    const wrap = input.closest('.combo');
+    const listaEl = wrap.querySelector('.combo-lista');
+    const toggle = wrap.querySelector('.combo-toggle');
+
+    function abrir(filtro) {
+      const f = normalizarBusqueda(filtro);
+      const items = f
+        ? nombresProveedores.filter(n => normalizarBusqueda(n).includes(f))
+        : nombresProveedores;
+      if (!items.length) {
+        listaEl.innerHTML = `<div class="combo-vacio">${nombresProveedores.length
+          ? 'Ningún proveedor coincide con lo escrito.'
+          : 'Aún no tienes proveedores guardados. Se irán añadiendo con tus facturas.'}</div>`;
+      } else {
+        listaEl.innerHTML = items.map(n => `<button type="button" class="combo-item">${escapar(n)}</button>`).join('');
+      }
+      listaEl.classList.remove('hidden');
+    }
+    const cerrar = () => listaEl.classList.add('hidden');
+
+    toggle.addEventListener('click', () => {
+      if (listaEl.classList.contains('hidden')) abrir(''); // el botón enseña SIEMPRE la lista completa
+      else cerrar();
+    });
+    input.addEventListener('input', () => abrir(input.value.trim()));
+    input.addEventListener('focus', () => abrir(input.value.trim()));
+    listaEl.addEventListener('mousedown', (e) => e.preventDefault()); // no robar el foco al input
+    listaEl.addEventListener('click', (e) => {
+      const item = e.target.closest('.combo-item');
+      if (!item) return;
+      input.value = item.textContent;
+      cerrar();
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    document.addEventListener('click', (e) => { if (!wrap.contains(e.target)) cerrar(); });
   }
 
   function escapar(s) {
@@ -1189,6 +1239,8 @@
   }
 
   mostrarBloqueo(); // si hay PIN, la app arranca bloqueada
+  crearComboProveedores('#f-proveedor');
+  crearComboProveedores('#q-proveedor');
   iniciarSelectorAnio();
   pintarConfig();
   pintarSeguridad();
