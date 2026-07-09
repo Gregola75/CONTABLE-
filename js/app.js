@@ -85,7 +85,7 @@
       $$('.tab-panel').forEach(p => p.classList.remove('active'));
       btn.classList.add('active');
       $('#tab-' + btn.dataset.tab).classList.add('active');
-      if (btn.dataset.tab === 'ajustes') { pintarStats(); pintarSeguridad(); }
+      if (btn.dataset.tab === 'ajustes') { pintarStats(); pintarSeguridad(); pintarNube(); }
       if (btn.dataset.tab === 'consultar') buscar();
     });
   });
@@ -1165,6 +1165,53 @@
     }
   });
 
+  /* ---------- NUBE: sesión y estado de sincronización ---------- */
+
+  function pintarNube() {
+    const est = NUBE.estado();
+    const linea = $('#nube-estado');
+    const det = $('#nube-detalle');
+
+    if (!est.disponible) {
+      linea.innerHTML = '<span>Nube</span><strong class="txt-sec">Sin conexión ahora mismo</strong>';
+      $('#nube-entrar').classList.add('hidden');
+      $('#nube-salir').classList.add('hidden');
+      det.classList.add('hidden');
+      return;
+    }
+    const textos = {
+      desconectado: ['txt-sec', '⚪ No conectada'],
+      conectando: ['txt-sec', '⏳ Conectando…'],
+      sincronizando: ['txt-sec', '🔄 Sincronizando…'],
+      sincronizado: ['txt-ok', '✅ Sincronizada'],
+      error: ['txt-bad', '⚠️ Problema al sincronizar']
+    };
+    const [clase, texto] = textos[est.estado] || textos.desconectado;
+    linea.innerHTML = `<span>${est.conectado ? escapar(est.correo) : 'Nube'}</span><strong class="${clase}">${texto}</strong>`;
+    $('#nube-entrar').classList.toggle('hidden', est.conectado);
+    $('#nube-salir').classList.toggle('hidden', !est.conectado);
+    det.textContent = est.detalle || '';
+    det.classList.toggle('hidden', !est.detalle);
+  }
+
+  $('#nube-entrar').addEventListener('click', async () => {
+    try {
+      await NUBE.entrar();
+      toast('☁️ Nube conectada. Tus datos se están sincronizando.');
+    } catch (e) {
+      console.error(e);
+      toast('⚠️ ' + e.message, 5000);
+    }
+    pintarNube();
+  });
+
+  $('#nube-salir').addEventListener('click', async () => {
+    if (!confirm('¿Desconectar la nube en este dispositivo?\n\nLos datos guardados aquí NO se borran; simplemente dejarán de sincronizarse hasta que vuelvas a entrar.')) return;
+    await NUBE.salir();
+    pintarNube();
+    toast('Nube desconectada en este dispositivo.');
+  });
+
   /* ---------- SEGURIDAD: PIN de acceso ---------- */
 
   let intentosFallidos = 0;
@@ -1400,4 +1447,15 @@
   pintarRecientes();
   pintarProveedores();
   cargarProveedores();
+
+  // Nube: al cambiar la sesión o llegar datos de otro dispositivo,
+  // refrescar las listas en pantalla
+  NUBE.iniciar(() => {
+    pintarNube();
+    pintarRecientes();
+    pintarProveedores();
+    cargarProveedores();
+    if (document.querySelector('.tab[data-tab="consultar"]').classList.contains('active')) buscar();
+  });
+  pintarNube();
 })();

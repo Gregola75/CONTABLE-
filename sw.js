@@ -7,13 +7,14 @@
    - Recursos externos (OCR, fuentes, pdf.js): caché primero, porque están
      versionados en su URL y no cambian. */
 
-const CACHE = 'contable-v16';
+const CACHE = 'contable-v17';
 const ARCHIVOS = [
   './',
   './index.html',
   './css/styles.css',
   './js/seguridad.js',
   './js/db.js',
+  './js/nube.js',
   './js/ocr.js',
   './js/report.js',
   './js/app.js',
@@ -68,7 +69,8 @@ self.addEventListener('fetch', (e) => {
       if (res) return res;
       return fetch(e.request).then(resp => {
         if (resp.ok && (url.href.includes('jsdelivr') || url.href.includes('tesseract') ||
-            url.href.includes('fonts.googleapis') || url.href.includes('fonts.gstatic'))) {
+            url.href.includes('fonts.googleapis') || url.href.includes('fonts.gstatic') ||
+            url.href.includes('gstatic.com/firebasejs'))) {
           const clon = resp.clone();
           caches.open(CACHE).then(c => c.put(e.request, clon));
         }

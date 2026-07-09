@@ -4,7 +4,7 @@
 
 const DB = (() => {
   const NOMBRE = 'contable-db';
-  const VERSION = 2;
+  const VERSION = 3;
   let db = null;
 
   function abrir() {
@@ -29,6 +29,24 @@ const DB = (() => {
     });
   }
 
+  /* ---------- Sincronización: identidad estable y avisos de cambio ----------
+     Cada registro/proveedor lleva:
+     - sid: identificador único que no cambia entre dispositivos
+     - mod: fecha-hora de la última modificación (para resolver conflictos)
+     Cuando algo cambia en local se avisa (js/nube.js escucha para subirlo).
+     Los cambios que VIENEN de la nube se aplican con { remoto: true } para
+     no volver a subirlos en bucle. */
+
+  const nuevoSid = () => Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+
+  let alCambioFn = null;
+  const alCambio = (fn) => { alCambioFn = fn; };
+  function avisar(evento, dato) {
+    if (alCambioFn) {
+      try { alCambioFn(evento, dato); } catch (e) { console.error(e); }
+    }
+  }
+
   function pedir(almacen, modo, fn) {
     return abrir().then(d => new Promise((resolve, reject) => {
       const req = fn(d.transaction(almacen, modo).objectStore(almacen));
@@ -42,8 +60,18 @@ const DB = (() => {
        proveedor, nif, categoria, total, efectivo, tarjeta, notas,
        imagen: Blob|null, ocrTexto, creado: ISOString } */
 
-  const guardar = (registro) => pedir('registros', 'readwrite', s => s.put(registro));
-  const borrar = (id) => pedir('registros', 'readwrite', s => s.delete(id));
+  async function guardar(registro, opts = {}) {
+    if (!registro.sid) registro.sid = nuevoSid();
+    if (!opts.remoto) registro.mod = new Date().toISOString();
+    const id = await pedir('registros', 'readwrite', s => s.put(registro));
+    if (!opts.remoto) avisar('registro', { ...registro, id });
+    return id;
+  }
+  async function borrar(id, opts = {}) {
+    const r = await obtener(id);
+    await pedir('registros', 'readwrite', s => s.delete(id));
+    if (!opts.remoto && r) avisar('borrar-registro', r);
+  }
   const obtener = (id) => pedir('registros', 'readonly', s => s.get(id)).then(r => r || null);
   const todos = () => pedir('registros', 'readonly', s => s.getAll()).then(r => r || []);
 
@@ -65,8 +93,18 @@ const DB = (() => {
   /* ==================== PROVEEDORES ====================
      { id, nombre, nif, categoria, creado } */
 
-  const provGuardar = (p) => pedir('proveedores', 'readwrite', s => s.put(p));
-  const provBorrar = (id) => pedir('proveedores', 'readwrite', s => s.delete(id));
+  async function provGuardar(p, opts = {}) {
+    if (!p.sid) p.sid = nuevoSid();
+    if (!opts.remoto) p.mod = new Date().toISOString();
+    const id = await pedir('proveedores', 'readwrite', s => s.put(p));
+    if (!opts.remoto) avisar('proveedor', { ...p, id });
+    return id;
+  }
+  async function provBorrar(id, opts = {}) {
+    const p = await pedir('proveedores', 'readonly', s => s.get(id));
+    await pedir('proveedores', 'readwrite', s => s.delete(id));
+    if (!opts.remoto && p) avisar('borrar-proveedor', p);
+  }
   const provTodos = () => pedir('proveedores', 'readonly', s => s.getAll())
     .then(r => (r || []).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')));
 
@@ -121,9 +159,13 @@ const DB = (() => {
       throw new Error('El archivo no es una copia de seguridad válida de CONTABLE.');
     }
     let n = 0;
+    // No duplicar lo que ya está (mismo sid): restaurar una copia es seguro
+    // aunque parte de los datos ya existan o ya estén sincronizados
+    const sidsExistentes = new Set((await todos()).map(r => r.sid).filter(Boolean));
     for (const r of datos.registros) {
       const copia = { ...r };
       delete copia.id; // evitar choques de ids: se reasignan
+      if (copia.sid && sidsExistentes.has(copia.sid)) continue;
       if (typeof copia.imagen === 'string' && copia.imagen.startsWith('data:')) {
         copia.imagen = dataURLABlob(copia.imagen);
       }
@@ -149,6 +191,6 @@ const DB = (() => {
   return {
     guardar, borrar, obtener, todos, buscar, proveedores,
     provGuardar, provBorrar, provTodos,
-    exportarTodo, importarTodo
+    exportarTodo, importarTodo, alCambio
   };
 })();

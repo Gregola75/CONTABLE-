@@ -449,6 +449,17 @@
   </div>
 
   <div class="card">
+    <h2>☁️ Nube: tus datos en cualquier dispositivo</h2>
+    <p class="hint">Entra con tu cuenta de Google y tus facturas se guardarán también en tu nube privada. Si cambias de móvil o te lo roban, entra con la misma cuenta en el dispositivo nuevo y lo recuperas todo. Solo tu cuenta puede ver estos datos.</p>
+    <div id="nube-estado" class="stat-linea"></div>
+    <div id="nube-detalle" class="hint hidden" style="margin-top:8px"></div>
+    <div class="form-actions">
+      <button class="btn btn-primary hidden" id="nube-entrar">🔑 Entrar con Google</button>
+      <button class="btn btn-secondary hidden" id="nube-salir">Desconectar la nube en este dispositivo</button>
+    </div>
+  </div>
+
+  <div class="card">
     <h2>Copia de seguridad</h2>
     <p class="hint">Tus datos se guardan solo en este dispositivo. Haz copias de seguridad de vez en cuando y guárdalas en otro sitio (Drive, correo, ordenador…). Puedes protegerlas con contraseña: así nadie podrá abrirlas aunque llegue al archivo.</p>
     <div class="form-actions">
@@ -523,8 +534,12 @@
 <div id="toast" class="toast hidden"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
 <script src="js/seguridad.js"></script>
 <script src="js/db.js"></script>
+<script src="js/nube.js"></script>
 <script src="js/ocr.js"></script>
 <script src="js/report.js"></script>
 <script src="js/app.js"></script>
