@@ -819,6 +819,28 @@
             : `<div style="display:flex;align-items:center;justify-content:center;height:100%;font-size:2rem">${r.tipo === 'factura' ? '📄' : '💰'}</div>`}
           <div class="pie">${escapar(r.tipo === 'factura' ? (r.proveedor || 'Factura') : 'Cierre')}<br>${fmtFecha(r.fecha)} · ${INFORME.eur(r.total)}</div>
         </div>`).join('');
+    } else if ($('#q-orden').value === 'proveedor') {
+      // Agrupadas por proveedor: cabecera con número de facturas y total
+      // de cada uno; dentro de cada grupo siguen ordenadas por fecha.
+      div.className = 'lista';
+      const grupos = new Map();
+      for (const r of ultimosResultados) {
+        const clave = r.tipo === 'factura' ? (r.proveedor || 'Sin proveedor') : '💰 Cierres de caja (ingresos)';
+        if (!grupos.has(clave)) grupos.set(clave, []);
+        grupos.get(clave).push(r);
+      }
+      const esCierres = (n) => n.startsWith('💰');
+      const nombres = [...grupos.keys()].sort((a, b) =>
+        (esCierres(a) ? 1 : 0) - (esCierres(b) ? 1 : 0) || a.localeCompare(b, 'es'));
+      div.innerHTML = nombres.map(nombre => {
+        const items = grupos.get(nombre);
+        const total = items.reduce((s, r) => s + (r.total || 0), 0);
+        return `
+          <div class="grupo-cab">
+            <span class="grupo-nombre">${escapar(nombre)}</span>
+            <span class="grupo-resumen">${items.length} · ${INFORME.eur(total)}</span>
+          </div>` + items.map(itemHTML).join('');
+      }).join('');
     } else {
       div.className = 'lista';
       div.innerHTML = ultimosResultados.map(itemHTML).join('');
@@ -827,13 +849,26 @@
   }
 
   $('#q-buscar').addEventListener('click', buscar);
+  $('#q-orden').addEventListener('change', buscar);
   $('#q-limpiar').addEventListener('click', () => {
     $('#q-tipo').value = 'todos';
     $('#q-proveedor').value = '';
     $('#q-desde').value = '';
     $('#q-hasta').value = '';
+    $('#q-orden').value = 'fecha';
     buscar();
   });
+
+  /* "Ver todas": salta a Consultar con el filtro del tipo ya puesto */
+  function verTodo(tipo) {
+    $('#q-tipo').value = tipo;
+    $('#q-proveedor').value = '';
+    $('#q-desde').value = '';
+    $('#q-hasta').value = '';
+    document.querySelector('.tab[data-tab="consultar"]').click(); // la pestaña ya lanza la búsqueda
+  }
+  $('#ver-todas-facturas').addEventListener('click', () => verTodo('factura'));
+  $('#ver-todos-cierres').addEventListener('click', () => verTodo('cierre'));
   $('#vista-lista').addEventListener('click', () => {
     vistaFotos = false;
     $('#vista-lista').classList.add('active');

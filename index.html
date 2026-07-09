@@ -183,6 +183,7 @@
   <div class="card">
     <h2>Últimas facturas</h2>
     <div id="facturas-recientes" class="lista"></div>
+    <button class="btn btn-secondary btn-big" id="ver-todas-facturas" style="margin-top:10px">📋 Ver todas las facturas</button>
   </div>
 
   <div class="card">
@@ -316,6 +317,7 @@
   <div class="card">
     <h2>Últimos cierres</h2>
     <div id="cierres-recientes" class="lista"></div>
+    <button class="btn btn-secondary btn-big" id="ver-todos-cierres" style="margin-top:10px">📋 Ver todos los cierres</button>
   </div>
 </section>
 
@@ -350,6 +352,13 @@
         <label for="q-hasta">Hasta</label>
         <input type="date" id="q-hasta">
       </div>
+    </div>
+    <div class="form-group">
+      <label for="q-orden">Ordenar</label>
+      <select id="q-orden">
+        <option value="fecha">Por fecha (recientes primero)</option>
+        <option value="proveedor">Agrupadas por proveedor</option>
+      </select>
     </div>
     <div class="form-actions">
       <button class="btn btn-primary" id="q-buscar">🔍 Buscar</button>

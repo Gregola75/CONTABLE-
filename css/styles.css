@@ -261,6 +261,38 @@ select { appearance: none; -webkit-appearance: none; }
 
 .vacio { text-align: center; color: var(--texto-sec); font-size: .88rem; padding: 16px; }
 
+/* Cabecera de grupo (resultados agrupados por proveedor) */
+.grupo-cab {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 8px 11px;
+  background: var(--panel-2);
+  border: 1px solid var(--plata-osc);
+  border-radius: 8px;
+}
+.grupo-cab:first-child { margin-top: 0; }
+.grupo-nombre {
+  font-weight: 800;
+  font-size: .82rem;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+  color: var(--plata);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.grupo-resumen {
+  font-size: .8rem;
+  font-weight: 700;
+  color: var(--texto-sec);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Vista de fotos */
 .galeria {
   display: grid;
