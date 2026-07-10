@@ -317,42 +317,51 @@
 
   /* ---------- FACTURAS ---------- */
 
+  /* Prepara el formulario de factura. Con foto/PDF lee la imagen (OCR);
+     sin archivo (anotar a mano) abre el formulario vacío. */
   async function procesarFactura(file) {
-    if (!file) return;
-    $('#factura-progress').classList.remove('hidden');
     $('#factura-form-card').classList.add('hidden');
-    $('#factura-progress-text').textContent = 'Leyendo el documento… puede tardar unos segundos';
 
-    try {
-      file = await archivoAImagen(file);
-    } catch (e) {
-      console.error(e);
-      $('#factura-progress').classList.add('hidden');
-      toast('⚠️ ' + (e.message || 'No se pudo abrir el PDF.'));
-      return;
+    if (file) {
+      $('#factura-progress').classList.remove('hidden');
+      $('#factura-progress-text').textContent = 'Leyendo el documento… puede tardar unos segundos';
+      try {
+        file = await archivoAImagen(file);
+      } catch (e) {
+        console.error(e);
+        $('#factura-progress').classList.add('hidden');
+        toast('⚠️ ' + (e.message || 'No se pudo abrir el PDF.'));
+        return;
+      }
     }
 
     let texto = '';
-    try {
-      texto = await OCR.leerImagen(file, (p) => {
-        $('#factura-progress-text').textContent = `Leyendo la imagen… ${p}%`;
-      });
-    } catch (e) {
-      console.error(e);
-      toast('⚠️ No se pudo leer la imagen automáticamente. Rellena los datos a mano.');
+    if (file) {
+      try {
+        texto = await OCR.leerImagen(file, (p) => {
+          $('#factura-progress-text').textContent = `Leyendo la imagen… ${p}%`;
+        });
+      } catch (e) {
+        console.error(e);
+        toast('⚠️ No se pudo leer la imagen automáticamente. Rellena los datos a mano.');
+      }
+      $('#factura-progress').classList.add('hidden');
     }
-    $('#factura-progress').classList.add('hidden');
 
     // Fichas completas (con NIF) primero: permiten reconocer al proveedor
     // por su NIF aunque el nombre venga distinto en la factura
     const [fichas, nombres] = await Promise.all([DB.provTodos(), DB.proveedores()]);
     const conocidos = [...fichas, ...nombres];
-    const datos = OCR.analizarFactura(texto, conocidos);
+    const datos = file ? OCR.analizarFactura(texto, conocidos) : {};
 
-    registroEditando = null; // foto nueva = registro nuevo
-    facturaPendiente = { imagen: file, ocrTexto: texto };
-    $('#factura-preview').classList.remove('hidden');
-    $('#factura-preview').src = urlImagen(file);
+    registroEditando = null; // anotación nueva = registro nuevo
+    facturaPendiente = { imagen: file || null, ocrTexto: texto };
+    if (file) {
+      $('#factura-preview').classList.remove('hidden');
+      $('#factura-preview').src = urlImagen(file);
+    } else {
+      $('#factura-preview').classList.add('hidden');
+    }
     $('#f-proveedor').value = datos.proveedor || '';
     $('#f-nif').value = datos.nif || '';
     $('#f-fecha').value = datos.fecha || hoyISO();
@@ -367,14 +376,16 @@
     $('#f-iva10').value = '';
     $('#f-iva4').value = '';
     $('#f-varios-wrap').classList.toggle('hidden', datos.ivaTipo !== 'varios');
-    $('#f-ocr-text').textContent = texto || '(no se detectó texto)';
+    $('#f-ocr-text').textContent = texto || (file ? '(no se detectó texto)' : '(anotada a mano, sin foto)');
     $('#factura-form-card').classList.remove('hidden');
     $('#factura-form-card').scrollIntoView({ behavior: 'smooth' });
 
     // Comprobar si el proveedor detectado ya está dado de alta
     await actualizarEstadoProveedor();
 
-    if (datos.proveedor || datos.total != null) {
+    if (!file) {
+      $('#f-proveedor').focus();
+    } else if (datos.proveedor || datos.total != null) {
       toast('✅ Datos detectados. Revísalos antes de guardar.');
     } else {
       toast('No se detectaron datos claros. Rellénalos a mano, la foto se guardará igualmente.');
@@ -383,6 +394,7 @@
 
   $('#factura-camera').addEventListener('change', (e) => { procesarFactura(e.target.files[0]); e.target.value = ''; });
   $('#factura-file').addEventListener('change', (e) => { procesarFactura(e.target.files[0]); e.target.value = ''; });
+  $('#factura-manual').addEventListener('click', () => procesarFactura(null));
 
   /* Autocálculo del IVA: al cambiar el total o el tipo, se recalculan
      la base y la cuota (sin pisar valores escritos a mano por el usuario). */
