@@ -11,6 +11,18 @@ const DB = (() => {
     return new Promise((resolve, reject) => {
       if (db) return resolve(db);
       const req = indexedDB.open(NOMBRE, VERSION);
+
+      // Si otra pestaña vieja de la app mantiene la base de datos abierta,
+      // la actualización de versión se queda bloqueada para siempre y nada
+      // se guarda. Avisamos en claro en vez de colgarnos en silencio.
+      const timeout = setTimeout(() => {
+        reject(new Error('La base de datos está bloqueada por otra pestaña de la app. Cierra las demás pestañas (o reinicia el navegador) y vuelve a intentarlo.'));
+      }, 8000);
+      req.onblocked = () => {
+        clearTimeout(timeout);
+        reject(new Error('Hay otra pestaña de la app abierta con una versión antigua. Ciérrala (o reinicia el navegador) y vuelve a intentarlo.'));
+      };
+
       req.onupgradeneeded = (e) => {
         const d = e.target.result;
         if (!d.objectStoreNames.contains('registros')) {
@@ -24,8 +36,15 @@ const DB = (() => {
           store.createIndex('nombre', 'nombre');
         }
       };
-      req.onsuccess = () => { db = req.result; resolve(db); };
-      req.onerror = () => reject(req.error);
+      req.onsuccess = () => {
+        clearTimeout(timeout);
+        db = req.result;
+        // Si en el futuro otra pestaña necesita subir de versión, soltar la
+        // conexión para no bloquearla (esta pestaña reabrirá al siguiente uso)
+        db.onversionchange = () => { try { db.close(); } catch (e) { /* nada */ } db = null; };
+        resolve(db);
+      };
+      req.onerror = () => { clearTimeout(timeout); reject(req.error); };
     });
   }
 

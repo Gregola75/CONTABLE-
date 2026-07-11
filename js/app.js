@@ -226,7 +226,7 @@
     $('#prov-form').classList.add('hidden');
   });
 
-  $('#prov-guardar').addEventListener('click', async () => {
+  $('#prov-guardar').addEventListener('click', guardarConAviso(async () => {
     const nombre = $('#p-nombre').value.trim();
     const nif = $('#p-nif').value.trim().toUpperCase();
     if (!nombre) { toast('⚠️ El nombre es obligatorio.'); return; }
@@ -259,7 +259,7 @@
     toast('💾 Proveedor guardado.');
     pintarProveedores();
     cargarProveedores();
-  });
+  }));
 
   async function pintarProveedores() {
     const lista = await DB.provTodos();
@@ -350,8 +350,14 @@
 
     // Fichas completas (con NIF) primero: permiten reconocer al proveedor
     // por su NIF aunque el nombre venga distinto en la factura
-    const [fichas, nombres] = await Promise.all([DB.provTodos(), DB.proveedores()]);
-    const conocidos = [...fichas, ...nombres];
+    let conocidos = [];
+    try {
+      const [fichas, nombres] = await Promise.all([DB.provTodos(), DB.proveedores()]);
+      conocidos = [...fichas, ...nombres];
+    } catch (e) {
+      console.error(e);
+      toast('⚠️ ' + (e.message || 'No se pudo acceder a los datos guardados.'), 6000);
+    }
     const datos = file ? OCR.analizarFactura(texto, conocidos) : {};
 
     registroEditando = null; // anotación nueva = registro nuevo
@@ -442,7 +448,15 @@
     }
   });
 
-  $('#factura-guardar').addEventListener('click', async () => {
+  /* Guardar con aviso visible si algo falla (nunca fallar en silencio) */
+  function guardarConAviso(fn) {
+    return () => fn().catch((e) => {
+      console.error(e);
+      toast('⚠️ No se pudo guardar: ' + (e.message || e), 7000);
+    });
+  }
+
+  $('#factura-guardar').addEventListener('click', guardarConAviso(async () => {
     const total = parseFloat($('#f-total').value);
     const fecha = $('#f-fecha').value;
     if (!fecha) { toast('⚠️ Falta la fecha.'); return; }
@@ -498,7 +512,7 @@
     buscar();
     pintarRecientes();
     cargarProveedores();
-  });
+  }));
 
   $('#factura-cancelar').addEventListener('click', () => {
     registroEditando = null;
@@ -575,7 +589,7 @@
     $('#c-mes-wrap').classList.toggle('hidden', !esMes);
   });
 
-  $('#cierre-guardar').addEventListener('click', async () => {
+  $('#cierre-guardar').addEventListener('click', guardarConAviso(async () => {
     const total = parseFloat($('#c-total').value);
     const esMes = $('#c-alcance').value === 'mes';
     if (isNaN(total) || total < 0) { toast('⚠️ Pon el total de ventas.'); return; }
@@ -633,7 +647,7 @@
     toast(eraEdicion ? '✏️ Cierre corregido.' : '💾 Cierre guardado.');
     pintarRecientes();
     buscar();
-  });
+  }));
 
   $('#cierre-cancelar').addEventListener('click', () => {
     registroEditando = null;

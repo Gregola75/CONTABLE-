@@ -13,6 +13,9 @@ const OCR = (() => {
           }
         }
       });
+      // Si falla la descarga del lector (mala cobertura), permitir reintentar
+      // en la siguiente foto en vez de quedarse roto para siempre
+      workerPromise.catch(() => { workerPromise = null; });
     }
     return workerPromise;
   }
@@ -50,10 +53,17 @@ const OCR = (() => {
   }
 
   async function leerImagen(blob, onProgreso) {
-    const worker = await obtenerWorker(onProgreso);
-    const canvas = await prepararImagen(blob);
-    const { data } = await worker.recognize(canvas);
-    return data.text || '';
+    const trabajo = (async () => {
+      const worker = await obtenerWorker(onProgreso);
+      const canvas = await prepararImagen(blob);
+      const { data } = await worker.recognize(canvas);
+      return data.text || '';
+    })();
+    // Tiempo límite: si el lector no responde (descarga lenta, cuelgue…),
+    // no dejar la app clavada en "Leyendo la imagen…" para siempre
+    const limite = new Promise((_, reject) => setTimeout(() =>
+      reject(new Error('La lectura automática tardó demasiado. La foto se guarda igual: rellena los datos a mano.')), 90000));
+    return Promise.race([trabajo, limite]);
   }
 
   /* ---------- Detección de datos en el texto ---------- */
