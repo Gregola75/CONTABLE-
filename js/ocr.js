@@ -525,6 +525,28 @@ const OCR = (() => {
     };
   }
 
+  /* Fecha de un cierre de caja. Los tickets Z traen fecha de APERTURA,
+     de CIERRE y de IMPRESIÓN: el día de la venta es el de APERTURA
+     (una caja abierta el 11 que se cierra de madrugada el 12 es venta
+     del 11). Se prefiere la de apertura y, a igualdad, la más antigua. */
+  function detectarFechaCierre(texto) {
+    const hoy = new Date();
+    const candidatas = []; // { f, peso }
+    for (const linea of texto.split('\n')) {
+      let peso = 0;
+      if (/apertura|abierto|inicio/i.test(linea)) peso = 3;
+      else if (/impres|emitido|emision|emisión/i.test(linea)) peso = -1;
+      else if (/cierre|\bz\b/i.test(linea)) peso = 1;
+      for (const f of fechasDeLinea(linea, hoy)) candidatas.push({ f, peso });
+    }
+    if (!candidatas.length) return null;
+    const maxPeso = Math.max(...candidatas.map(c => c.peso));
+    const pool = candidatas.filter(c => c.peso === maxPeso).map(c => c.f);
+    pool.sort((a, b) => a - b); // la más antigua primero (apertura ≤ cierre ≤ impresión)
+    const noFuturas = pool.filter(f => f <= hoy);
+    return aISO(noFuturas[0] || pool[0]);
+  }
+
   /* Analiza el texto de un cierre de caja (ticket Z). */
   function analizarCierre(texto) {
     const lineas = texto.split('\n');
@@ -554,7 +576,7 @@ const OCR = (() => {
       total = Math.round((efectivo + tarjeta) * 100) / 100;
     }
 
-    return { fecha: detectarFecha(texto), total, efectivo, tarjeta };
+    return { fecha: detectarFechaCierre(texto), total, efectivo, tarjeta };
   }
 
   return { leerImagen, analizarFactura, analizarCierre, normalizarNumero };
