@@ -7,7 +7,7 @@
    - Recursos externos (OCR, fuentes, pdf.js): caché primero, porque están
      versionados en su URL y no cambian. */
 
-const CACHE = 'contable-v23';
+const CACHE = 'contable-v24';
 const ARCHIVOS = [
   './',
   './index.html',

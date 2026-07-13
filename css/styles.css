@@ -689,6 +689,27 @@ select { appearance: none; -webkit-appearance: none; }
   justify-content: space-between;
   gap: 10px;
 }
+.per-toggle { cursor: pointer; margin: -12px; padding: 12px; border-radius: 10px; }
+.per-toggle:active { background: #26262c; }
+.per-resumen-cab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+  font-size: .88rem;
+}
+.per-flecha { color: var(--texto-sec); font-size: .7rem; }
+.per-body { margin-top: 16px; }
+.per-seccion {
+  font-size: .74rem;
+  font-weight: 800;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--plata);
+  margin: 14px 0 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--borde);
+}
 .cal {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
@@ -717,6 +738,18 @@ select { appearance: none; -webkit-appearance: none; }
   color: #0a0a0c;
   font-weight: 800;
   border-color: transparent;
+}
+.cal .dia.falta {
+  background: #2a1414;
+  color: var(--bad);
+  border-color: #4a2323;
+  font-weight: 700;
+}
+.cal .dia:disabled {
+  background: #000;
+  color: #2e2e34;
+  border-color: #17171b;
+  cursor: not-allowed;
 }
 .cal .dia { position: relative; }
 .cal .dia.con-nota::after {

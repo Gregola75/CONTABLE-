@@ -1131,6 +1131,7 @@
   /* ---------- PERSONAL: sueldos, adelantos y días trabajados ---------- */
 
   let perEditando = null; // trabajador en edición
+  const perAbiertos = new Set(); // fichas de empleado desplegadas
 
   function mesPersonal() {
     return $('#per-mes').value || hoyISO().slice(0, 7);
@@ -1177,16 +1178,21 @@
     const [a, m] = mes.split('-').map(Number);
     const nDias = new Date(a, m, 0).getDate();
     const primerDiaSemana = (new Date(a, m - 1, 1).getDay() + 6) % 7; // lunes = 0
-    const set = new Set((t.dias || []).filter(d => d.startsWith(mes)));
+    const trabajados = new Set((t.dias || []).filter(d => d.startsWith(mes)));
+    const faltas = new Set((t.faltas || []).filter(d => d.startsWith(mes)));
     const conNota = new Set((t.notasDias || []).map(n => n.fecha).filter(f => (f || '').startsWith(mes)));
     const cab = ['L', 'M', 'X', 'J', 'V', 'S', 'D'].map(d => `<span class="cal-cab">${d}</span>`).join('');
     let celdas = '';
     for (let i = 0; i < primerDiaSemana; i++) celdas += '<span></span>';
     for (let d = 1; d <= nDias; d++) {
       const fecha = `${mes}-${String(d).padStart(2, '0')}`;
-      celdas += `<button type="button" class="dia ${set.has(fecha) ? 'on' : ''} ${conNota.has(fecha) ? 'con-nota' : ''}" data-sid="${t.sid}" data-fecha="${fecha}">${d}</button>`;
+      // Antes de su inicio (o después de su baja) no trabajaba: en negro, sin poder tocar
+      const bloqueado = (t.inicio && fecha < t.inicio) || (t.fin && fecha > t.fin);
+      const clase = trabajados.has(fecha) ? 'on' : (faltas.has(fecha) ? 'falta' : '');
+      celdas += `<button type="button" class="dia ${clase} ${conNota.has(fecha) ? 'con-nota' : ''}"${bloqueado ? ' disabled' : ''} data-sid="${t.sid}" data-fecha="${fecha}">${d}</button>`;
     }
-    return `<div class="cal">${cab}${celdas}</div>`;
+    return `<div class="cal">${cab}${celdas}</div>
+      <p class="hint" style="margin:0 0 8px">1 toque: trabajó (claro) · 2 toques: faltó (rojo) · 3 toques: nada. En negro: aún no trabajaba.</p>`;
   }
 
   /* Colores de los trabajadores (paleta validada para el tema oscuro).
@@ -1338,10 +1344,11 @@
       const ventasT = ventasParaTrabajador(t, cierresMes, mes);
       const c = calcularMes(t, ventasT, pagosMes, mes);
       const inicioEnMes = t.inicio && t.inicio.slice(0, 7) === mes && t.inicio > mes + '-01';
+      const abierta = perAbiertos.has(t.sid);
 
       const comisionTxt = c.tramoActual
         ? `✅ Objetivo de ${INFORME.eur(c.tramoActual.objetivo)} alcanzado → ${c.tramoActual.porcentaje} % = <strong>${INFORME.eur(c.comision)}</strong>`
-        : (tramosDe(t).length ? 'Aún sin objetivo alcanzado: solo el fijo' : 'Sin comisiones pactadas');
+        : (tramosDe(t).length ? 'Aún sin objetivo alcanzado: solo el fijo pactado' : 'Sin comisiones pactadas');
       const notaProrrateo = inicioEnMes
         ? `<p class="hint" style="margin:2px 0 0">Sus ventas cuentan desde su inicio (${fmtFecha(t.inicio)}): ${INFORME.eur(ventasT)}.</p>` : '';
       const siguienteTxt = c.siguiente
@@ -1350,14 +1357,29 @@
 
       // Dado de baja pero aún sin abonar: finiquito total pendiente
       let bajaHTML = '';
+      let finiquito = null;
       if (t.fin) {
-        const finiquito = await pendienteTotal(t, pagosT);
+        finiquito = await pendienteTotal(t, pagosT);
         bajaHTML = `
           <div class="per-baja">
             <div>🚪 Dejó de trabajar el <strong>${fmtFecha(t.fin)}</strong></div>
             <div class="stat-linea"><span>${finiquito > 0 ? 'DEBES PAGARLE (todo lo pendiente)' : 'No le debes nada'}</span><strong class="${finiquito > 0 ? 'txt-bad' : 'txt-ok'}">${INFORME.eur(Math.max(0, finiquito))}</strong></div>
             <button class="btn btn-primary per-abonar" data-sid="${t.sid}">✔️ ${finiquito > 0 ? 'Abonar ' + INFORME.eur(finiquito) + ' y liquidar' : 'Marcar como liquidado'}</button>
           </div>`;
+      }
+
+      // Resumen para la cabecera de la ficha (visible siempre)
+      let resumenCab;
+      if (t.fin) {
+        resumenCab = finiquito > 0
+          ? `<strong class="txt-bad">Finiquito: ${INFORME.eur(finiquito)}</strong>`
+          : '<strong class="txt-ok">✓ Sin deuda</strong>';
+      } else if (c.pendiente > 0) {
+        resumenCab = `<strong class="txt-bad">Le debes ${INFORME.eur(c.pendiente)}</strong>`;
+      } else if (c.pendiente < 0) {
+        resumenCab = `<strong class="txt-sec">Adelantado ${INFORME.eur(-c.pendiente)}</strong>`;
+      } else {
+        resumenCab = '<strong class="txt-ok">✓ Al día</strong>';
       }
 
       const notasMes = (t.notasDias || []).map((n, idx) => ({ ...n, idx }))
@@ -1379,40 +1401,48 @@
 
       tarjetas.push(`
         <div class="prov-form per-card">
-          <div class="per-cab">
-            <div>
+          <div class="per-cab per-toggle" data-sid="${t.sid}">
+            <div style="min-width:0">
               <div class="stat-prov-nombre">${pdot(t, i)} ${escapar(t.nombre)}</div>
               ${t.inicio ? `<div class="stat-prov-nif">Trabaja desde el ${fmtFecha(t.inicio)}</div>` : ''}
             </div>
-            <button class="btn btn-small per-editar" data-id="${t.id}">✏️ Editar</button>
+            <div class="per-resumen-cab">${resumenCab}<span class="per-flecha">${abierta ? '▲' : '▼'}</span></div>
           </div>
-          ${bajaHTML}
-          <p class="hint" style="margin:4px 0 0">Días trabajados en el mes (toca para marcar / desmarcar):</p>
-          ${calendarioHTML(t, mes)}
-          <div class="form-row">
-            <div class="form-group"><input type="date" class="nota-fecha" value="${hoyISO()}"></div>
-            <div class="form-group"><input type="text" class="nota-texto" placeholder="Nota del día: qué pasó"></div>
-          </div>
-          <button class="btn btn-small nota-apuntar" data-sid="${t.sid}">📝 Apuntar nota del día</button>
-          ${notasHTML ? `<div style="margin-top:6px">${notasHTML}</div>` : ''}
-          <div class="stat-linea"><span>Fijo: ${c.dias.length} día${c.dias.length === 1 ? '' : 's'} × ${INFORME.eur((t.sueldoMensual || 0) / 30)}</span><strong>${INFORME.eur(c.fijo)}</strong></div>
-          <div class="stat-linea"><span>Comisión</span><span style="text-align:right">${comisionTxt}</span></div>
-          ${notaProrrateo}
-          ${siguienteTxt}
-          <div class="stat-linea"><span>Le corresponde este mes</span><strong>${INFORME.eur(c.devengado)}</strong></div>
-          <div class="stat-linea"><span>Ya le has dado (adelantos y pagos)</span><strong>${INFORME.eur(c.entregado)}</strong></div>
-          <div class="stat-linea per-pendiente ${c.pendiente > 0 ? '' : 'ok'}"><span>${c.pendiente >= 0 ? 'LE DEBES' : 'TE DEBE (adelantado de más)'}</span><strong>${INFORME.eur(Math.abs(c.pendiente))}</strong></div>
+          <div class="per-body ${abierta ? '' : 'hidden'}">
+            ${bajaHTML}
+            <p class="per-seccion">📅 Días del mes</p>
+            ${calendarioHTML(t, mes)}
+            <div class="stat-linea"><span>Fijo: ${c.dias.length} día${c.dias.length === 1 ? '' : 's'} × ${INFORME.eur((t.sueldoMensual || 0) / 30)}</span><strong>${INFORME.eur(c.fijo)}</strong></div>
+            <div class="stat-linea"><span>Comisión</span><span style="text-align:right">${comisionTxt}</span></div>
+            ${notaProrrateo}
+            ${siguienteTxt}
+            <div class="stat-linea"><span>Le corresponde este mes</span><strong>${INFORME.eur(c.devengado)}</strong></div>
+            <div class="stat-linea"><span>Ya le has dado</span><strong>${INFORME.eur(c.entregado)}</strong></div>
+            <div class="stat-linea per-pendiente ${c.pendiente > 0 ? '' : 'ok'}"><span>${c.pendiente >= 0 ? 'LE DEBES' : 'TE DEBE (adelantado de más)'}</span><strong>${INFORME.eur(Math.abs(c.pendiente))}</strong></div>
 
-          <p class="hint" style="margin:10px 0 4px">Apuntar entrega de dinero (adelanto o pago):</p>
-          <div class="form-row">
-            <div class="form-group"><input type="date" class="pago-fecha" value="${hoyISO()}"></div>
-            <div class="form-group"><input type="number" class="pago-importe" step="0.01" min="0" placeholder="€"></div>
+            <p class="per-seccion">💶 Adelantos y pagos que le haces</p>
+            <div class="form-row">
+              <div class="form-group"><input type="date" class="pago-fecha" value="${hoyISO()}"></div>
+              <div class="form-group"><input type="number" class="pago-importe" step="0.01" min="0" placeholder="€"></div>
+            </div>
+            <div class="form-row">
+              <div class="form-group"><input type="text" class="pago-notas" placeholder="Nota (opcional): adelanto, paga…"></div>
+            </div>
+            <button class="btn btn-secondary pago-apuntar" data-sid="${t.sid}">➕ Apuntar entrega</button>
+            <div style="margin-top:8px">${pagosHTML}</div>
+
+            <p class="per-seccion">📝 Nota de un día (si pasó algo)</p>
+            <div class="form-row">
+              <div class="form-group"><input type="date" class="nota-fecha" value="${hoyISO()}"></div>
+              <div class="form-group"><input type="text" class="nota-texto" placeholder="Qué pasó ese día"></div>
+            </div>
+            <button class="btn btn-small nota-apuntar" data-sid="${t.sid}">📝 Apuntar nota</button>
+            ${notasHTML ? `<div style="margin-top:6px">${notasHTML}</div>` : ''}
+
+            <div class="form-actions">
+              <button class="btn btn-small per-editar" data-id="${t.id}">✏️ Editar ficha (sueldo, objetivos, inicio, baja)</button>
+            </div>
           </div>
-          <div class="form-row">
-            <div class="form-group"><input type="text" class="pago-notas" placeholder="Nota (opcional): adelanto, paga…"></div>
-          </div>
-          <button class="btn btn-secondary pago-apuntar" data-sid="${t.sid}">➕ Apuntar entrega</button>
-          <div style="margin-top:8px">${pagosHTML}</div>
         </div>`);
     }
     div.innerHTML = tarjetas.length ? tarjetas.join('') : '<p class="vacio">Aún no tienes trabajadores dados de alta.</p>';
@@ -1430,15 +1460,29 @@
         }).join('')
       : '<p class="vacio">Sin trabajadores antiguos todavía.</p>';
 
-    // Marcar / desmarcar días trabajados
+    // Abrir / cerrar la ficha de cada empleado
+    div.querySelectorAll('.per-toggle').forEach(cab => {
+      cab.addEventListener('click', () => {
+        const sid = cab.dataset.sid;
+        if (perAbiertos.has(sid)) perAbiertos.delete(sid);
+        else perAbiertos.add(sid);
+        pintarPersonal();
+      });
+    });
+
+    // Día del calendario: 1 toque = trabajó, 2 = faltó, 3 = nada
     div.querySelectorAll('.cal .dia').forEach(btn => {
       btn.addEventListener('click', guardarConAviso(async () => {
         const t = (await DB.perTodos()).find(x => x.sid === btn.dataset.sid);
         if (!t) return;
+        const f = btn.dataset.fecha;
         const dias = new Set(t.dias || []);
-        if (dias.has(btn.dataset.fecha)) dias.delete(btn.dataset.fecha);
-        else dias.add(btn.dataset.fecha);
+        const faltas = new Set(t.faltas || []);
+        if (dias.has(f)) { dias.delete(f); faltas.add(f); }
+        else if (faltas.has(f)) { faltas.delete(f); }
+        else { dias.add(f); }
         t.dias = [...dias].sort();
+        t.faltas = [...faltas].sort();
         await DB.perGuardar(t);
         pintarPersonal();
       }));
@@ -1574,10 +1618,10 @@
       ...(perEditando
         ? {
             id: perEditando.id, sid: perEditando.sid,
-            dias: perEditando.dias || [], notasDias: perEditando.notasDias || [],
+            dias: perEditando.dias || [], faltas: perEditando.faltas || [], notasDias: perEditando.notasDias || [],
             liquidado: perEditando.liquidado || '', creado: perEditando.creado
           }
-        : { dias: [], notasDias: [], liquidado: '', creado: new Date().toISOString() }),
+        : { dias: [], faltas: [], notasDias: [], liquidado: '', creado: new Date().toISOString() }),
       nombre,
       sueldoMensual: Math.round(sueldo * 100) / 100,
       inicio: $('#pe-inicio').value || '',
