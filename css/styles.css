@@ -426,6 +426,7 @@ select { appearance: none; -webkit-appearance: none; }
 .txt-ok { color: var(--ok); }
 .txt-bad { color: var(--bad); }
 .txt-sec { color: var(--texto-sec); }
+.txt-oro { color: var(--oro); }
 
 /* Modal */
 .modal {
@@ -738,6 +739,12 @@ select { appearance: none; -webkit-appearance: none; }
   color: #0a0a0c;
   font-weight: 800;
   border-color: transparent;
+}
+.cal .dia.tarde {
+  background: #241d08;
+  color: var(--oro);
+  border-color: #4a3d12;
+  font-weight: 700;
 }
 .cal .dia.falta {
   background: #2a1414;

@@ -1150,7 +1150,11 @@
 
   /* Cálculo del mes de un trabajador: fijo por días + comisión por tramo */
   function calcularMes(t, ventas, pagosMes, mes) {
-    const dias = (t.dias || []).filter(d => d.startsWith(mes)).sort();
+    // Trabajó = días normales + días que llegó tarde (vino igualmente)
+    const dias = [...new Set([...(t.dias || []), ...(t.tardes || [])])]
+      .filter(d => d.startsWith(mes)).sort();
+    const tardes = (t.tardes || []).filter(d => d.startsWith(mes));
+    const faltas = (t.faltas || []).filter(d => d.startsWith(mes));
     const fijoDia = (t.sueldoMensual || 0) / 30;
     const fijo = Math.round(fijoDia * dias.length * 100) / 100;
 
@@ -1166,7 +1170,7 @@
     const entregado = Math.round(pagosMes.reduce((s, p) => s + (p.importe || 0), 0) * 100) / 100;
     const devengado = Math.round((fijo + comision) * 100) / 100;
     return {
-      dias, fijo, comision, tramoActual, siguiente,
+      dias, tardes, faltas, fijo, comision, tramoActual, siguiente,
       devengado, entregado,
       pendiente: Math.round((devengado - entregado) * 100) / 100
     };
@@ -1179,6 +1183,7 @@
     const nDias = new Date(a, m, 0).getDate();
     const primerDiaSemana = (new Date(a, m - 1, 1).getDay() + 6) % 7; // lunes = 0
     const trabajados = new Set((t.dias || []).filter(d => d.startsWith(mes)));
+    const tardes = new Set((t.tardes || []).filter(d => d.startsWith(mes)));
     const faltas = new Set((t.faltas || []).filter(d => d.startsWith(mes)));
     const conNota = new Set((t.notasDias || []).map(n => n.fecha).filter(f => (f || '').startsWith(mes)));
     const cab = ['L', 'M', 'X', 'J', 'V', 'S', 'D'].map(d => `<span class="cal-cab">${d}</span>`).join('');
@@ -1188,11 +1193,11 @@
       const fecha = `${mes}-${String(d).padStart(2, '0')}`;
       // Antes de su inicio (o después de su baja) no trabajaba: en negro, sin poder tocar
       const bloqueado = (t.inicio && fecha < t.inicio) || (t.fin && fecha > t.fin);
-      const clase = trabajados.has(fecha) ? 'on' : (faltas.has(fecha) ? 'falta' : '');
+      const clase = trabajados.has(fecha) ? 'on' : (tardes.has(fecha) ? 'tarde' : (faltas.has(fecha) ? 'falta' : ''));
       celdas += `<button type="button" class="dia ${clase} ${conNota.has(fecha) ? 'con-nota' : ''}"${bloqueado ? ' disabled' : ''} data-sid="${t.sid}" data-fecha="${fecha}">${d}</button>`;
     }
     return `<div class="cal">${cab}${celdas}</div>
-      <p class="hint" style="margin:0 0 8px">1 toque: trabajó (claro) · 2 toques: faltó (rojo) · 3 toques: nada. En negro: aún no trabajaba.</p>`;
+      <p class="hint" style="margin:0 0 8px">Toques en el día → 1: trabajó · 2: ⏰ llegó tarde · 3: faltó · 4: nada. En negro: aún no trabajaba.</p>`;
   }
 
   /* Colores de los trabajadores (paleta validada para el tema oscuro).
@@ -1263,7 +1268,8 @@
       ventasDia.set(c.fecha, Math.round(((ventasDia.get(c.fecha) || 0) + (c.total || 0)) * 100) / 100);
     });
     const fechas = new Set(ventasDia.keys());
-    plantilla.forEach(t => (t.dias || []).filter(d => d.startsWith(mes)).forEach(d => fechas.add(d)));
+    const diasDe = (t) => [...new Set([...(t.dias || []), ...(t.tardes || [])])];
+    plantilla.forEach(t => diasDe(t).filter(d => d.startsWith(mes)).forEach(d => fechas.add(d)));
     const lista = [...fechas].sort();
     if (!lista.length) return '<p class="vacio">Aún no hay cierres ni días marcados este mes.</p>';
 
@@ -1271,7 +1277,7 @@
     const filas = lista.map(f => {
       const v = ventasDia.get(f) || 0;
       const dots = plantilla
-        .filter(t => (t.dias || []).includes(f))
+        .filter(t => diasDe(t).includes(f))
         .map(t => pdot(t, trabajadores.indexOf(t))).join('');
       return `
         <div class="fila-mes">
@@ -1286,7 +1292,7 @@
 
     const medias = plantilla.map(t => {
       const i = trabajadores.indexOf(t);
-      const suyos = (t.dias || []).filter(d => d.startsWith(mes) && ventasDia.has(d));
+      const suyos = diasDe(t).filter(d => d.startsWith(mes) && ventasDia.has(d));
       if (!suyos.length) {
         return `<div class="stat-linea"><span>${pdot(t, i)} ${escapar(t.nombre)}</span><span class="txt-sec">sin días con venta anotada</span></div>`;
       }
@@ -1412,6 +1418,7 @@
             ${bajaHTML}
             <p class="per-seccion">📅 Días del mes</p>
             ${calendarioHTML(t, mes)}
+            <div class="stat-linea"><span>Asistencia del mes</span><span>${c.dias.length} trabajado${c.dias.length === 1 ? '' : 's'}${c.tardes.length ? ` · <strong class="txt-oro">⏰ ${c.tardes.length} tarde${c.tardes.length === 1 ? '' : 's'}</strong>` : ''}${c.faltas.length ? ` · <strong class="txt-bad">${c.faltas.length} falta${c.faltas.length === 1 ? '' : 's'}</strong>` : ''}</span></div>
             <div class="stat-linea"><span>Fijo: ${c.dias.length} día${c.dias.length === 1 ? '' : 's'} × ${INFORME.eur((t.sueldoMensual || 0) / 30)}</span><strong>${INFORME.eur(c.fijo)}</strong></div>
             <div class="stat-linea"><span>Comisión</span><span style="text-align:right">${comisionTxt}</span></div>
             ${notaProrrateo}
@@ -1477,11 +1484,14 @@
         if (!t) return;
         const f = btn.dataset.fecha;
         const dias = new Set(t.dias || []);
+        const tardes = new Set(t.tardes || []);
         const faltas = new Set(t.faltas || []);
-        if (dias.has(f)) { dias.delete(f); faltas.add(f); }
-        else if (faltas.has(f)) { faltas.delete(f); }
-        else { dias.add(f); }
+        if (dias.has(f)) { dias.delete(f); tardes.add(f); }        // trabajó → llegó tarde
+        else if (tardes.has(f)) { tardes.delete(f); faltas.add(f); } // tarde → faltó
+        else if (faltas.has(f)) { faltas.delete(f); }               // faltó → nada
+        else { dias.add(f); }                                       // nada → trabajó
         t.dias = [...dias].sort();
+        t.tardes = [...tardes].sort();
         t.faltas = [...faltas].sort();
         await DB.perGuardar(t);
         pintarPersonal();
@@ -1618,10 +1628,10 @@
       ...(perEditando
         ? {
             id: perEditando.id, sid: perEditando.sid,
-            dias: perEditando.dias || [], faltas: perEditando.faltas || [], notasDias: perEditando.notasDias || [],
+            dias: perEditando.dias || [], tardes: perEditando.tardes || [], faltas: perEditando.faltas || [], notasDias: perEditando.notasDias || [],
             liquidado: perEditando.liquidado || '', creado: perEditando.creado
           }
-        : { dias: [], faltas: [], notasDias: [], liquidado: '', creado: new Date().toISOString() }),
+        : { dias: [], tardes: [], faltas: [], notasDias: [], liquidado: '', creado: new Date().toISOString() }),
       nombre,
       sueldoMensual: Math.round(sueldo * 100) / 100,
       inicio: $('#pe-inicio').value || '',
