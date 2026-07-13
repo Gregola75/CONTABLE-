@@ -39,6 +39,7 @@
   <button class="tab active" data-tab="facturas">📄 Facturas</button>
   <button class="tab" data-tab="cierres">💰 Cierres</button>
   <button class="tab" data-tab="consultar">🔍 Consultar</button>
+  <button class="tab" data-tab="personal">👥 Personal</button>
   <button class="tab" data-tab="informe">📊 Informe</button>
   <button class="tab" data-tab="ajustes">⚙️</button>
 </nav>
@@ -375,6 +376,76 @@
     </div>
     <div id="q-resumen" class="resumen-busqueda"></div>
     <div id="q-resultados" class="lista"></div>
+  </div>
+</section>
+
+<!-- ==================== PERSONAL ==================== -->
+<section id="tab-personal" class="tab-panel">
+  <div class="card">
+    <h2>👥 Personal — solo para ti</h2>
+    <p class="hint">Control privado de sueldos, adelantos y días trabajados. <strong>No aparece en el informe ni en el CSV</strong> que envías a la gestoría.</p>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="per-mes">Mes</label>
+        <input type="month" id="per-mes">
+      </div>
+    </div>
+    <div id="per-ventas" class="resumen-busqueda"></div>
+    <button class="btn btn-secondary" id="per-nuevo">➕ Añadir trabajador</button>
+
+    <div id="per-form" class="prov-form hidden">
+      <div class="form-group">
+        <label for="pe-nombre">Nombre *</label>
+        <input type="text" id="pe-nombre" placeholder="Ej.: Juan">
+      </div>
+      <div class="form-group">
+        <label for="pe-sueldo">Sueldo pactado por mes completo (€) *</label>
+        <input type="number" id="pe-sueldo" step="1" min="0" placeholder="900">
+        <p class="hint" style="margin:6px 0 0">Se paga por día trabajado: sueldo ÷ 30 por cada día que venga.</p>
+      </div>
+      <p class="hint">Comisiones por objetivos (opcional): si las ventas del mes del negocio llegan al objetivo, cobra ese <strong>% sobre las ventas del mes</strong>. Se aplica el tramo más alto alcanzado.</p>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Objetivo 1 (€ ventas)</label>
+          <input type="number" id="pe-obj1" step="100" min="0" placeholder="Ej.: 15000">
+        </div>
+        <div class="form-group">
+          <label>Comisión 1 (%)</label>
+          <input type="number" id="pe-pct1" step="0.1" min="0" placeholder="Ej.: 1">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Objetivo 2 (€ ventas)</label>
+          <input type="number" id="pe-obj2" step="100" min="0">
+        </div>
+        <div class="form-group">
+          <label>Comisión 2 (%)</label>
+          <input type="number" id="pe-pct2" step="0.1" min="0">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Objetivo 3 (€ ventas)</label>
+          <input type="number" id="pe-obj3" step="100" min="0">
+        </div>
+        <div class="form-group">
+          <label>Comisión 3 (%)</label>
+          <input type="number" id="pe-pct3" step="0.1" min="0">
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="pe-notas">Notas <small>opcional</small></label>
+        <input type="text" id="pe-notas" placeholder="Ej.: los lunes no viene">
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-primary" id="per-guardar">💾 Guardar trabajador</button>
+        <button class="btn btn-danger hidden" id="per-borrar">🗑️ Eliminar trabajador</button>
+        <button class="btn btn-ghost" id="per-cancelar">Cancelar</button>
+      </div>
+    </div>
+
+    <div id="per-lista" style="margin-top:12px"></div>
   </div>
 </section>
 

@@ -681,6 +681,61 @@ select { appearance: none; -webkit-appearance: none; }
   font-variant-numeric: tabular-nums;
 }
 
+/* Personal: sueldos, adelantos y días trabajados */
+.per-card { margin-bottom: 12px; }
+.per-cab {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.cal {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  margin: 8px 0 10px;
+}
+.cal .cal-cab {
+  text-align: center;
+  font-size: .62rem;
+  letter-spacing: 1px;
+  color: var(--texto-sec);
+  padding-bottom: 2px;
+}
+.cal .dia {
+  padding: 7px 0;
+  border-radius: 8px;
+  border: 1px solid var(--borde);
+  background: #0f0f12;
+  color: var(--texto-sec);
+  font-family: inherit;
+  font-size: .8rem;
+  cursor: pointer;
+}
+.cal .dia.on {
+  background: linear-gradient(180deg, #f4f5f7, #b9bec7);
+  color: #0a0a0c;
+  font-weight: 800;
+  border-color: transparent;
+}
+.per-siguiente {
+  font-size: .8rem;
+  color: var(--oro);
+  padding: 6px 0;
+  border-bottom: 1px solid var(--borde);
+}
+.per-pendiente strong { font-size: 1.15rem; color: var(--bad); }
+.per-pendiente.ok strong { color: var(--ok); }
+.per-pago {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--borde);
+  font-size: .84rem;
+}
+
 /* Estadísticas ajustes */
 .stat-linea { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--borde); font-size: .9rem; }
 

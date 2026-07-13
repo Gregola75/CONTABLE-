@@ -87,6 +87,7 @@
       $('#tab-' + btn.dataset.tab).classList.add('active');
       if (btn.dataset.tab === 'ajustes') { pintarStats(); pintarSeguridad(); pintarNube(); }
       if (btn.dataset.tab === 'consultar') buscar();
+      if (btn.dataset.tab === 'personal') pintarPersonal();
     });
   });
 
@@ -1127,6 +1128,242 @@
     });
   });
 
+  /* ---------- PERSONAL: sueldos, adelantos y días trabajados ---------- */
+
+  let perEditando = null; // trabajador en edición
+
+  function mesPersonal() {
+    return $('#per-mes').value || hoyISO().slice(0, 7);
+  }
+
+  /* Ventas del negocio en un mes (suma de los cierres anotados) */
+  async function ventasDelMes(mes) {
+    const cierres = await DB.buscar({ tipo: 'cierre', desde: mes + '-01', hasta: mes + '-31' });
+    return Math.round(cierres.reduce((s, r) => s + (r.total || 0), 0) * 100) / 100;
+  }
+
+  function tramosDe(t) {
+    return (t.tramos || []).filter(x => x && x.objetivo > 0 && x.porcentaje > 0)
+      .sort((a, b) => a.objetivo - b.objetivo);
+  }
+
+  /* Cálculo del mes de un trabajador: fijo por días + comisión por tramo */
+  function calcularMes(t, ventas, pagosMes, mes) {
+    const dias = (t.dias || []).filter(d => d.startsWith(mes)).sort();
+    const fijoDia = (t.sueldoMensual || 0) / 30;
+    const fijo = Math.round(fijoDia * dias.length * 100) / 100;
+
+    const tramos = tramosDe(t);
+    let tramoActual = null;
+    let siguiente = null;
+    for (const tr of tramos) {
+      if (ventas >= tr.objetivo) tramoActual = tr;
+      else if (!siguiente) siguiente = tr;
+    }
+    const comision = tramoActual ? Math.round(ventas * tramoActual.porcentaje) / 100 : 0;
+
+    const entregado = Math.round(pagosMes.reduce((s, p) => s + (p.importe || 0), 0) * 100) / 100;
+    const devengado = Math.round((fijo + comision) * 100) / 100;
+    return {
+      dias, fijo, comision, tramoActual, siguiente,
+      devengado, entregado,
+      pendiente: Math.round((devengado - entregado) * 100) / 100
+    };
+  }
+
+  /* Calendario del mes: un botón por día, los trabajados en claro */
+  function calendarioHTML(t, mes) {
+    const [a, m] = mes.split('-').map(Number);
+    const nDias = new Date(a, m, 0).getDate();
+    const primerDiaSemana = (new Date(a, m - 1, 1).getDay() + 6) % 7; // lunes = 0
+    const set = new Set((t.dias || []).filter(d => d.startsWith(mes)));
+    const cab = ['L', 'M', 'X', 'J', 'V', 'S', 'D'].map(d => `<span class="cal-cab">${d}</span>`).join('');
+    let celdas = '';
+    for (let i = 0; i < primerDiaSemana; i++) celdas += '<span></span>';
+    for (let d = 1; d <= nDias; d++) {
+      const fecha = `${mes}-${String(d).padStart(2, '0')}`;
+      celdas += `<button type="button" class="dia ${set.has(fecha) ? 'on' : ''}" data-sid="${t.sid}" data-fecha="${fecha}">${d}</button>`;
+    }
+    return `<div class="cal">${cab}${celdas}</div>`;
+  }
+
+  async function pintarPersonal() {
+    if (!$('#per-mes').value) $('#per-mes').value = hoyISO().slice(0, 7);
+    const mes = mesPersonal();
+    const [trabajadores, pagos, ventas] = await Promise.all([
+      DB.perTodos(), DB.pagoTodos(), ventasDelMes(mes)
+    ]);
+
+    $('#per-ventas').innerHTML =
+      `Ventas del negocio en ${mesEnLetras(mes + '-01')}: <strong class="ingreso">${INFORME.eur(ventas)}</strong> (según tus cierres)`;
+
+    const div = $('#per-lista');
+    if (!trabajadores.length) {
+      div.innerHTML = '<p class="vacio">Aún no tienes trabajadores dados de alta.</p>';
+      return;
+    }
+
+    div.innerHTML = trabajadores.map(t => {
+      const pagosMes = pagos.filter(p => p.trabajadorSid === t.sid && (p.fecha || '').startsWith(mes))
+        .sort((a, b) => (a.fecha || '').localeCompare(b.fecha || ''));
+      const c = calcularMes(t, ventas, pagosMes, mes);
+
+      const comisionTxt = c.tramoActual
+        ? `✅ Objetivo de ${INFORME.eur(c.tramoActual.objetivo)} alcanzado → ${c.tramoActual.porcentaje} % de las ventas = <strong>${INFORME.eur(c.comision)}</strong>`
+        : (tramosDe(t).length ? 'Aún sin objetivo alcanzado: solo el fijo' : 'Sin comisiones pactadas');
+      const siguienteTxt = c.siguiente
+        ? `<div class="per-siguiente">Faltan <strong>${INFORME.eur(Math.max(0, c.siguiente.objetivo - ventas))}</strong> de ventas para el ${c.tramoActual ? 'siguiente' : 'primer'} objetivo (${INFORME.eur(c.siguiente.objetivo)} → ${c.siguiente.porcentaje} %)</div>`
+        : '';
+
+      const pagosHTML = pagosMes.length
+        ? pagosMes.map(p => `
+            <div class="per-pago">
+              <span>${fmtFecha(p.fecha)}${p.notas ? ' · ' + escapar(p.notas) : ''}</span>
+              <span>${INFORME.eur(p.importe)} <button class="btn btn-small pago-borrar" data-id="${p.id}" title="Eliminar">🗑️</button></span>
+            </div>`).join('')
+        : '<p class="vacio" style="padding:6px">Sin entregas este mes.</p>';
+
+      return `
+        <div class="prov-form per-card">
+          <div class="per-cab">
+            <div class="stat-prov-nombre">${escapar(t.nombre)}</div>
+            <button class="btn btn-small per-editar" data-id="${t.id}">✏️ Editar</button>
+          </div>
+          <p class="hint" style="margin:4px 0 0">Días trabajados en el mes (toca para marcar / desmarcar):</p>
+          ${calendarioHTML(t, mes)}
+          <div class="stat-linea"><span>Fijo: ${c.dias.length} día${c.dias.length === 1 ? '' : 's'} × ${INFORME.eur((t.sueldoMensual || 0) / 30)}</span><strong>${INFORME.eur(c.fijo)}</strong></div>
+          <div class="stat-linea"><span>Comisión</span><span style="text-align:right">${comisionTxt}</span></div>
+          ${siguienteTxt}
+          <div class="stat-linea"><span>Le corresponde este mes</span><strong>${INFORME.eur(c.devengado)}</strong></div>
+          <div class="stat-linea"><span>Ya le has dado (adelantos y pagos)</span><strong>${INFORME.eur(c.entregado)}</strong></div>
+          <div class="stat-linea per-pendiente ${c.pendiente > 0 ? '' : 'ok'}"><span>${c.pendiente >= 0 ? 'LE DEBES' : 'TE DEBE (adelantado de más)'}</span><strong>${INFORME.eur(Math.abs(c.pendiente))}</strong></div>
+
+          <p class="hint" style="margin:10px 0 4px">Apuntar entrega de dinero (adelanto o pago):</p>
+          <div class="form-row">
+            <div class="form-group"><input type="date" class="pago-fecha" value="${hoyISO()}"></div>
+            <div class="form-group"><input type="number" class="pago-importe" step="0.01" min="0" placeholder="€"></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><input type="text" class="pago-notas" placeholder="Nota (opcional): adelanto, paga…"></div>
+          </div>
+          <button class="btn btn-secondary pago-apuntar" data-sid="${t.sid}">➕ Apuntar entrega</button>
+          <div style="margin-top:8px">${pagosHTML}</div>
+        </div>`;
+    }).join('');
+
+    // Marcar / desmarcar días trabajados
+    div.querySelectorAll('.cal .dia').forEach(btn => {
+      btn.addEventListener('click', guardarConAviso(async () => {
+        const t = (await DB.perTodos()).find(x => x.sid === btn.dataset.sid);
+        if (!t) return;
+        const dias = new Set(t.dias || []);
+        if (dias.has(btn.dataset.fecha)) dias.delete(btn.dataset.fecha);
+        else dias.add(btn.dataset.fecha);
+        t.dias = [...dias].sort();
+        await DB.perGuardar(t);
+        pintarPersonal();
+      }));
+    });
+
+    // Editar trabajador
+    div.querySelectorAll('.per-editar').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const t = (await DB.perTodos()).find(x => x.id === +btn.dataset.id);
+        if (t) abrirFormPersonal(t);
+      });
+    });
+
+    // Apuntar entrega
+    div.querySelectorAll('.pago-apuntar').forEach(btn => {
+      btn.addEventListener('click', guardarConAviso(async () => {
+        const card = btn.closest('.per-card');
+        const importe = parseFloat(card.querySelector('.pago-importe').value);
+        const fecha = card.querySelector('.pago-fecha').value;
+        if (isNaN(importe) || importe <= 0) { toast('⚠️ Pon el importe entregado.'); return; }
+        if (!fecha) { toast('⚠️ Falta la fecha.'); return; }
+        await DB.pagoGuardar({
+          trabajadorSid: btn.dataset.sid,
+          fecha,
+          importe: Math.round(importe * 100) / 100,
+          notas: card.querySelector('.pago-notas').value.trim(),
+          creado: new Date().toISOString()
+        });
+        toast('💾 Entrega apuntada.');
+        pintarPersonal();
+      }));
+    });
+
+    // Borrar entrega
+    div.querySelectorAll('.pago-borrar').forEach(btn => {
+      btn.addEventListener('click', guardarConAviso(async () => {
+        if (!confirm('¿Eliminar esta entrega?')) return;
+        await DB.pagoBorrar(+btn.dataset.id);
+        pintarPersonal();
+      }));
+    });
+  }
+
+  function abrirFormPersonal(t = null) {
+    perEditando = t;
+    $('#pe-nombre').value = t ? t.nombre : '';
+    $('#pe-sueldo').value = t && t.sueldoMensual != null ? t.sueldoMensual : '';
+    const tramos = t ? (t.tramos || []) : [];
+    [1, 2, 3].forEach(i => {
+      $(`#pe-obj${i}`).value = tramos[i - 1] ? tramos[i - 1].objetivo : '';
+      $(`#pe-pct${i}`).value = tramos[i - 1] ? tramos[i - 1].porcentaje : '';
+    });
+    $('#pe-notas').value = t ? (t.notas || '') : '';
+    $('#per-borrar').classList.toggle('hidden', !t);
+    $('#per-form').classList.remove('hidden');
+    $('#pe-nombre').focus();
+  }
+
+  $('#per-nuevo').addEventListener('click', () => abrirFormPersonal());
+  $('#per-cancelar').addEventListener('click', () => {
+    perEditando = null;
+    $('#per-form').classList.add('hidden');
+  });
+
+  $('#per-guardar').addEventListener('click', guardarConAviso(async () => {
+    const nombre = $('#pe-nombre').value.trim();
+    const sueldo = parseFloat($('#pe-sueldo').value);
+    if (!nombre) { toast('⚠️ El nombre es obligatorio.'); return; }
+    if (isNaN(sueldo) || sueldo < 0) { toast('⚠️ Pon el sueldo mensual pactado.'); return; }
+
+    const tramos = [1, 2, 3].map(i => ({
+      objetivo: parseFloat($(`#pe-obj${i}`).value) || 0,
+      porcentaje: parseFloat($(`#pe-pct${i}`).value) || 0
+    })).filter(x => x.objetivo > 0 && x.porcentaje > 0);
+
+    await DB.perGuardar({
+      ...(perEditando
+        ? { id: perEditando.id, sid: perEditando.sid, dias: perEditando.dias || [], creado: perEditando.creado }
+        : { dias: [], creado: new Date().toISOString() }),
+      nombre,
+      sueldoMensual: Math.round(sueldo * 100) / 100,
+      tramos,
+      notas: $('#pe-notas').value.trim()
+    });
+    perEditando = null;
+    $('#per-form').classList.add('hidden');
+    toast('💾 Trabajador guardado.');
+    pintarPersonal();
+  }));
+
+  $('#per-borrar').addEventListener('click', guardarConAviso(async () => {
+    if (!perEditando) return;
+    if (!confirm(`¿Eliminar a "${perEditando.nombre}" y todas sus entregas apuntadas? No se puede deshacer.`)) return;
+    const pagos = (await DB.pagoTodos()).filter(p => p.trabajadorSid === perEditando.sid);
+    for (const p of pagos) await DB.pagoBorrar(p.id);
+    await DB.perBorrar(perEditando.id);
+    perEditando = null;
+    $('#per-form').classList.add('hidden');
+    toast('🗑️ Trabajador eliminado.');
+    pintarPersonal();
+  }));
+
+  $('#per-mes').addEventListener('change', pintarPersonal);
+
   /* ---------- AJUSTES ---------- */
 
   async function pintarStats() {
@@ -1482,6 +1719,7 @@
     pintarProveedores();
     cargarProveedores();
     if (document.querySelector('.tab[data-tab="consultar"]').classList.contains('active')) buscar();
+    if (document.querySelector('.tab[data-tab="personal"]').classList.contains('active')) pintarPersonal();
   });
   pintarNube();
 })();

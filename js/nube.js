@@ -32,8 +32,10 @@ const NUBE = (() => {
   let avisarUI = () => {};
 
   let paradas = []; // funciones para dejar de escuchar al cerrar sesión
-  const remotos = { registros: new Map(), proveedores: new Map(), borrados: new Map() };
-  const listos = { registros: false, proveedores: false, borrados: false };
+  const COLECCIONES = ['registros', 'proveedores', 'personal', 'pagos', 'borrados'];
+  const remotos = {};
+  const listos = {};
+  COLECCIONES.forEach(n => { remotos[n] = new Map(); listos[n] = false; });
   let timerReconciliar = null;
   let reconciliando = false;
   let reconciliarOtraVez = false;
@@ -180,7 +182,7 @@ const NUBE = (() => {
   function empezarEscuchas() {
     pararEscuchas();
     cambiarEstado('sincronizando');
-    ['registros', 'proveedores', 'borrados'].forEach((nombre) => {
+    COLECCIONES.forEach((nombre) => {
       const parar = col(nombre).onSnapshot((snap) => {
         remotos[nombre] = new Map(snap.docs.map(d => [d.id, d.data()]));
         listos[nombre] = true;
@@ -196,11 +198,11 @@ const NUBE = (() => {
   function pararEscuchas() {
     paradas.forEach(p => { try { p(); } catch (e) { /* nada */ } });
     paradas = [];
-    ['registros', 'proveedores', 'borrados'].forEach(n => { remotos[n] = new Map(); listos[n] = false; });
+    COLECCIONES.forEach(n => { remotos[n] = new Map(); listos[n] = false; });
   }
 
   function programarReconciliacion() {
-    if (!listos.registros || !listos.proveedores || !listos.borrados) return;
+    if (!COLECCIONES.every(n => listos[n])) return;
     clearTimeout(timerReconciliar);
     timerReconciliar = setTimeout(reconciliar, 400);
   }
@@ -211,19 +213,21 @@ const NUBE = (() => {
     reconciliando = true;
     let huboCambiosLocales = false;
     try {
-      const cambioRegistros = await reconciliarColeccion(
-        'registros',
-        await DB.todos(),
-        (obj) => DB.guardar(obj, { remoto: true }),
-        (id) => DB.borrar(id, { remoto: true })
-      );
-      const cambioProveedores = await reconciliarColeccion(
-        'proveedores',
-        await DB.provTodos(),
-        (obj) => DB.provGuardar(obj, { remoto: true }),
-        (id) => DB.provBorrar(id, { remoto: true })
-      );
-      huboCambiosLocales = cambioRegistros || cambioProveedores;
+      const tablas = [
+        ['registros', DB.todos, DB.guardar, DB.borrar],
+        ['proveedores', DB.provTodos, DB.provGuardar, DB.provBorrar],
+        ['personal', DB.perTodos, DB.perGuardar, DB.perBorrar],
+        ['pagos', DB.pagoTodos, DB.pagoGuardar, DB.pagoBorrar]
+      ];
+      for (const [nombre, leer, guardarL, borrarL] of tablas) {
+        const cambio = await reconciliarColeccion(
+          nombre,
+          await leer(),
+          (obj) => guardarL(obj, { remoto: true }),
+          (id) => borrarL(id, { remoto: true })
+        );
+        huboCambiosLocales = huboCambiosLocales || cambio;
+      }
       cambiarEstado('sincronizado');
     } catch (e) {
       console.error('Reconciliación:', e);
@@ -290,6 +294,10 @@ const NUBE = (() => {
         case 'borrar-registro': return borrarRemoto('registros', dato.sid);
         case 'proveedor': return subir('proveedores', dato);
         case 'borrar-proveedor': return borrarRemoto('proveedores', dato.sid);
+        case 'personal': return subir('personal', dato);
+        case 'borrar-personal': return borrarRemoto('personal', dato.sid);
+        case 'pago': return subir('pagos', dato);
+        case 'borrar-pago': return borrarRemoto('pagos', dato.sid);
         default: return Promise.resolve();
       }
     })();

@@ -4,7 +4,7 @@
 
 const DB = (() => {
   const NOMBRE = 'contable-db';
-  const VERSION = 3;
+  const VERSION = 4;
   let db = null;
 
   function abrir() {
@@ -34,6 +34,14 @@ const DB = (() => {
         if (!d.objectStoreNames.contains('proveedores')) {
           const store = d.createObjectStore('proveedores', { keyPath: 'id', autoIncrement: true });
           store.createIndex('nombre', 'nombre');
+        }
+        // v4: control de personal (trabajadores y entregas de dinero)
+        if (!d.objectStoreNames.contains('personal')) {
+          d.createObjectStore('personal', { keyPath: 'id', autoIncrement: true });
+        }
+        if (!d.objectStoreNames.contains('pagos')) {
+          const store = d.createObjectStore('pagos', { keyPath: 'id', autoIncrement: true });
+          store.createIndex('trabajador', 'trabajadorSid');
         }
       };
       req.onsuccess = () => {
@@ -136,6 +144,40 @@ const DB = (() => {
     return [...set].filter(Boolean).sort((a, b) => a.localeCompare(b, 'es'));
   }
 
+  /* ==================== PERSONAL (control privado de sueldos) ====================
+     Trabajador: { id, sid, mod, nombre, sueldoMensual, tramos: [{objetivo, porcentaje}],
+                   dias: ['YYYY-MM-DD', …] (días trabajados), notas, creado }
+     Entrega:    { id, sid, mod, trabajadorSid, fecha, importe, notas, creado } */
+
+  async function perGuardar(t, opts = {}) {
+    if (!t.sid) t.sid = nuevoSid();
+    if (!opts.remoto) t.mod = new Date().toISOString();
+    const id = await pedir('personal', 'readwrite', s => s.put(t));
+    if (!opts.remoto) avisar('personal', { ...t, id });
+    return id;
+  }
+  async function perBorrar(id, opts = {}) {
+    const t = await pedir('personal', 'readonly', s => s.get(id));
+    await pedir('personal', 'readwrite', s => s.delete(id));
+    if (!opts.remoto && t) avisar('borrar-personal', t);
+  }
+  const perTodos = () => pedir('personal', 'readonly', s => s.getAll())
+    .then(r => (r || []).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')));
+
+  async function pagoGuardar(p, opts = {}) {
+    if (!p.sid) p.sid = nuevoSid();
+    if (!opts.remoto) p.mod = new Date().toISOString();
+    const id = await pedir('pagos', 'readwrite', s => s.put(p));
+    if (!opts.remoto) avisar('pago', { ...p, id });
+    return id;
+  }
+  async function pagoBorrar(id, opts = {}) {
+    const p = await pedir('pagos', 'readonly', s => s.get(id));
+    await pedir('pagos', 'readwrite', s => s.delete(id));
+    if (!opts.remoto && p) avisar('borrar-pago', p);
+  }
+  const pagoTodos = () => pedir('pagos', 'readonly', s => s.getAll()).then(r => r || []);
+
   /* ==================== Copia de seguridad ==================== */
 
   function blobADataURL(blob) {
@@ -168,8 +210,9 @@ const DB = (() => {
     }
     const provs = await provTodos();
     return {
-      app: 'CONTABLE', version: 2, exportado: new Date().toISOString(),
-      registros: salida, proveedores: provs
+      app: 'CONTABLE', version: 3, exportado: new Date().toISOString(),
+      registros: salida, proveedores: provs,
+      personal: await perTodos(), pagos: await pagoTodos()
     };
   }
 
@@ -204,12 +247,34 @@ const DB = (() => {
         }
       }
     }
+    if (Array.isArray(datos.personal)) {
+      const sids = new Set((await perTodos()).map(t => t.sid).filter(Boolean));
+      for (const t of datos.personal) {
+        const copia = { ...t };
+        delete copia.id;
+        if (copia.sid && sids.has(copia.sid)) continue;
+        await perGuardar(copia);
+        n++;
+      }
+    }
+    if (Array.isArray(datos.pagos)) {
+      const sids = new Set((await pagoTodos()).map(p => p.sid).filter(Boolean));
+      for (const p of datos.pagos) {
+        const copia = { ...p };
+        delete copia.id;
+        if (copia.sid && sids.has(copia.sid)) continue;
+        await pagoGuardar(copia);
+        n++;
+      }
+    }
     return n;
   }
 
   return {
     guardar, borrar, obtener, todos, buscar, proveedores,
     provGuardar, provBorrar, provTodos,
+    perGuardar, perBorrar, perTodos,
+    pagoGuardar, pagoBorrar, pagoTodos,
     exportarTodo, importarTodo, alCambio
   };
 })();
