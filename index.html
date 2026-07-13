@@ -398,11 +398,17 @@
         <label for="pe-nombre">Nombre *</label>
         <input type="text" id="pe-nombre" placeholder="Ej.: Juan">
       </div>
-      <div class="form-group">
-        <label for="pe-sueldo">Sueldo pactado por mes completo (€) *</label>
-        <input type="number" id="pe-sueldo" step="1" min="0" placeholder="900">
-        <p class="hint" style="margin:6px 0 0">Se paga por día trabajado: sueldo ÷ 30 por cada día que venga.</p>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="pe-sueldo">Sueldo por mes completo (€) *</label>
+          <input type="number" id="pe-sueldo" step="1" min="0" placeholder="900">
+        </div>
+        <div class="form-group">
+          <label for="pe-inicio">Comenzó a trabajar el</label>
+          <input type="date" id="pe-inicio">
+        </div>
       </div>
+      <p class="hint" style="margin:0 0 10px">Se paga por día trabajado: sueldo ÷ 30 por cada día que venga.</p>
       <p class="hint">Comisiones por objetivos (opcional): si las ventas del mes del negocio llegan al objetivo, cobra ese <strong>% sobre las ventas del mes</strong>. Se aplica el tramo más alto alcanzado.</p>
       <div class="form-row">
         <div class="form-group">

@@ -1171,18 +1171,20 @@
     };
   }
 
-  /* Calendario del mes: un botón por día, los trabajados en claro */
+  /* Calendario del mes: un botón por día, los trabajados en claro y
+     con un puntito los días que tienen nota apuntada */
   function calendarioHTML(t, mes) {
     const [a, m] = mes.split('-').map(Number);
     const nDias = new Date(a, m, 0).getDate();
     const primerDiaSemana = (new Date(a, m - 1, 1).getDay() + 6) % 7; // lunes = 0
     const set = new Set((t.dias || []).filter(d => d.startsWith(mes)));
+    const conNota = new Set((t.notasDias || []).map(n => n.fecha).filter(f => (f || '').startsWith(mes)));
     const cab = ['L', 'M', 'X', 'J', 'V', 'S', 'D'].map(d => `<span class="cal-cab">${d}</span>`).join('');
     let celdas = '';
     for (let i = 0; i < primerDiaSemana; i++) celdas += '<span></span>';
     for (let d = 1; d <= nDias; d++) {
       const fecha = `${mes}-${String(d).padStart(2, '0')}`;
-      celdas += `<button type="button" class="dia ${set.has(fecha) ? 'on' : ''}" data-sid="${t.sid}" data-fecha="${fecha}">${d}</button>`;
+      celdas += `<button type="button" class="dia ${set.has(fecha) ? 'on' : ''} ${conNota.has(fecha) ? 'con-nota' : ''}" data-sid="${t.sid}" data-fecha="${fecha}">${d}</button>`;
     }
     return `<div class="cal">${cab}${celdas}</div>`;
   }
@@ -1223,14 +1225,32 @@
             </div>`).join('')
         : '<p class="vacio" style="padding:6px">Sin entregas este mes.</p>';
 
+      const notasMes = (t.notasDias || []).map((n, idx) => ({ ...n, idx }))
+        .filter(n => (n.fecha || '').startsWith(mes))
+        .sort((a, b) => a.fecha.localeCompare(b.fecha));
+      const notasHTML = notasMes.map(n => `
+        <div class="per-pago">
+          <span>📝 ${fmtFecha(n.fecha)} · ${escapar(n.texto)}</span>
+          <button class="btn btn-small nota-borrar" data-sid="${t.sid}" data-idx="${n.idx}" title="Eliminar">🗑️</button>
+        </div>`).join('');
+
       return `
         <div class="prov-form per-card">
           <div class="per-cab">
-            <div class="stat-prov-nombre">${escapar(t.nombre)}</div>
+            <div>
+              <div class="stat-prov-nombre">${escapar(t.nombre)}</div>
+              ${t.inicio ? `<div class="stat-prov-nif">Trabaja desde el ${fmtFecha(t.inicio)}</div>` : ''}
+            </div>
             <button class="btn btn-small per-editar" data-id="${t.id}">✏️ Editar</button>
           </div>
           <p class="hint" style="margin:4px 0 0">Días trabajados en el mes (toca para marcar / desmarcar):</p>
           ${calendarioHTML(t, mes)}
+          <div class="form-row">
+            <div class="form-group"><input type="date" class="nota-fecha" value="${hoyISO()}"></div>
+            <div class="form-group"><input type="text" class="nota-texto" placeholder="Nota del día: qué pasó"></div>
+          </div>
+          <button class="btn btn-small nota-apuntar" data-sid="${t.sid}">📝 Apuntar nota del día</button>
+          ${notasHTML ? `<div style="margin-top:6px">${notasHTML}</div>` : ''}
           <div class="stat-linea"><span>Fijo: ${c.dias.length} día${c.dias.length === 1 ? '' : 's'} × ${INFORME.eur((t.sueldoMensual || 0) / 30)}</span><strong>${INFORME.eur(c.fijo)}</strong></div>
           <div class="stat-linea"><span>Comisión</span><span style="text-align:right">${comisionTxt}</span></div>
           ${siguienteTxt}
@@ -1260,6 +1280,35 @@
         if (dias.has(btn.dataset.fecha)) dias.delete(btn.dataset.fecha);
         else dias.add(btn.dataset.fecha);
         t.dias = [...dias].sort();
+        await DB.perGuardar(t);
+        pintarPersonal();
+      }));
+    });
+
+    // Apuntar nota de un día
+    div.querySelectorAll('.nota-apuntar').forEach(btn => {
+      btn.addEventListener('click', guardarConAviso(async () => {
+        const card = btn.closest('.per-card');
+        const fecha = card.querySelector('.nota-fecha').value;
+        const texto = card.querySelector('.nota-texto').value.trim();
+        if (!fecha) { toast('⚠️ Falta la fecha de la nota.'); return; }
+        if (!texto) { toast('⚠️ Escribe la nota.'); return; }
+        const t = (await DB.perTodos()).find(x => x.sid === btn.dataset.sid);
+        if (!t) return;
+        t.notasDias = [...(t.notasDias || []), { fecha, texto }];
+        await DB.perGuardar(t);
+        toast('📝 Nota apuntada.');
+        pintarPersonal();
+      }));
+    });
+
+    // Borrar nota de un día
+    div.querySelectorAll('.nota-borrar').forEach(btn => {
+      btn.addEventListener('click', guardarConAviso(async () => {
+        if (!confirm('¿Eliminar esta nota?')) return;
+        const t = (await DB.perTodos()).find(x => x.sid === btn.dataset.sid);
+        if (!t || !t.notasDias) return;
+        t.notasDias.splice(+btn.dataset.idx, 1);
         await DB.perGuardar(t);
         pintarPersonal();
       }));
@@ -1307,6 +1356,7 @@
     perEditando = t;
     $('#pe-nombre').value = t ? t.nombre : '';
     $('#pe-sueldo').value = t && t.sueldoMensual != null ? t.sueldoMensual : '';
+    $('#pe-inicio').value = t ? (t.inicio || '') : '';
     const tramos = t ? (t.tramos || []) : [];
     [1, 2, 3].forEach(i => {
       $(`#pe-obj${i}`).value = tramos[i - 1] ? tramos[i - 1].objetivo : '';
@@ -1337,10 +1387,11 @@
 
     await DB.perGuardar({
       ...(perEditando
-        ? { id: perEditando.id, sid: perEditando.sid, dias: perEditando.dias || [], creado: perEditando.creado }
-        : { dias: [], creado: new Date().toISOString() }),
+        ? { id: perEditando.id, sid: perEditando.sid, dias: perEditando.dias || [], notasDias: perEditando.notasDias || [], creado: perEditando.creado }
+        : { dias: [], notasDias: [], creado: new Date().toISOString() }),
       nombre,
       sueldoMensual: Math.round(sueldo * 100) / 100,
+      inicio: $('#pe-inicio').value || '',
       tramos,
       notas: $('#pe-notas').value.trim()
     });
