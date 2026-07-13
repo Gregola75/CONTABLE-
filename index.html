@@ -444,6 +444,11 @@
         <label for="pe-notas">Notas <small>opcional</small></label>
         <input type="text" id="pe-notas" placeholder="Ej.: los lunes no viene">
       </div>
+      <div class="form-group">
+        <label for="pe-fin">Dejó de trabajar el <small>solo al darle de baja</small></label>
+        <input type="date" id="pe-fin">
+        <p class="hint" style="margin:6px 0 0">Al poner esta fecha, la app te calculará el finiquito (todo lo que le debes) para abonárselo.</p>
+      </div>
       <div class="form-actions">
         <button class="btn btn-primary" id="per-guardar">💾 Guardar trabajador</button>
         <button class="btn btn-danger hidden" id="per-borrar">🗑️ Eliminar trabajador</button>
@@ -452,6 +457,18 @@
     </div>
 
     <div id="per-lista" style="margin-top:12px"></div>
+  </div>
+
+  <div class="card">
+    <h2>📊 Ventas del mes y quién trabajó</h2>
+    <p class="hint">Las ventas de cada día (según tus cierres) y qué empleados trabajaron. Así ves cómo varía la venta según quién esté.</p>
+    <div id="per-grafico"></div>
+  </div>
+
+  <div class="card">
+    <h2>📁 Historial de trabajadores</h2>
+    <p class="hint">Antiguos trabajadores ya abonados y liquidados. Queda como prueba de que les pagaste.</p>
+    <div id="per-historial"></div>
   </div>
 </section>
 

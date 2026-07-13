@@ -745,6 +745,42 @@ select { appearance: none; -webkit-appearance: none; }
   font-size: .84rem;
 }
 
+/* Puntos de identidad de cada trabajador (con su inicial dentro) */
+.pdot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px; height: 17px;
+  border-radius: 50%;
+  font-size: .6rem;
+  font-weight: 800;
+  color: #fff;
+  vertical-align: middle;
+  margin-right: 2px;
+  flex-shrink: 0;
+}
+.pdots { display: inline-flex; gap: 2px; flex-shrink: 0; min-width: 21px; justify-content: flex-end; }
+.ley-personal {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 10px;
+  font-size: .8rem;
+  color: var(--texto-sec);
+}
+.ley-item { display: inline-flex; align-items: center; gap: 4px; }
+
+/* Aviso de baja / finiquito */
+.per-baja {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1.5px dashed var(--plata-osc);
+  border-radius: 10px;
+  background: #101014;
+  font-size: .88rem;
+}
+.per-baja .btn { margin-top: 8px; width: 100%; }
+
 /* Estadísticas ajustes */
 .stat-linea { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--borde); font-size: .9rem; }
 

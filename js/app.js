@@ -1189,41 +1189,176 @@
     return `<div class="cal">${cab}${celdas}</div>`;
   }
 
+  /* Colores de los trabajadores (paleta validada para el tema oscuro).
+     El punto lleva la inicial dentro para no depender solo del color. */
+  const PALETA_PERSONAL = ['#5b8def', '#1fa383', '#9a6fd0', '#d5643f', '#b8892e'];
+
+  const pdot = (t, i) =>
+    `<span class="pdot" style="background:${PALETA_PERSONAL[i % PALETA_PERSONAL.length]}">${escapar((t.nombre || '?')[0].toUpperCase())}</span>`;
+
+  /* Ventas que cuentan para un trabajador en un mes: solo desde su fecha de
+     inicio y hasta su baja. Si empezó el día 10, sus comisiones se calculan
+     con las ventas desde el 10; al mes siguiente ya cuenta el mes entero.
+     Un total mensual sin detalle por días se reparte proporcionalmente. */
+  function ventasParaTrabajador(t, cierresMes, mes) {
+    const [a, m] = mes.split('-').map(Number);
+    const diasMes = new Date(a, m, 0).getDate();
+    const desde = t.inicio && t.inicio > mes + '-01' ? t.inicio : mes + '-01';
+    const tope = `${mes}-${String(diasMes).padStart(2, '0')}`;
+    const hasta = t.fin && t.fin < tope ? t.fin : tope;
+    if (desde > hasta) return 0;
+    let s = 0;
+    for (const c of cierresMes) {
+      if (c.mensual) {
+        const frac = (Number(hasta.slice(8)) - Number(desde.slice(8)) + 1) / diasMes;
+        s += (c.total || 0) * Math.max(0, Math.min(1, frac));
+      } else if (c.fecha >= desde && c.fecha <= hasta) {
+        s += c.total || 0;
+      }
+    }
+    return Math.round(s * 100) / 100;
+  }
+
+  function mesSiguiente(mes) {
+    const [a, m] = mes.split('-').map(Number);
+    return m === 12 ? `${a + 1}-01` : `${a}-${String(m + 1).padStart(2, '0')}`;
+  }
+
+  /* Finiquito: todo lo devengado desde que empezó hasta su baja (u hoy),
+     menos todo lo que ya se le ha entregado. */
+  async function pendienteTotal(t, pagosT) {
+    const inicios = [t.inicio || '', ...(t.dias || []), ...pagosT.map(p => p.fecha || '')]
+      .filter(Boolean).sort();
+    if (!inicios.length) return 0;
+    let mes = inicios[0].slice(0, 7);
+    const ultimo = (t.fin || hoyISO()).slice(0, 7);
+    let devengado = 0;
+    while (mes <= ultimo) {
+      const cierresMes = await DB.buscar({ tipo: 'cierre', desde: mes + '-01', hasta: mes + '-31' });
+      devengado += calcularMes(t, ventasParaTrabajador(t, cierresMes, mes), [], mes).devengado;
+      mes = mesSiguiente(mes);
+    }
+    const entregado = pagosT.reduce((s, p) => s + (p.importe || 0), 0);
+    return Math.round((devengado - entregado) * 100) / 100;
+  }
+
+  const DIAS_EN_MEMORIA = 10; // tras abonar, el trabajador pasa al historial
+
+  function diasDesde(iso) {
+    return Math.floor((new Date() - new Date(iso + 'T00:00:00')) / 86400000);
+  }
+
+  /* Gráfico del mes: barra de ventas por día con los puntos de quién trabajó,
+     y la media de ventas de los días de cada uno. */
+  function graficoPersonalHTML(trabajadores, cierresMes, mes) {
+    const plantilla = trabajadores.filter(t => !t.liquidado);
+    const ventasDia = new Map();
+    cierresMes.filter(c => !c.mensual).forEach(c => {
+      ventasDia.set(c.fecha, Math.round(((ventasDia.get(c.fecha) || 0) + (c.total || 0)) * 100) / 100);
+    });
+    const fechas = new Set(ventasDia.keys());
+    plantilla.forEach(t => (t.dias || []).filter(d => d.startsWith(mes)).forEach(d => fechas.add(d)));
+    const lista = [...fechas].sort();
+    if (!lista.length) return '<p class="vacio">Aún no hay cierres ni días marcados este mes.</p>';
+
+    const max = Math.max(1, ...ventasDia.values());
+    const filas = lista.map(f => {
+      const v = ventasDia.get(f) || 0;
+      const dots = plantilla
+        .filter(t => (t.dias || []).includes(f))
+        .map(t => pdot(t, trabajadores.indexOf(t))).join('');
+      return `
+        <div class="fila-mes">
+          <span class="mes-etq">día ${+f.slice(8)}</span>
+          <div class="barra"><div class="barra-fill" style="width:${Math.max(2, Math.round(v / max * 100))}%"></div></div>
+          <span class="mes-val">${v ? INFORME.eur(v) : '—'}</span>
+          <span class="pdots">${dots}</span>
+        </div>`;
+    }).join('');
+
+    const leyenda = plantilla.map(t => `<span class="ley-item">${pdot(t, trabajadores.indexOf(t))} ${escapar(t.nombre)}</span>`).join('');
+
+    const medias = plantilla.map(t => {
+      const i = trabajadores.indexOf(t);
+      const suyos = (t.dias || []).filter(d => d.startsWith(mes) && ventasDia.has(d));
+      if (!suyos.length) {
+        return `<div class="stat-linea"><span>${pdot(t, i)} ${escapar(t.nombre)}</span><span class="txt-sec">sin días con venta anotada</span></div>`;
+      }
+      const media = suyos.reduce((s, d) => s + ventasDia.get(d), 0) / suyos.length;
+      return `<div class="stat-linea"><span>${pdot(t, i)} ${escapar(t.nombre)} · ${suyos.length} día${suyos.length === 1 ? '' : 's'} con venta</span><strong>media ${INFORME.eur(media)}/día</strong></div>`;
+    }).join('');
+
+    return `
+      ${plantilla.length ? `<div class="ley-personal">${leyenda}</div>` : ''}
+      ${filas}
+      ${plantilla.length ? `<p class="hint" style="margin:12px 0 4px">Media de ventas los días que trabaja cada uno:</p>${medias}` : ''}`;
+  }
+
   async function pintarPersonal() {
     if (!$('#per-mes').value) $('#per-mes').value = hoyISO().slice(0, 7);
     const mes = mesPersonal();
-    const [trabajadores, pagos, ventas] = await Promise.all([
-      DB.perTodos(), DB.pagoTodos(), ventasDelMes(mes)
+    const [trabajadores, pagos, cierresMes] = await Promise.all([
+      DB.perTodos(), DB.pagoTodos(),
+      DB.buscar({ tipo: 'cierre', desde: mes + '-01', hasta: mes + '-31' })
     ]);
+    const ventasNegocio = Math.round(cierresMes.reduce((s, r) => s + (r.total || 0), 0) * 100) / 100;
 
     $('#per-ventas').innerHTML =
-      `Ventas del negocio en ${mesEnLetras(mes + '-01')}: <strong class="ingreso">${INFORME.eur(ventas)}</strong> (según tus cierres)`;
+      `Ventas del negocio en ${mesEnLetras(mes + '-01')}: <strong class="ingreso">${INFORME.eur(ventasNegocio)}</strong> (según tus cierres)`;
+
+    const activos = trabajadores.filter(t => !t.liquidado || diasDesde(t.liquidado) < DIAS_EN_MEMORIA);
+    const historial = trabajadores.filter(t => t.liquidado && diasDesde(t.liquidado) >= DIAS_EN_MEMORIA);
 
     const div = $('#per-lista');
-    if (!trabajadores.length) {
-      div.innerHTML = '<p class="vacio">Aún no tienes trabajadores dados de alta.</p>';
-      return;
-    }
-
-    div.innerHTML = trabajadores.map(t => {
-      const pagosMes = pagos.filter(p => p.trabajadorSid === t.sid && (p.fecha || '').startsWith(mes))
+    const tarjetas = [];
+    for (const t of activos) {
+      const i = trabajadores.indexOf(t);
+      const pagosT = pagos.filter(p => p.trabajadorSid === t.sid)
         .sort((a, b) => (a.fecha || '').localeCompare(b.fecha || ''));
-      const c = calcularMes(t, ventas, pagosMes, mes);
+      const pagosMes = pagosT.filter(p => (p.fecha || '').startsWith(mes));
+
+      // Ya abonado: tarjeta compacta hasta que pase al historial
+      if (t.liquidado) {
+        const totalPagado = pagosT.reduce((s, p) => s + (p.importe || 0), 0);
+        tarjetas.push(`
+          <div class="prov-form per-card">
+            <div class="per-cab">
+              <div>
+                <div class="stat-prov-nombre">${pdot(t, i)} ${escapar(t.nombre)}</div>
+                <div class="stat-prov-nif">Trabajó ${t.inicio ? 'del ' + fmtFecha(t.inicio) : ''}${t.fin ? ' al ' + fmtFecha(t.fin) : ''}</div>
+              </div>
+            </div>
+            <div class="stat-linea"><span>✔️ Abonado y liquidado el</span><strong class="txt-ok">${fmtFecha(t.liquidado)}</strong></div>
+            <div class="stat-linea"><span>Total pagado en todo su tiempo</span><strong>${INFORME.eur(totalPagado)}</strong></div>
+            <p class="hint" style="margin:8px 0 0">Pasará al historial en ${Math.max(1, DIAS_EN_MEMORIA - diasDesde(t.liquidado))} día(s).</p>
+          </div>`);
+        continue;
+      }
+
+      const ventasT = ventasParaTrabajador(t, cierresMes, mes);
+      const c = calcularMes(t, ventasT, pagosMes, mes);
+      const inicioEnMes = t.inicio && t.inicio.slice(0, 7) === mes && t.inicio > mes + '-01';
 
       const comisionTxt = c.tramoActual
-        ? `✅ Objetivo de ${INFORME.eur(c.tramoActual.objetivo)} alcanzado → ${c.tramoActual.porcentaje} % de las ventas = <strong>${INFORME.eur(c.comision)}</strong>`
+        ? `✅ Objetivo de ${INFORME.eur(c.tramoActual.objetivo)} alcanzado → ${c.tramoActual.porcentaje} % = <strong>${INFORME.eur(c.comision)}</strong>`
         : (tramosDe(t).length ? 'Aún sin objetivo alcanzado: solo el fijo' : 'Sin comisiones pactadas');
+      const notaProrrateo = inicioEnMes
+        ? `<p class="hint" style="margin:2px 0 0">Sus ventas cuentan desde su inicio (${fmtFecha(t.inicio)}): ${INFORME.eur(ventasT)}.</p>` : '';
       const siguienteTxt = c.siguiente
-        ? `<div class="per-siguiente">Faltan <strong>${INFORME.eur(Math.max(0, c.siguiente.objetivo - ventas))}</strong> de ventas para el ${c.tramoActual ? 'siguiente' : 'primer'} objetivo (${INFORME.eur(c.siguiente.objetivo)} → ${c.siguiente.porcentaje} %)</div>`
+        ? `<div class="per-siguiente">Faltan <strong>${INFORME.eur(Math.max(0, c.siguiente.objetivo - ventasT))}</strong> de ventas para el ${c.tramoActual ? 'siguiente' : 'primer'} objetivo (${INFORME.eur(c.siguiente.objetivo)} → ${c.siguiente.porcentaje} %)</div>`
         : '';
 
-      const pagosHTML = pagosMes.length
-        ? pagosMes.map(p => `
-            <div class="per-pago">
-              <span>${fmtFecha(p.fecha)}${p.notas ? ' · ' + escapar(p.notas) : ''}</span>
-              <span>${INFORME.eur(p.importe)} <button class="btn btn-small pago-borrar" data-id="${p.id}" title="Eliminar">🗑️</button></span>
-            </div>`).join('')
-        : '<p class="vacio" style="padding:6px">Sin entregas este mes.</p>';
+      // Dado de baja pero aún sin abonar: finiquito total pendiente
+      let bajaHTML = '';
+      if (t.fin) {
+        const finiquito = await pendienteTotal(t, pagosT);
+        bajaHTML = `
+          <div class="per-baja">
+            <div>🚪 Dejó de trabajar el <strong>${fmtFecha(t.fin)}</strong></div>
+            <div class="stat-linea"><span>${finiquito > 0 ? 'DEBES PAGARLE (todo lo pendiente)' : 'No le debes nada'}</span><strong class="${finiquito > 0 ? 'txt-bad' : 'txt-ok'}">${INFORME.eur(Math.max(0, finiquito))}</strong></div>
+            <button class="btn btn-primary per-abonar" data-sid="${t.sid}">✔️ ${finiquito > 0 ? 'Abonar ' + INFORME.eur(finiquito) + ' y liquidar' : 'Marcar como liquidado'}</button>
+          </div>`;
+      }
 
       const notasMes = (t.notasDias || []).map((n, idx) => ({ ...n, idx }))
         .filter(n => (n.fecha || '').startsWith(mes))
@@ -1234,15 +1369,24 @@
           <button class="btn btn-small nota-borrar" data-sid="${t.sid}" data-idx="${n.idx}" title="Eliminar">🗑️</button>
         </div>`).join('');
 
-      return `
+      const pagosHTML = pagosMes.length
+        ? pagosMes.map(p => `
+            <div class="per-pago">
+              <span>${fmtFecha(p.fecha)}${p.notas ? ' · ' + escapar(p.notas) : ''}</span>
+              <span>${INFORME.eur(p.importe)} <button class="btn btn-small pago-borrar" data-id="${p.id}" title="Eliminar">🗑️</button></span>
+            </div>`).join('')
+        : '<p class="vacio" style="padding:6px">Sin entregas este mes.</p>';
+
+      tarjetas.push(`
         <div class="prov-form per-card">
           <div class="per-cab">
             <div>
-              <div class="stat-prov-nombre">${escapar(t.nombre)}</div>
+              <div class="stat-prov-nombre">${pdot(t, i)} ${escapar(t.nombre)}</div>
               ${t.inicio ? `<div class="stat-prov-nif">Trabaja desde el ${fmtFecha(t.inicio)}</div>` : ''}
             </div>
             <button class="btn btn-small per-editar" data-id="${t.id}">✏️ Editar</button>
           </div>
+          ${bajaHTML}
           <p class="hint" style="margin:4px 0 0">Días trabajados en el mes (toca para marcar / desmarcar):</p>
           ${calendarioHTML(t, mes)}
           <div class="form-row">
@@ -1253,6 +1397,7 @@
           ${notasHTML ? `<div style="margin-top:6px">${notasHTML}</div>` : ''}
           <div class="stat-linea"><span>Fijo: ${c.dias.length} día${c.dias.length === 1 ? '' : 's'} × ${INFORME.eur((t.sueldoMensual || 0) / 30)}</span><strong>${INFORME.eur(c.fijo)}</strong></div>
           <div class="stat-linea"><span>Comisión</span><span style="text-align:right">${comisionTxt}</span></div>
+          ${notaProrrateo}
           ${siguienteTxt}
           <div class="stat-linea"><span>Le corresponde este mes</span><strong>${INFORME.eur(c.devengado)}</strong></div>
           <div class="stat-linea"><span>Ya le has dado (adelantos y pagos)</span><strong>${INFORME.eur(c.entregado)}</strong></div>
@@ -1268,8 +1413,22 @@
           </div>
           <button class="btn btn-secondary pago-apuntar" data-sid="${t.sid}">➕ Apuntar entrega</button>
           <div style="margin-top:8px">${pagosHTML}</div>
-        </div>`;
-    }).join('');
+        </div>`);
+    }
+    div.innerHTML = tarjetas.length ? tarjetas.join('') : '<p class="vacio">Aún no tienes trabajadores dados de alta.</p>';
+
+    // Gráfico del mes e historial de antiguos
+    $('#per-grafico').innerHTML = graficoPersonalHTML(trabajadores, cierresMes, mes);
+    $('#per-historial').innerHTML = historial.length
+      ? historial.map(t => {
+          const totalPagado = pagos.filter(p => p.trabajadorSid === t.sid).reduce((s, p) => s + (p.importe || 0), 0);
+          return `
+            <div class="stat-linea">
+              <span>${escapar(t.nombre)}<br><small class="txt-sec">${t.inicio ? 'del ' + fmtFecha(t.inicio) : ''}${t.fin ? ' al ' + fmtFecha(t.fin) : ''} · ✔️ abonado el ${fmtFecha(t.liquidado)}</small></span>
+              <strong>${INFORME.eur(totalPagado)}</strong>
+            </div>`;
+        }).join('')
+      : '<p class="vacio">Sin trabajadores antiguos todavía.</p>';
 
     // Marcar / desmarcar días trabajados
     div.querySelectorAll('.cal .dia').forEach(btn => {
@@ -1310,6 +1469,31 @@
         if (!t || !t.notasDias) return;
         t.notasDias.splice(+btn.dataset.idx, 1);
         await DB.perGuardar(t);
+        pintarPersonal();
+      }));
+    });
+
+    // Abonar el finiquito y liquidar
+    div.querySelectorAll('.per-abonar').forEach(btn => {
+      btn.addEventListener('click', guardarConAviso(async () => {
+        const t = (await DB.perTodos()).find(x => x.sid === btn.dataset.sid);
+        if (!t) return;
+        const pagosT = (await DB.pagoTodos()).filter(p => p.trabajadorSid === t.sid);
+        const finiquito = await pendienteTotal(t, pagosT);
+        const mensaje = finiquito > 0
+          ? `Se apuntará una entrega de ${INFORME.eur(finiquito)} como liquidación final y "${t.nombre}" quedará como ABONADO. ¿Continuar?`
+          : `¿Marcar a "${t.nombre}" como liquidado? (no le debes nada)`;
+        if (!confirm(mensaje)) return;
+        if (finiquito > 0) {
+          await DB.pagoGuardar({
+            trabajadorSid: t.sid, fecha: hoyISO(),
+            importe: finiquito, notas: 'Liquidación final (finiquito)',
+            creado: new Date().toISOString()
+          });
+        }
+        t.liquidado = hoyISO();
+        await DB.perGuardar(t);
+        toast('✔️ Abonado. Quedará en el historial como prueba de pago.');
         pintarPersonal();
       }));
     });
@@ -1357,6 +1541,7 @@
     $('#pe-nombre').value = t ? t.nombre : '';
     $('#pe-sueldo').value = t && t.sueldoMensual != null ? t.sueldoMensual : '';
     $('#pe-inicio').value = t ? (t.inicio || '') : '';
+    $('#pe-fin').value = t ? (t.fin || '') : '';
     const tramos = t ? (t.tramos || []) : [];
     [1, 2, 3].forEach(i => {
       $(`#pe-obj${i}`).value = tramos[i - 1] ? tramos[i - 1].objetivo : '';
@@ -1387,11 +1572,16 @@
 
     await DB.perGuardar({
       ...(perEditando
-        ? { id: perEditando.id, sid: perEditando.sid, dias: perEditando.dias || [], notasDias: perEditando.notasDias || [], creado: perEditando.creado }
-        : { dias: [], notasDias: [], creado: new Date().toISOString() }),
+        ? {
+            id: perEditando.id, sid: perEditando.sid,
+            dias: perEditando.dias || [], notasDias: perEditando.notasDias || [],
+            liquidado: perEditando.liquidado || '', creado: perEditando.creado
+          }
+        : { dias: [], notasDias: [], liquidado: '', creado: new Date().toISOString() }),
       nombre,
       sueldoMensual: Math.round(sueldo * 100) / 100,
       inicio: $('#pe-inicio').value || '',
+      fin: $('#pe-fin').value || '',
       tramos,
       notas: $('#pe-notas').value.trim()
     });
