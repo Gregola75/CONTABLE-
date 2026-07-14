@@ -1211,19 +1211,21 @@
      inicio y hasta su baja. Si empezó el día 10, sus comisiones se calculan
      con las ventas desde el 10; al mes siguiente ya cuenta el mes entero.
      Un total mensual sin detalle por días se reparte proporcionalmente. */
+  /* Ventas que cuentan para el objetivo de un trabajador: SOLO las de los
+     días que él trabajó (marcados en su calendario, incluidos los días que
+     llegó tarde). Las ventas de sus días libres o faltas no entran.
+     Un total mensual sin detalle por días se reparte por proporción. */
   function ventasParaTrabajador(t, cierresMes, mes) {
     const [a, m] = mes.split('-').map(Number);
-    const diasMes = new Date(a, m, 0).getDate();
-    const desde = t.inicio && t.inicio > mes + '-01' ? t.inicio : mes + '-01';
-    const tope = `${mes}-${String(diasMes).padStart(2, '0')}`;
-    const hasta = t.fin && t.fin < tope ? t.fin : tope;
-    if (desde > hasta) return 0;
+    const diasDelMes = new Date(a, m, 0).getDate();
+    const trabajados = new Set(
+      [...(t.dias || []), ...(t.tardes || [])].filter(d => d.startsWith(mes))
+    );
     let s = 0;
     for (const c of cierresMes) {
       if (c.mensual) {
-        const frac = (Number(hasta.slice(8)) - Number(desde.slice(8)) + 1) / diasMes;
-        s += (c.total || 0) * Math.max(0, Math.min(1, frac));
-      } else if (c.fecha >= desde && c.fecha <= hasta) {
+        s += (c.total || 0) * Math.min(1, trabajados.size / diasDelMes);
+      } else if (trabajados.has(c.fecha)) {
         s += c.total || 0;
       }
     }
@@ -1349,14 +1351,13 @@
 
       const ventasT = ventasParaTrabajador(t, cierresMes, mes);
       const c = calcularMes(t, ventasT, pagosMes, mes);
-      const inicioEnMes = t.inicio && t.inicio.slice(0, 7) === mes && t.inicio > mes + '-01';
       const abierta = perAbiertos.has(t.sid);
 
       const comisionTxt = c.tramoActual
         ? `✅ Objetivo de ${INFORME.eur(c.tramoActual.objetivo)} alcanzado → ${c.tramoActual.porcentaje} % = <strong>${INFORME.eur(c.comision)}</strong>`
         : (tramosDe(t).length ? 'Aún sin objetivo alcanzado: solo el fijo pactado' : 'Sin comisiones pactadas');
-      const notaProrrateo = inicioEnMes
-        ? `<p class="hint" style="margin:2px 0 0">Sus ventas cuentan desde su inicio (${fmtFecha(t.inicio)}): ${INFORME.eur(ventasT)}.</p>` : '';
+      const notaVentas = tramosDe(t).length
+        ? `<p class="hint" style="margin:2px 0 0">Para su objetivo solo cuentan las ventas de sus días trabajados: <strong>${INFORME.eur(ventasT)}</strong> este mes.</p>` : '';
       const siguienteTxt = c.siguiente
         ? `<div class="per-siguiente">Faltan <strong>${INFORME.eur(Math.max(0, c.siguiente.objetivo - ventasT))}</strong> de ventas para el ${c.tramoActual ? 'siguiente' : 'primer'} objetivo (${INFORME.eur(c.siguiente.objetivo)} → ${c.siguiente.porcentaje} %)</div>`
         : '';
@@ -1421,7 +1422,7 @@
             <div class="stat-linea"><span>Asistencia del mes</span><span>${c.dias.length} trabajado${c.dias.length === 1 ? '' : 's'}${c.tardes.length ? ` · <strong class="txt-oro">⏰ ${c.tardes.length} tarde${c.tardes.length === 1 ? '' : 's'}</strong>` : ''}${c.faltas.length ? ` · <strong class="txt-bad">${c.faltas.length} falta${c.faltas.length === 1 ? '' : 's'}</strong>` : ''}</span></div>
             <div class="stat-linea"><span>Fijo: ${c.dias.length} día${c.dias.length === 1 ? '' : 's'} × ${INFORME.eur((t.sueldoMensual || 0) / (t.diasMes || 26))} <small class="txt-sec">(${INFORME.eur(t.sueldoMensual || 0)} ÷ ${t.diasMes || 26})</small></span><strong>${INFORME.eur(c.fijo)}</strong></div>
             <div class="stat-linea"><span>Comisión</span><span style="text-align:right">${comisionTxt}</span></div>
-            ${notaProrrateo}
+            ${notaVentas}
             ${siguienteTxt}
             <div class="stat-linea"><span>Le corresponde este mes</span><strong>${INFORME.eur(c.devengado)}</strong></div>
             <div class="stat-linea"><span>Ya le has dado</span><strong>${INFORME.eur(c.entregado)}</strong></div>
