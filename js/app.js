@@ -1155,7 +1155,7 @@
       .filter(d => d.startsWith(mes)).sort();
     const tardes = (t.tardes || []).filter(d => d.startsWith(mes));
     const faltas = (t.faltas || []).filter(d => d.startsWith(mes));
-    const fijoDia = (t.sueldoMensual || 0) / 30;
+    const fijoDia = (t.sueldoMensual || 0) / (t.diasMes || 26);
     const fijo = Math.round(fijoDia * dias.length * 100) / 100;
 
     const tramos = tramosDe(t);
@@ -1419,7 +1419,7 @@
             <p class="per-seccion">📅 Días del mes</p>
             ${calendarioHTML(t, mes)}
             <div class="stat-linea"><span>Asistencia del mes</span><span>${c.dias.length} trabajado${c.dias.length === 1 ? '' : 's'}${c.tardes.length ? ` · <strong class="txt-oro">⏰ ${c.tardes.length} tarde${c.tardes.length === 1 ? '' : 's'}</strong>` : ''}${c.faltas.length ? ` · <strong class="txt-bad">${c.faltas.length} falta${c.faltas.length === 1 ? '' : 's'}</strong>` : ''}</span></div>
-            <div class="stat-linea"><span>Fijo: ${c.dias.length} día${c.dias.length === 1 ? '' : 's'} × ${INFORME.eur((t.sueldoMensual || 0) / 30)}</span><strong>${INFORME.eur(c.fijo)}</strong></div>
+            <div class="stat-linea"><span>Fijo: ${c.dias.length} día${c.dias.length === 1 ? '' : 's'} × ${INFORME.eur((t.sueldoMensual || 0) / (t.diasMes || 26))} <small class="txt-sec">(${INFORME.eur(t.sueldoMensual || 0)} ÷ ${t.diasMes || 26})</small></span><strong>${INFORME.eur(c.fijo)}</strong></div>
             <div class="stat-linea"><span>Comisión</span><span style="text-align:right">${comisionTxt}</span></div>
             ${notaProrrateo}
             ${siguienteTxt}
@@ -1594,6 +1594,7 @@
     perEditando = t;
     $('#pe-nombre').value = t ? t.nombre : '';
     $('#pe-sueldo').value = t && t.sueldoMensual != null ? t.sueldoMensual : '';
+    $('#pe-diasmes').value = t && t.diasMes ? t.diasMes : 26;
     $('#pe-inicio').value = t ? (t.inicio || '') : '';
     $('#pe-fin').value = t ? (t.fin || '') : '';
     const tramos = t ? (t.tramos || []) : [];
@@ -1616,8 +1617,10 @@
   $('#per-guardar').addEventListener('click', guardarConAviso(async () => {
     const nombre = $('#pe-nombre').value.trim();
     const sueldo = parseFloat($('#pe-sueldo').value);
+    const diasMes = Math.round(parseFloat($('#pe-diasmes').value));
     if (!nombre) { toast('⚠️ El nombre es obligatorio.'); return; }
     if (isNaN(sueldo) || sueldo < 0) { toast('⚠️ Pon el sueldo mensual pactado.'); return; }
+    if (isNaN(diasMes) || diasMes < 1 || diasMes > 31) { toast('⚠️ Pon los días que trabaja al mes (ej.: 26).'); return; }
 
     const tramos = [1, 2, 3].map(i => ({
       objetivo: parseFloat($(`#pe-obj${i}`).value) || 0,
@@ -1634,6 +1637,7 @@
         : { dias: [], tardes: [], faltas: [], notasDias: [], liquidado: '', creado: new Date().toISOString() }),
       nombre,
       sueldoMensual: Math.round(sueldo * 100) / 100,
+      diasMes,
       inicio: $('#pe-inicio').value || '',
       fin: $('#pe-fin').value || '',
       tramos,
