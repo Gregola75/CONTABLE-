@@ -1448,7 +1448,8 @@
             ${notasHTML ? `<div style="margin-top:6px">${notasHTML}</div>` : ''}
 
             <div class="form-actions">
-              <button class="btn btn-small per-editar" data-id="${t.id}">✏️ Editar ficha (sueldo, objetivos, inicio, baja)</button>
+              <button class="btn btn-small per-editar" data-id="${t.id}">✏️ Editar ficha (sueldo, objetivos, días…)</button>
+              ${t.fin ? '' : `<button class="btn btn-small per-dar-baja" data-id="${t.id}">🚪 Dar de baja (dejó de trabajar)</button>`}
             </div>
           </div>
         </div>`);
@@ -1551,6 +1552,21 @@
         toast('✔️ Abonado. Quedará en el historial como prueba de pago.');
         pintarPersonal();
       }));
+    });
+
+    // Dar de baja: abre la ficha y lleva directo al campo de la fecha
+    div.querySelectorAll('.per-dar-baja').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const t = (await DB.perTodos()).find(x => x.id === +btn.dataset.id);
+        if (!t) return;
+        abrirFormPersonal(t);
+        if (!$('#pe-fin').value) $('#pe-fin').value = hoyISO();
+        setTimeout(() => {
+          $('#pe-fin').scrollIntoView({ behavior: 'smooth', block: 'center' });
+          $('#pe-fin').focus();
+        }, 150);
+        toast('Revisa la fecha de baja y pulsa Guardar. Después podrás abonarle el finiquito.', 4500);
+      });
     });
 
     // Editar trabajador
