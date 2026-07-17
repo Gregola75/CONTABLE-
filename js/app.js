@@ -1151,12 +1151,16 @@
   /* Cálculo del mes de un trabajador: fijo por días + comisión por tramo */
   function calcularMes(t, ventas, pagosMes, mes) {
     // Trabajó = días normales + días que llegó tarde (vino igualmente)
-    const dias = [...new Set([...(t.dias || []), ...(t.tardes || [])])]
+    const dias = [...new Set([...(t.dias || []), ...fechasTardes(t)])]
       .filter(d => d.startsWith(mes)).sort();
-    const tardes = (t.tardes || []).filter(d => d.startsWith(mes));
+    const tardes = tardesDe(t).filter(x => x.fecha.startsWith(mes));
     const faltas = (t.faltas || []).filter(d => d.startsWith(mes));
     const fijoDia = (t.sueldoMensual || 0) / (t.diasMes || 26);
-    const fijo = Math.round(fijoDia * dias.length * 100) / 100;
+    const jornada = t.horasJornada || 7.5;
+    const horasTarde = Math.round(tardes.reduce((s, x) => s + (x.horas || 0), 0) * 10) / 10;
+    const descuentoTardes = Math.round(tardes.reduce(
+      (s, x) => s + fijoDia * Math.min(1, (x.horas || 0) / jornada), 0) * 100) / 100;
+    const fijo = Math.round((fijoDia * dias.length - descuentoTardes) * 100) / 100;
 
     const tramos = tramosDe(t);
     let tramoActual = null;
@@ -1170,7 +1174,8 @@
     const entregado = Math.round(pagosMes.reduce((s, p) => s + (p.importe || 0), 0) * 100) / 100;
     const devengado = Math.round((fijo + comision) * 100) / 100;
     return {
-      dias, tardes, faltas, fijo, comision, tramoActual, siguiente,
+      dias, tardes, faltas, horasTarde, descuentoTardes,
+      fijo, comision, tramoActual, siguiente,
       devengado, entregado,
       pendiente: Math.round((devengado - entregado) * 100) / 100
     };
@@ -1183,7 +1188,7 @@
     const nDias = new Date(a, m, 0).getDate();
     const primerDiaSemana = (new Date(a, m - 1, 1).getDay() + 6) % 7; // lunes = 0
     const trabajados = new Set((t.dias || []).filter(d => d.startsWith(mes)));
-    const tardes = new Set((t.tardes || []).filter(d => d.startsWith(mes)));
+    const tardes = new Set(fechasTardes(t).filter(d => d.startsWith(mes)));
     const faltas = new Set((t.faltas || []).filter(d => d.startsWith(mes)));
     const conNota = new Set((t.notasDias || []).map(n => n.fecha).filter(f => (f || '').startsWith(mes)));
     const cab = ['L', 'M', 'X', 'J', 'V', 'S', 'D'].map(d => `<span class="cal-cab">${d}</span>`).join('');
@@ -1204,6 +1209,11 @@
      El punto lleva la inicial dentro para no depender solo del color. */
   const PALETA_PERSONAL = ['#5b8def', '#1fa383', '#9a6fd0', '#d5643f', '#b8892e'];
 
+  /* Las tardes se guardan como { fecha, horas de retraso }. Las antiguas
+     eran solo la fecha: se tratan como 0 horas (sin descuento). */
+  const tardesDe = (t) => (t.tardes || []).map(x => (typeof x === 'string' ? { fecha: x, horas: 0 } : x));
+  const fechasTardes = (t) => tardesDe(t).map(x => x.fecha);
+
   const pdot = (t, i) =>
     `<span class="pdot" style="background:${PALETA_PERSONAL[i % PALETA_PERSONAL.length]}">${escapar((t.nombre || '?')[0].toUpperCase())}</span>`;
 
@@ -1219,7 +1229,7 @@
     const [a, m] = mes.split('-').map(Number);
     const diasDelMes = new Date(a, m, 0).getDate();
     const trabajados = new Set(
-      [...(t.dias || []), ...(t.tardes || [])].filter(d => d.startsWith(mes))
+      [...(t.dias || []), ...fechasTardes(t)].filter(d => d.startsWith(mes))
     );
     let s = 0;
     for (const c of cierresMes) {
@@ -1270,7 +1280,7 @@
       ventasDia.set(c.fecha, Math.round(((ventasDia.get(c.fecha) || 0) + (c.total || 0)) * 100) / 100);
     });
     const fechas = new Set(ventasDia.keys());
-    const diasDe = (t) => [...new Set([...(t.dias || []), ...(t.tardes || [])])];
+    const diasDe = (t) => [...new Set([...(t.dias || []), ...fechasTardes(t)])];
     plantilla.forEach(t => diasDe(t).filter(d => d.startsWith(mes)).forEach(d => fechas.add(d)));
     const lista = [...fechas].sort();
     if (!lista.length) return '<p class="vacio">Aún no hay cierres ni días marcados este mes.</p>';
@@ -1419,8 +1429,9 @@
             ${bajaHTML}
             <p class="per-seccion">📅 Días del mes</p>
             ${calendarioHTML(t, mes)}
-            <div class="stat-linea"><span>Asistencia del mes</span><span>${c.dias.length} trabajado${c.dias.length === 1 ? '' : 's'}${c.tardes.length ? ` · <strong class="txt-oro">⏰ ${c.tardes.length} tarde${c.tardes.length === 1 ? '' : 's'}</strong>` : ''}${c.faltas.length ? ` · <strong class="txt-bad">${c.faltas.length} falta${c.faltas.length === 1 ? '' : 's'}</strong>` : ''}</span></div>
+            <div class="stat-linea"><span>Asistencia del mes</span><span>${c.dias.length} trabajado${c.dias.length === 1 ? '' : 's'}${c.tardes.length ? ` · <strong class="txt-oro">⏰ ${c.tardes.length} tarde${c.tardes.length === 1 ? '' : 's'}${c.horasTarde ? ` (${c.horasTarde} h)` : ''}</strong>` : ''}${c.faltas.length ? ` · <strong class="txt-bad">${c.faltas.length} falta${c.faltas.length === 1 ? '' : 's'}</strong>` : ''}</span></div>
             <div class="stat-linea"><span>Fijo: ${c.dias.length} día${c.dias.length === 1 ? '' : 's'} × ${INFORME.eur((t.sueldoMensual || 0) / (t.diasMes || 26))} <small class="txt-sec">(${INFORME.eur(t.sueldoMensual || 0)} ÷ ${t.diasMes || 26})</small></span><strong>${INFORME.eur(c.fijo)}</strong></div>
+            ${c.descuentoTardes > 0 ? `<div class="stat-linea"><span>Descuento por retrasos (${c.horasTarde} h de ${t.horasJornada || 7.5} h/jornada)</span><strong class="txt-bad">−${INFORME.eur(c.descuentoTardes)}</strong></div>` : ''}
             <div class="stat-linea"><span>Comisión</span><span style="text-align:right">${comisionTxt}</span></div>
             ${notaVentas}
             ${siguienteTxt}
@@ -1486,14 +1497,24 @@
         if (!t) return;
         const f = btn.dataset.fecha;
         const dias = new Set(t.dias || []);
-        const tardes = new Set(t.tardes || []);
+        const tardes = tardesDe(t);
         const faltas = new Set(t.faltas || []);
-        if (dias.has(f)) { dias.delete(f); tardes.add(f); }        // trabajó → llegó tarde
-        else if (tardes.has(f)) { tardes.delete(f); faltas.add(f); } // tarde → faltó
-        else if (faltas.has(f)) { faltas.delete(f); }               // faltó → nada
-        else { dias.add(f); }                                       // nada → trabajó
+        const iTarde = tardes.findIndex(x => x.fecha === f);
+        if (dias.has(f)) {
+          // trabajó → llegó tarde: preguntar cuántas horas para descontar la parte del día
+          dias.delete(f);
+          const resp = prompt('⏰ ¿Cuántas horas llegó tarde ese día?\n(0 = se le paga el día entero igualmente)', '1');
+          const horas = Math.max(0, parseFloat(String(resp || '0').replace(',', '.')) || 0);
+          tardes.push({ fecha: f, horas });
+        } else if (iTarde >= 0) {
+          tardes.splice(iTarde, 1); faltas.add(f);                  // tarde → faltó
+        } else if (faltas.has(f)) {
+          faltas.delete(f);                                          // faltó → nada
+        } else {
+          dias.add(f);                                               // nada → trabajó
+        }
         t.dias = [...dias].sort();
-        t.tardes = [...tardes].sort();
+        t.tardes = tardes.sort((a, b) => a.fecha.localeCompare(b.fecha));
         t.faltas = [...faltas].sort();
         await DB.perGuardar(t);
         pintarPersonal();
@@ -1612,6 +1633,7 @@
     $('#pe-nombre').value = t ? t.nombre : '';
     $('#pe-sueldo').value = t && t.sueldoMensual != null ? t.sueldoMensual : '';
     $('#pe-diasmes').value = t && t.diasMes ? t.diasMes : 26;
+    $('#pe-jornada').value = t && t.horasJornada ? t.horasJornada : 7.5;
     $('#pe-inicio').value = t ? (t.inicio || '') : '';
     $('#pe-fin').value = t ? (t.fin || '') : '';
     const tramos = t ? (t.tramos || []) : [];
@@ -1655,6 +1677,7 @@
       nombre,
       sueldoMensual: Math.round(sueldo * 100) / 100,
       diasMes,
+      horasJornada: Math.max(1, Math.min(16, parseFloat($('#pe-jornada').value) || 7.5)),
       inicio: $('#pe-inicio').value || '',
       fin: $('#pe-fin').value || '',
       tramos,

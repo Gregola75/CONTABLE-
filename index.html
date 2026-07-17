@@ -410,6 +410,11 @@
       </div>
       <p class="hint" style="margin:0 0 10px">El precio del día = sueldo ÷ esos días. Con 1 día libre a la semana son ~26 días (ej.: 900 ÷ 26 = 34,62 € el día). Se paga por día trabajado.</p>
       <div class="form-group">
+        <label for="pe-jornada">Horas de una jornada <small>para descontar retrasos</small></label>
+        <input type="number" id="pe-jornada" step="0.5" min="1" max="16" value="7.5">
+        <p class="hint" style="margin:6px 0 0">Si llega tarde, se le descuenta la parte del día: horas de retraso ÷ horas de jornada. Ej.: jornada de 7,5 h (20:00–3:30) y llega 4 h tarde → cobra la mitad aprox. de ese día.</p>
+      </div>
+      <div class="form-group">
         <label for="pe-inicio">Comenzó a trabajar el</label>
         <input type="date" id="pe-inicio">
       </div>
