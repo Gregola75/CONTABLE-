@@ -810,6 +810,16 @@ select { appearance: none; -webkit-appearance: none; }
 }
 .ley-item { display: inline-flex; align-items: center; gap: 4px; }
 
+/* Rentabilidad de empleados */
+.renta-item {
+  border: 1px solid var(--borde);
+  border-radius: 10px;
+  background: var(--panel-2);
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+.renta-cab { font-size: .95rem; margin-bottom: 4px; }
+
 /* Aviso de baja / finiquito */
 .per-baja {
   margin: 10px 0;

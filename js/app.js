@@ -1312,10 +1312,72 @@
       return `<div class="stat-linea"><span>${pdot(t, i)} ${escapar(t.nombre)} · ${suyos.length} día${suyos.length === 1 ? '' : 's'} con venta</span><strong>media ${INFORME.eur(media)}/día</strong></div>`;
     }).join('');
 
+    // 🏆 Los días que más se facturó en el mes
+    const topDias = [...ventasDia.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
+    const medallas = ['🥇', '🥈', '🥉'];
+    const topHTML = topDias.map(([f, v], k) => {
+      const dots = plantilla.filter(t => diasDe(t).includes(f)).map(t => pdot(t, trabajadores.indexOf(t))).join('');
+      return `<div class="stat-linea"><span>${medallas[k]} ${fmtFecha(f)} ${dots}</span><strong>${INFORME.eur(v)}</strong></div>`;
+    }).join('');
+
+    // 📅 Media de ventas por día de la semana (qué días se factura más)
+    const nombresDias = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+    const agg = Array.from({ length: 7 }, () => ({ s: 0, n: 0 }));
+    ventasDia.forEach((v, f) => {
+      const i = (new Date(f + 'T00:00:00').getDay() + 6) % 7;
+      agg[i].s += v;
+      agg[i].n++;
+    });
+    const mediasSemana = agg.map(x => (x.n ? x.s / x.n : 0));
+    const maxSemana = Math.max(1, ...mediasSemana);
+    const semanaHTML = nombresDias.map((n, i) => agg[i].n ? `
+      <div class="fila-mes">
+        <span class="mes-etq">${n}</span>
+        <div class="barra"><div class="barra-fill" style="width:${Math.max(2, Math.round(mediasSemana[i] / maxSemana * 100))}%"></div></div>
+        <span class="mes-val">${INFORME.eur(mediasSemana[i])}</span>
+      </div>` : '').join('');
+
     return `
       ${plantilla.length ? `<div class="ley-personal">${leyenda}</div>` : ''}
       ${filas}
+      ${topHTML ? `<p class="hint" style="margin:12px 0 4px">🏆 Los días que más facturaste este mes:</p>${topHTML}` : ''}
+      ${semanaHTML.trim() ? `<p class="hint" style="margin:12px 0 4px">📅 Media de ventas por día de la semana:</p>${semanaHTML}` : ''}
       ${plantilla.length ? `<p class="hint" style="margin:12px 0 4px">Media de ventas los días que trabaja cada uno:</p>${medias}` : ''}`;
+  }
+
+  /* Rentabilidad de cada empleado activo: su coste del mes (fijo + comisión)
+     frente a las ventas de sus días trabajados. */
+  function rentabilidadHTML(trabajadores, cierresMes, mes) {
+    const plantilla = trabajadores.filter(t => !t.liquidado && !t.fin);
+    if (!plantilla.length) return '<p class="vacio">Sin empleados activos.</p>';
+
+    const datos = plantilla.map(t => {
+      const ventas = ventasParaTrabajador(t, cierresMes, mes);
+      const c = calcularMes(t, ventas, [], mes);
+      return { t, ventas, coste: c.devengado, dias: c.dias.length };
+    });
+    const conDatos = datos.filter(d => d.coste > 0 && d.ventas > 0)
+      .sort((a, b) => b.ventas / b.coste - a.ventas / a.coste);
+    const sinDatos = datos.filter(d => !(d.coste > 0 && d.ventas > 0));
+    const medallas = ['🥇', '🥈', '🥉'];
+
+    const filas = conDatos.map((d, k) => {
+      const retorno = Math.round((d.ventas / d.coste) * 10) / 10;
+      const pct = Math.round((d.coste / d.ventas) * 1000) / 10;
+      return `
+        <div class="renta-item">
+          <div class="renta-cab">${medallas[k] || ''} ${pdot(d.t, trabajadores.indexOf(d.t))} <strong>${escapar(d.t.nombre)}</strong></div>
+          <div class="stat-linea"><span>Te cuesta este mes (${d.dias} día${d.dias === 1 ? '' : 's'})</span><strong>${INFORME.eur(d.coste)}</strong></div>
+          <div class="stat-linea"><span>Ventas en sus días</span><strong>${INFORME.eur(d.ventas)}</strong></div>
+          <div class="stat-linea"><span>Rentabilidad</span><span style="text-align:right">por cada <strong>1 €</strong> que le pagas entran <strong>${retorno.toLocaleString('es-ES')} €</strong><br><small class="txt-sec">su coste es el ${pct.toLocaleString('es-ES')} % de lo que se vende con él</small></span></div>
+        </div>`;
+    }).join('');
+
+    const otros = sinDatos.map(d =>
+      `<div class="stat-linea"><span>${pdot(d.t, trabajadores.indexOf(d.t))} ${escapar(d.t.nombre)}</span><span class="txt-sec">sin días marcados o sin ventas este mes</span></div>`
+    ).join('');
+
+    return (filas + otros) || '<p class="vacio">Marca los días trabajados y anota los cierres para poder medir.</p>';
   }
 
   async function pintarPersonal() {
@@ -1467,8 +1529,9 @@
     }
     div.innerHTML = tarjetas.length ? tarjetas.join('') : '<p class="vacio">Aún no tienes trabajadores dados de alta.</p>';
 
-    // Gráfico del mes e historial de antiguos
+    // Gráfico del mes, rentabilidad e historial de antiguos
     $('#per-grafico').innerHTML = graficoPersonalHTML(trabajadores, cierresMes, mes);
+    $('#per-renta').innerHTML = rentabilidadHTML(trabajadores, cierresMes, mes);
     $('#per-historial').innerHTML = historial.length
       ? historial.map(t => {
           const totalPagado = pagos.filter(p => p.trabajadorSid === t.sid).reduce((s, p) => s + (p.importe || 0), 0);
