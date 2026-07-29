@@ -1345,6 +1345,55 @@
       ${plantilla.length ? `<p class="hint" style="margin:12px 0 4px">Media de ventas los días que trabaja cada uno:</p>${medias}` : ''}`;
   }
 
+  /* Comparativa por combinaciones: qué se factura de media los días en que
+     trabaja cada uno solo, los dos juntos, etc. */
+  function combinacionesHTML(trabajadores, cierresMes, mes) {
+    const plantilla = trabajadores.filter(t => !t.liquidado);
+    if (!plantilla.length) return '';
+    const ventasDia = new Map();
+    cierresMes.filter(c => !c.mensual).forEach(c => {
+      ventasDia.set(c.fecha, Math.round(((ventasDia.get(c.fecha) || 0) + (c.total || 0)) * 100) / 100);
+    });
+    if (!ventasDia.size) return '';
+
+    const presencia = plantilla.map(t => new Set([...(t.dias || []), ...fechasTardes(t)]));
+    const grupos = new Map(); // "Juan + Ana" → { n, total, quienes }
+    for (const [f, v] of ventasDia) {
+      const quienes = plantilla.filter((t, i) => presencia[i].has(f));
+      const clave = quienes.length ? quienes.map(t => t.nombre).join(' + ') : 'sin-nadie';
+      if (!grupos.has(clave)) grupos.set(clave, { n: 0, total: 0, quienes });
+      const g = grupos.get(clave);
+      g.n++;
+      g.total += v;
+    }
+
+    const lista = [...grupos.entries()]
+      .map(([clave, g]) => ({ clave, ...g, media: g.total / g.n }))
+      .sort((a, b) => b.media - a.media);
+    const maxMedia = Math.max(1, ...lista.map(g => g.media));
+    const medallas = ['🥇', '🥈', '🥉'];
+
+    const filas = lista.map((g, k) => {
+      const dots = g.quienes.map(t => pdot(t, trabajadores.indexOf(t))).join('');
+      const etiqueta = g.clave === 'sin-nadie'
+        ? '<span class="txt-sec">Sin nadie marcado</span>'
+        : (g.quienes.length === 1 ? `Solo ${escapar(g.quienes[0].nombre)}` : g.quienes.map(t => escapar(t.nombre)).join(' + '));
+      return `
+        <div class="combo-linea">
+          <div class="combo-etq">${medallas[k] || ''} ${dots} ${etiqueta} <small class="txt-sec">· ${g.n} día${g.n === 1 ? '' : 's'}</small></div>
+          <div class="fila-mes">
+            <div class="barra"><div class="barra-fill" style="width:${Math.max(2, Math.round(g.media / maxMedia * 100))}%"></div></div>
+            <span class="mes-val"><strong>${INFORME.eur(g.media)}</strong>/día</span>
+          </div>
+        </div>`;
+    }).join('');
+
+    return `
+      <p class="hint" style="margin:0 0 6px">🧩 <strong>Media de ventas según quién trabaja</strong> — compara los días de cada uno solo y los días juntos:</p>
+      ${filas}
+      <div style="margin-bottom:14px"></div>`;
+  }
+
   /* Rentabilidad de cada empleado activo: su coste del mes (fijo + comisión)
      frente a las ventas de sus días trabajados. */
   function rentabilidadHTML(trabajadores, cierresMes, mes) {
@@ -1377,7 +1426,9 @@
       `<div class="stat-linea"><span>${pdot(d.t, trabajadores.indexOf(d.t))} ${escapar(d.t.nombre)}</span><span class="txt-sec">sin días marcados o sin ventas este mes</span></div>`
     ).join('');
 
-    return (filas + otros) || '<p class="vacio">Marca los días trabajados y anota los cierres para poder medir.</p>';
+    const cuerpo = filas + otros;
+    return combinacionesHTML(trabajadores, cierresMes, mes) +
+      (cuerpo || '<p class="vacio">Marca los días trabajados y anota los cierres para poder medir.</p>');
   }
 
   async function pintarPersonal() {

@@ -810,6 +810,18 @@ select { appearance: none; -webkit-appearance: none; }
 }
 .ley-item { display: inline-flex; align-items: center; gap: 4px; }
 
+/* Comparativa por combinaciones de turno */
+.combo-linea { margin-bottom: 8px; }
+.combo-etq {
+  font-size: .84rem;
+  font-weight: 600;
+  margin-bottom: 2px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
 /* Rentabilidad de empleados */
 .renta-item {
   border: 1px solid var(--borde);
