@@ -1413,11 +1413,14 @@
     const filas = conDatos.map((d, k) => {
       const retorno = Math.round((d.ventas / d.coste) * 10) / 10;
       const pct = Math.round((d.coste / d.ventas) * 1000) / 10;
+      const mediaDia = d.dias ? d.ventas / d.dias : 0;
+      const costeDia = d.dias ? d.coste / d.dias : 0;
       return `
         <div class="renta-item">
-          <div class="renta-cab">${medallas[k] || ''} ${pdot(d.t, trabajadores.indexOf(d.t))} <strong>${escapar(d.t.nombre)}</strong></div>
-          <div class="stat-linea"><span>Te cuesta este mes (${d.dias} día${d.dias === 1 ? '' : 's'})</span><strong>${INFORME.eur(d.coste)}</strong></div>
-          <div class="stat-linea"><span>Ventas en sus días</span><strong>${INFORME.eur(d.ventas)}</strong></div>
+          <div class="renta-cab">${medallas[k] || ''} ${pdot(d.t, trabajadores.indexOf(d.t))} <strong>${escapar(d.t.nombre)}</strong> <small class="txt-sec">· ${d.dias} día${d.dias === 1 ? '' : 's'} trabajado${d.dias === 1 ? '' : 's'}</small></div>
+          <div class="stat-linea"><span><strong>Vende de media por día trabajado</strong></span><strong>${INFORME.eur(mediaDia)}/día</strong></div>
+          <div class="stat-linea"><span>Te cuesta de media por día</span><strong>${INFORME.eur(costeDia)}/día</strong></div>
+          <div class="stat-linea"><span>Total del mes: coste / ventas en sus días</span><span>${INFORME.eur(d.coste)} / ${INFORME.eur(d.ventas)}</span></div>
           <div class="stat-linea"><span>Rentabilidad</span><span style="text-align:right">por cada <strong>1 €</strong> que le pagas entran <strong>${retorno.toLocaleString('es-ES')} €</strong><br><small class="txt-sec">su coste es el ${pct.toLocaleString('es-ES')} % de lo que se vende con él</small></span></div>
         </div>`;
     }).join('');
