@@ -1247,22 +1247,38 @@
     return m === 12 ? `${a + 1}-01` : `${a}-${String(m + 1).padStart(2, '0')}`;
   }
 
-  /* Finiquito: todo lo devengado desde que empezó hasta su baja (u hoy),
-     menos todo lo que ya se le ha entregado. */
-  async function pendienteTotal(t, pagosT) {
-    const inicios = [t.inicio || '', ...(t.dias || []), ...pagosT.map(p => p.fecha || '')]
+  /* Deuda completa con un trabajador, mes a mes: lo devengado desde que
+     empezó (hasta su baja u hoy) menos todo lo entregado. Devuelve el total
+     y el desglose por meses para poder verlo en detalle. */
+  async function desgloseDeuda(t, pagosT, cierresDeMes) {
+    const fechas = [t.inicio || '', ...(t.dias || []), ...fechasTardes(t), ...pagosT.map(p => p.fecha || '')]
       .filter(Boolean).sort();
-    if (!inicios.length) return 0;
-    let mes = inicios[0].slice(0, 7);
+    if (!fechas.length) return { total: 0, meses: [] };
+    let mes = fechas[0].slice(0, 7);
     const ultimo = (t.fin || hoyISO()).slice(0, 7);
-    let devengado = 0;
+    const meses = [];
+    let total = 0;
     while (mes <= ultimo) {
-      const cierresMes = await DB.buscar({ tipo: 'cierre', desde: mes + '-01', hasta: mes + '-31' });
-      devengado += calcularMes(t, ventasParaTrabajador(t, cierresMes, mes), [], mes).devengado;
+      const cierresMes = await cierresDeMes(mes);
+      const devengado = calcularMes(t, ventasParaTrabajador(t, cierresMes, mes), [], mes).devengado;
+      const entregado = Math.round(pagosT.filter(p => (p.fecha || '').startsWith(mes))
+        .reduce((s, p) => s + (p.importe || 0), 0) * 100) / 100;
+      if (devengado || entregado) {
+        meses.push({ mes, devengado, entregado, saldo: Math.round((devengado - entregado) * 100) / 100 });
+      }
+      total += devengado - entregado;
       mes = mesSiguiente(mes);
     }
-    const entregado = pagosT.reduce((s, p) => s + (p.importe || 0), 0);
-    return Math.round((devengado - entregado) * 100) / 100;
+    return { total: Math.round(total * 100) / 100, meses };
+  }
+
+  async function pendienteTotal(t, pagosT) {
+    const cache = new Map();
+    const cierresDeMes = async (m) => {
+      if (!cache.has(m)) cache.set(m, await DB.buscar({ tipo: 'cierre', desde: m + '-01', hasta: m + '-31' }));
+      return cache.get(m);
+    };
+    return (await desgloseDeuda(t, pagosT, cierresDeMes)).total;
   }
 
   const DIAS_EN_MEMORIA = 10; // tras abonar, el trabajador pasa al historial
@@ -1449,6 +1465,12 @@
     const activos = trabajadores.filter(t => !t.liquidado || diasDesde(t.liquidado) < DIAS_EN_MEMORIA);
     const historial = trabajadores.filter(t => t.liquidado && diasDesde(t.liquidado) >= DIAS_EN_MEMORIA);
 
+    const cacheCierres = new Map([[mes, cierresMes]]);
+    const cierresDeMes = async (m) => {
+      if (!cacheCierres.has(m)) cacheCierres.set(m, await DB.buscar({ tipo: 'cierre', desde: m + '-01', hasta: m + '-31' }));
+      return cacheCierres.get(m);
+    };
+
     const div = $('#per-lista');
     const tarjetas = [];
     for (const t of activos) {
@@ -1488,32 +1510,41 @@
         ? `<div class="per-siguiente">Faltan <strong>${INFORME.eur(Math.max(0, c.siguiente.objetivo - ventasT))}</strong> de ventas para el ${c.tramoActual ? 'siguiente' : 'primer'} objetivo (${INFORME.eur(c.siguiente.objetivo)} → ${c.siguiente.porcentaje} %)</div>`
         : '';
 
+      // Deuda TOTAL con él (este mes + lo arrastrado de meses anteriores)
+      const deuda = await desgloseDeuda(t, pagosT, cierresDeMes);
+      const arrastre = Math.round((deuda.total - c.pendiente) * 100) / 100;
+
       // Dado de baja pero aún sin abonar: finiquito total pendiente
       let bajaHTML = '';
-      let finiquito = null;
       if (t.fin) {
-        finiquito = await pendienteTotal(t, pagosT);
         bajaHTML = `
           <div class="per-baja">
             <div>🚪 Dejó de trabajar el <strong>${fmtFecha(t.fin)}</strong></div>
-            <div class="stat-linea"><span>${finiquito > 0 ? 'DEBES PAGARLE (todo lo pendiente)' : 'No le debes nada'}</span><strong class="${finiquito > 0 ? 'txt-bad' : 'txt-ok'}">${INFORME.eur(Math.max(0, finiquito))}</strong></div>
-            <button class="btn btn-primary per-abonar" data-sid="${t.sid}">✔️ ${finiquito > 0 ? 'Abonar ' + INFORME.eur(finiquito) + ' y liquidar' : 'Marcar como liquidado'}</button>
+            <div class="stat-linea"><span>${deuda.total > 0 ? 'DEBES PAGARLE (todo lo pendiente)' : 'No le debes nada'}</span><strong class="${deuda.total > 0 ? 'txt-bad' : 'txt-ok'}">${INFORME.eur(Math.max(0, deuda.total))}</strong></div>
+            <button class="btn btn-primary per-abonar" data-sid="${t.sid}">✔️ ${deuda.total > 0 ? 'Abonar ' + INFORME.eur(deuda.total) + ' y liquidar' : 'Marcar como liquidado'}</button>
           </div>`;
       }
 
-      // Resumen para la cabecera de la ficha (visible siempre)
+      // Resumen para la cabecera de la ficha (visible siempre): la deuda TOTAL
       let resumenCab;
       if (t.fin) {
-        resumenCab = finiquito > 0
-          ? `<strong class="txt-bad">Finiquito: ${INFORME.eur(finiquito)}</strong>`
+        resumenCab = deuda.total > 0
+          ? `<strong class="txt-bad">Finiquito: ${INFORME.eur(deuda.total)}</strong>`
           : '<strong class="txt-ok">✓ Sin deuda</strong>';
-      } else if (c.pendiente > 0) {
-        resumenCab = `<strong class="txt-bad">Le debes ${INFORME.eur(c.pendiente)}</strong>`;
-      } else if (c.pendiente < 0) {
-        resumenCab = `<strong class="txt-sec">Adelantado ${INFORME.eur(-c.pendiente)}</strong>`;
+      } else if (deuda.total > 0) {
+        resumenCab = `<strong class="txt-bad">Le debes ${INFORME.eur(deuda.total)}</strong>`;
+      } else if (deuda.total < 0) {
+        resumenCab = `<strong class="txt-sec">Adelantado ${INFORME.eur(-deuda.total)}</strong>`;
       } else {
         resumenCab = '<strong class="txt-ok">✓ Al día</strong>';
       }
+
+      // Desglose mes a mes (vista detallada, plegada)
+      const filasMeses = deuda.meses.map(m => `
+        <div class="stat-linea"><span>${mesEnLetras(m.mes + '-01')}: le correspondió ${INFORME.eur(m.devengado)} · le diste ${INFORME.eur(m.entregado)}</span><strong class="${m.saldo > 0 ? 'txt-bad' : (m.saldo < 0 ? 'txt-sec' : 'txt-ok')}">${m.saldo > 0 ? 'quedó debiendo ' : (m.saldo < 0 ? 'de más ' : '')}${m.saldo === 0 ? '✓' : INFORME.eur(Math.abs(m.saldo))}</strong></div>`).join('');
+      const desgloseHTML = deuda.meses.length
+        ? `<details class="ocr-details" style="margin:6px 0 0"><summary>Ver el desglose mes a mes</summary>${filasMeses}</details>`
+        : '';
 
       const notasMes = (t.notasDias || []).map((n, idx) => ({ ...n, idx }))
         .filter(n => (n.fecha || '').startsWith(mes))
@@ -1552,8 +1583,11 @@
             ${notaVentas}
             ${siguienteTxt}
             <div class="stat-linea"><span>Le corresponde este mes</span><strong>${INFORME.eur(c.devengado)}</strong></div>
-            <div class="stat-linea"><span>Ya le has dado</span><strong>${INFORME.eur(c.entregado)}</strong></div>
-            <div class="stat-linea per-pendiente ${c.pendiente > 0 ? '' : 'ok'}"><span>${c.pendiente >= 0 ? 'LE DEBES' : 'TE DEBE (adelantado de más)'}</span><strong>${INFORME.eur(Math.abs(c.pendiente))}</strong></div>
+            <div class="stat-linea"><span>Le has dado este mes</span><strong>${INFORME.eur(c.entregado)}</strong></div>
+            <div class="stat-linea"><span>Saldo de este mes</span><strong class="${c.pendiente > 0 ? 'txt-bad' : 'txt-sec'}">${INFORME.eur(c.pendiente)}</strong></div>
+            ${arrastre !== 0 ? `<div class="stat-linea"><span>Arrastre de meses anteriores</span><strong class="${arrastre > 0 ? 'txt-bad' : 'txt-sec'}">${arrastre > 0 ? '+' : ''}${INFORME.eur(arrastre)}</strong></div>` : ''}
+            <div class="stat-linea per-pendiente ${deuda.total > 0 ? '' : 'ok'}"><span>${deuda.total >= 0 ? 'LE DEBES EN TOTAL' : 'TE DEBE (adelantado de más)'}</span><strong>${INFORME.eur(Math.abs(deuda.total))}</strong></div>
+            ${desgloseHTML}
 
             <p class="per-seccion">💶 Adelantos y pagos que le haces</p>
             <div class="form-row">
