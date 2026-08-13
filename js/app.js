@@ -1500,6 +1500,7 @@
     const div = $('#per-lista');
     const tarjetas = [];
     const resumenes = new Map(); // sid → texto para compartir
+    const general = []; // visión general del equipo
     for (const t of activos) {
       const i = trabajadores.indexOf(t);
       const pagosT = pagos.filter(p => p.trabajadorSid === t.sid)
@@ -1589,6 +1590,7 @@
         : '<p class="vacio" style="padding:6px">Sin entregas este mes.</p>';
 
       resumenes.set(t.sid, resumenTexto(t, c, deuda, pagosT, mes));
+      general.push({ t, i, dias: c.dias.length, entregadoMes: c.entregado, deudaTotal: deuda.total });
 
       tarjetas.push(`
         <div class="prov-form per-card">
@@ -1648,6 +1650,33 @@
         </div>`);
     }
     div.innerHTML = tarjetas.length ? tarjetas.join('') : '<p class="vacio">Aún no tienes trabajadores dados de alta.</p>';
+
+    // 👀 Visión general del equipo: una línea por empleado + totales
+    const totalDeuda = general.reduce((s, g) => s + Math.max(0, g.deudaTotal), 0);
+    const totalEntregadoMes = Math.round(general.reduce((s, g) => s + g.entregadoMes, 0) * 100) / 100;
+    $('#per-general').innerHTML = general.length ? `
+      <div class="prov-form" style="margin-bottom:12px">
+        <p class="per-seccion" style="border:none;padding-top:0;margin-top:0">👀 Visión general del equipo <small class="txt-sec" style="text-transform:none;letter-spacing:0">(toca uno para ver su detalle)</small></p>
+        ${general.map(g => `
+          <div class="stat-linea per-gen-fila" data-sid="${g.t.sid}" style="cursor:pointer">
+            <span>${pdot(g.t, g.i)} ${escapar(g.t.nombre)} <small class="txt-sec">· ${g.dias} día${g.dias === 1 ? '' : 's'} este mes</small></span>
+            ${g.deudaTotal > 0
+              ? `<strong class="txt-bad">debes ${INFORME.eur(g.deudaTotal)}</strong>`
+              : (g.deudaTotal < 0 ? `<strong class="txt-sec">adelantado ${INFORME.eur(-g.deudaTotal)}</strong>` : '<strong class="txt-ok">✓ al día</strong>')}
+          </div>`).join('')}
+        <div class="stat-linea"><span><strong>TOTAL QUE DEBES AL EQUIPO</strong></span><strong class="${totalDeuda > 0 ? 'txt-bad' : 'txt-ok'}" style="font-size:1.05rem">${INFORME.eur(totalDeuda)}</strong></div>
+        <div class="stat-linea"><span>Entregado este mes (entre todos)</span><strong>${INFORME.eur(totalEntregadoMes)}</strong></div>
+      </div>` : '';
+
+    $('#per-general').querySelectorAll('.per-gen-fila').forEach(fila => {
+      fila.addEventListener('click', () => {
+        perAbiertos.add(fila.dataset.sid);
+        pintarPersonal().then(() => {
+          const el = document.querySelector(`.per-toggle[data-sid="${fila.dataset.sid}"]`);
+          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+      });
+    });
 
     // Gráfico del mes, rentabilidad e historial de antiguos
     $('#per-grafico').innerHTML = graficoPersonalHTML(trabajadores, cierresMes, mes);
