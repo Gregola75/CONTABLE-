@@ -1450,6 +1450,32 @@
       (cuerpo || '<p class="vacio">Marca los días trabajados y anota los cierres para poder medir.</p>');
   }
 
+  /* Texto neutro con lo del trabajador, para enviarle por WhatsApp.
+     Sin nombre del negocio, del dueño ni de la app. */
+  function resumenTexto(t, c, deuda, pagosT, mes) {
+    const lineas = [];
+    lineas.push(`Resumen de ${t.nombre} — ${mesEnLetras(mes + '-01')}`);
+    lineas.push('');
+    lineas.push(`Días trabajados: ${c.dias.length}` +
+      (c.tardes.length ? ` (⏰ ${c.tardes.length} con retraso${c.horasTarde ? `, ${c.horasTarde} h` : ''})` : '') +
+      (c.faltas.length ? ` · Faltas: ${c.faltas.length}` : ''));
+    lineas.push(`Corresponde este mes: ${INFORME.eur(c.devengado)}`);
+    const pagosMes = pagosT.filter(p => (p.fecha || '').startsWith(mes));
+    lineas.push(`Recibido este mes: ${INFORME.eur(c.entregado)}`);
+    pagosMes.forEach(p => lineas.push(`  · ${fmtFecha(p.fecha)}: ${INFORME.eur(p.importe)}${p.notas ? ` (${p.notas})` : ''}`));
+    const arrastre = Math.round((deuda.total - c.pendiente) * 100) / 100;
+    if (Math.abs(arrastre) >= 0.01) {
+      lineas.push(arrastre > 0
+        ? `Pendiente de meses anteriores: ${INFORME.eur(arrastre)}`
+        : `Recibido de más en meses anteriores: ${INFORME.eur(-arrastre)}`);
+    }
+    lineas.push('');
+    lineas.push(deuda.total >= 0
+      ? `PENDIENTE TOTAL A DÍA DE HOY: ${INFORME.eur(deuda.total)}`
+      : `RECIBIDO DE MÁS (a devolver o descontar): ${INFORME.eur(-deuda.total)}`);
+    return lineas.join('\n');
+  }
+
   async function pintarPersonal() {
     if (!$('#per-mes').value) $('#per-mes').value = hoyISO().slice(0, 7);
     const mes = mesPersonal();
@@ -1473,6 +1499,7 @@
 
     const div = $('#per-lista');
     const tarjetas = [];
+    const resumenes = new Map(); // sid → texto para compartir
     for (const t of activos) {
       const i = trabajadores.indexOf(t);
       const pagosT = pagos.filter(p => p.trabajadorSid === t.sid)
@@ -1542,9 +1569,7 @@
       // Desglose mes a mes (vista detallada, plegada)
       const filasMeses = deuda.meses.map(m => `
         <div class="stat-linea"><span>${mesEnLetras(m.mes + '-01')}: le correspondió ${INFORME.eur(m.devengado)} · le diste ${INFORME.eur(m.entregado)}</span><strong class="${m.saldo > 0 ? 'txt-bad' : (m.saldo < 0 ? 'txt-sec' : 'txt-ok')}">${m.saldo > 0 ? 'quedó debiendo ' : (m.saldo < 0 ? 'de más ' : '')}${m.saldo === 0 ? '✓' : INFORME.eur(Math.abs(m.saldo))}</strong></div>`).join('');
-      const desgloseHTML = deuda.meses.length
-        ? `<details class="ocr-details" style="margin:6px 0 0"><summary>Ver el desglose mes a mes</summary>${filasMeses}</details>`
-        : '';
+      const entregadoTotal = Math.round(pagosT.reduce((s, p) => s + (p.importe || 0), 0) * 100) / 100;
 
       const notasMes = (t.notasDias || []).map((n, idx) => ({ ...n, idx }))
         .filter(n => (n.fecha || '').startsWith(mes))
@@ -1562,6 +1587,8 @@
               <span>${INFORME.eur(p.importe)} <button class="btn btn-small pago-borrar" data-id="${p.id}" title="Eliminar">🗑️</button></span>
             </div>`).join('')
         : '<p class="vacio" style="padding:6px">Sin entregas este mes.</p>';
+
+      resumenes.set(t.sid, resumenTexto(t, c, deuda, pagosT, mes));
 
       tarjetas.push(`
         <div class="prov-form per-card">
@@ -1582,12 +1609,16 @@
             <div class="stat-linea"><span>Comisión</span><span style="text-align:right">${comisionTxt}</span></div>
             ${notaVentas}
             ${siguienteTxt}
-            <div class="stat-linea"><span>Le corresponde este mes</span><strong>${INFORME.eur(c.devengado)}</strong></div>
-            <div class="stat-linea"><span>Le has dado este mes</span><strong>${INFORME.eur(c.entregado)}</strong></div>
-            <div class="stat-linea"><span>Saldo de este mes</span><strong class="${c.pendiente > 0 ? 'txt-bad' : 'txt-sec'}">${INFORME.eur(c.pendiente)}</strong></div>
-            ${arrastre !== 0 ? `<div class="stat-linea"><span>Arrastre de meses anteriores</span><strong class="${arrastre > 0 ? 'txt-bad' : 'txt-sec'}">${arrastre > 0 ? '+' : ''}${INFORME.eur(arrastre)}</strong></div>` : ''}
             <div class="stat-linea per-pendiente ${deuda.total > 0 ? '' : 'ok'}"><span>${deuda.total >= 0 ? 'LE DEBES EN TOTAL' : 'TE DEBE (adelantado de más)'}</span><strong>${INFORME.eur(Math.abs(deuda.total))}</strong></div>
-            ${desgloseHTML}
+            <div class="stat-linea"><span>Entregado en total (todos los adelantos y pagas)</span><strong>${INFORME.eur(entregadoTotal)}</strong></div>
+            <details class="ocr-details" style="margin:6px 0 0">
+              <summary>Ver el detalle (este mes y mes a mes)</summary>
+              <div class="stat-linea"><span>Le corresponde este mes</span><strong>${INFORME.eur(c.devengado)}</strong></div>
+              <div class="stat-linea"><span>Le has dado este mes</span><strong>${INFORME.eur(c.entregado)}</strong></div>
+              <div class="stat-linea"><span>Saldo de este mes</span><strong class="${c.pendiente > 0 ? 'txt-bad' : 'txt-sec'}">${INFORME.eur(c.pendiente)}</strong></div>
+              ${arrastre !== 0 ? `<div class="stat-linea"><span>Arrastre de meses anteriores</span><strong class="${arrastre > 0 ? 'txt-bad' : 'txt-sec'}">${arrastre > 0 ? '+' : ''}${INFORME.eur(arrastre)}</strong></div>` : ''}
+              ${filasMeses}
+            </details>
 
             <p class="per-seccion">💶 Adelantos y pagos que le haces</p>
             <div class="form-row">
@@ -1609,6 +1640,7 @@
             ${notasHTML ? `<div style="margin-top:6px">${notasHTML}</div>` : ''}
 
             <div class="form-actions">
+              <button class="btn btn-small per-compartir" data-sid="${t.sid}">📤 Enviar su resumen (WhatsApp…)</button>
               <button class="btn btn-small per-editar" data-id="${t.id}">✏️ Editar ficha (sueldo, objetivos, días…)</button>
               ${t.fin ? '' : `<button class="btn btn-small per-dar-baja" data-id="${t.id}">🚪 Dar de baja (dejó de trabajar)</button>`}
             </div>
@@ -1738,6 +1770,27 @@
           $('#pe-fin').focus();
         }, 150);
         toast('Revisa la fecha de baja y pulsa Guardar. Después podrás abonarle el finiquito.', 4500);
+      });
+    });
+
+    // Compartir el resumen del trabajador (texto neutro)
+    div.querySelectorAll('.per-compartir').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const texto = resumenes.get(btn.dataset.sid);
+        if (!texto) return;
+        try {
+          if (navigator.share) { await navigator.share({ text: texto }); return; }
+        } catch (e) { if (e && e.name === 'AbortError') return; }
+        try {
+          await navigator.clipboard.writeText(texto);
+          toast('📋 Resumen copiado. Pégalo en WhatsApp.');
+        } catch (e) {
+          $('#modal-body').innerHTML = `
+            <h2>📤 Resumen para enviar</h2>
+            <p class="hint">Mantén pulsado el texto para copiarlo y pégalo en WhatsApp:</p>
+            <pre style="white-space:pre-wrap;word-break:break-word;background:#0f0f12;border:1px solid var(--borde);padding:12px;border-radius:8px;font-size:.85rem">${escapar(texto)}</pre>`;
+          $('#modal').classList.remove('hidden');
+        }
       });
     });
 
