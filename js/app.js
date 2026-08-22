@@ -1225,21 +1225,45 @@
      días que él trabajó (marcados en su calendario, incluidos los días que
      llegó tarde). Las ventas de sus días libres o faltas no entran.
      Un total mensual sin detalle por días se reparte por proporción. */
-  function ventasParaTrabajador(t, cierresMes, mes) {
+  /* Ventas que cuentan para el objetivo de un trabajador:
+     - Días trabajados normales: cuenta la venta completa del día.
+     - Días que llegó tarde: cuenta la parte proporcional a las horas que
+       estuvo (venta ÷ horas de jornada × horas trabajadas).
+     - Días libres o faltas: no cuentan nada.
+     Un total mensual sin detalle por días se reparte por proporción.
+     Con conDetalle=true devuelve también el desglose de los días con retraso. */
+  function ventasParaTrabajador(t, cierresMes, mes, conDetalle = false) {
     const [a, m] = mes.split('-').map(Number);
     const diasDelMes = new Date(a, m, 0).getDate();
-    const trabajados = new Set(
-      [...(t.dias || []), ...fechasTardes(t)].filter(d => d.startsWith(mes))
-    );
-    let s = 0;
+    const jornada = t.horasJornada || 7.5;
+    const normales = new Set((t.dias || []).filter(d => d.startsWith(mes)));
+    const tardesMes = tardesDe(t).filter(x => x.fecha.startsWith(mes));
+    const tardePorFecha = new Map(tardesMes.map(x => [x.fecha, x.horas || 0]));
+
+    const ventasDia = new Map();
+    let mensual = 0;
     for (const c of cierresMes) {
-      if (c.mensual) {
-        s += (c.total || 0) * Math.min(1, trabajados.size / diasDelMes);
-      } else if (trabajados.has(c.fecha)) {
-        s += c.total || 0;
+      if (c.mensual) mensual += (c.total || 0);
+      else ventasDia.set(c.fecha, (ventasDia.get(c.fecha) || 0) + (c.total || 0));
+    }
+
+    let s = 0;
+    const detalleTardes = [];
+    for (const [f, v] of ventasDia) {
+      if (normales.has(f)) {
+        s += v;
+      } else if (tardePorFecha.has(f)) {
+        const horas = tardePorFecha.get(f);
+        const horasTrabajadas = Math.max(0, Math.round((jornada - horas) * 10) / 10);
+        const cuenta = Math.round(v * Math.max(0, (jornada - horas) / jornada) * 100) / 100;
+        s += cuenta;
+        detalleTardes.push({ fecha: f, horas, ventaDia: v, cuenta, horasTrabajadas });
       }
     }
-    return Math.round(s * 100) / 100;
+    const trabajados = normales.size + tardesMes.length;
+    s += mensual * Math.min(1, trabajados / diasDelMes);
+    const total = Math.round(s * 100) / 100;
+    return conDetalle ? { total, detalleTardes } : total;
   }
 
   function mesSiguiente(mes) {
@@ -1525,15 +1549,41 @@
         continue;
       }
 
-      const ventasT = ventasParaTrabajador(t, cierresMes, mes);
+      const ventasDet = ventasParaTrabajador(t, cierresMes, mes, true);
+      const ventasT = ventasDet.total;
       const c = calcularMes(t, ventasT, pagosMes, mes);
       const abierta = perAbiertos.has(t.sid);
+
+      // 📖 La cuenta bien explicada, paso a paso (para enseñársela al empleado)
+      const fijoDia = (t.sueldoMensual || 0) / (t.diasMes || 26);
+      const jornada = t.horasJornada || 7.5;
+      const ex = [];
+      ex.push(`Precio del día: ${INFORME.eur(t.sueldoMensual || 0)} ÷ ${t.diasMes || 26} días = <strong>${INFORME.eur(fijoDia)}</strong>`);
+      ex.push(`Fijo: ${c.dias.length} día${c.dias.length === 1 ? '' : 's'} trabajado${c.dias.length === 1 ? '' : 's'} × ${INFORME.eur(fijoDia)} = ${INFORME.eur(Math.round(fijoDia * c.dias.length * 100) / 100)}`);
+      c.tardes.filter(x => x.horas > 0).forEach(x => {
+        ex.push(`⏰ ${fmtFecha(x.fecha)}: llegó ${x.horas} h tarde → se descuentan ${INFORME.eur(Math.round(fijoDia * Math.min(1, x.horas / jornada) * 100) / 100)} del fijo`);
+      });
+      ventasDet.detalleTardes.filter(l => l.horas > 0).forEach(l => {
+        ex.push(`⏰ ${fmtFecha(l.fecha)}: la venta del día fue ${INFORME.eur(l.ventaDia)}, pero solo estuvo ${l.horasTrabajadas} de ${jornada} h → para su objetivo cuentan ${INFORME.eur(l.ventaDia)} ÷ ${jornada} × ${l.horasTrabajadas} = <strong>${INFORME.eur(l.cuenta)}</strong>`);
+      });
+      if (tramosDe(t).length) {
+        ex.push(`Ventas que cuentan para su objetivo: <strong>${INFORME.eur(ventasT)}</strong> (solo sus días; los de retraso, en proporción)`);
+        ex.push(c.tramoActual
+          ? `Objetivo de ${INFORME.eur(c.tramoActual.objetivo)} alcanzado → ${c.tramoActual.porcentaje} % de ${INFORME.eur(ventasT)} = <strong>${INFORME.eur(c.comision)}</strong>`
+          : `No llegó al objetivo${c.siguiente ? ` de ${INFORME.eur(c.siguiente.objetivo)}` : ''} → sin comisión: cobra solo el fijo pactado`);
+      }
+      ex.push(`Le corresponde el mes: fijo ${INFORME.eur(c.fijo)} + comisión ${INFORME.eur(c.comision)} = <strong>${INFORME.eur(c.devengado)}</strong>`);
+      const explicacionHTML = `
+        <details class="ocr-details" style="margin:8px 0 0">
+          <summary>📖 Ver la cuenta bien explicada (para enseñársela)</summary>
+          ${ex.map(l => `<div class="stat-linea"><span style="width:100%">${l}</span></div>`).join('')}
+        </details>`;
 
       const comisionTxt = c.tramoActual
         ? `✅ Objetivo de ${INFORME.eur(c.tramoActual.objetivo)} alcanzado → ${c.tramoActual.porcentaje} % = <strong>${INFORME.eur(c.comision)}</strong>`
         : (tramosDe(t).length ? 'Aún sin objetivo alcanzado: solo el fijo pactado' : 'Sin comisiones pactadas');
       const notaVentas = tramosDe(t).length
-        ? `<p class="hint" style="margin:2px 0 0">Para su objetivo solo cuentan las ventas de sus días trabajados: <strong>${INFORME.eur(ventasT)}</strong> este mes.</p>` : '';
+        ? `<p class="hint" style="margin:2px 0 0">Para su objetivo cuentan las ventas de sus días trabajados (los de retraso, en proporción a sus horas): <strong>${INFORME.eur(ventasT)}</strong> este mes.</p>` : '';
       const siguienteTxt = c.siguiente
         ? `<div class="per-siguiente">Faltan <strong>${INFORME.eur(Math.max(0, c.siguiente.objetivo - ventasT))}</strong> de ventas para el ${c.tramoActual ? 'siguiente' : 'primer'} objetivo (${INFORME.eur(c.siguiente.objetivo)} → ${c.siguiente.porcentaje} %)</div>`
         : '';
@@ -1621,6 +1671,7 @@
               ${arrastre !== 0 ? `<div class="stat-linea"><span>Arrastre de meses anteriores</span><strong class="${arrastre > 0 ? 'txt-bad' : 'txt-sec'}">${arrastre > 0 ? '+' : ''}${INFORME.eur(arrastre)}</strong></div>` : ''}
               ${filasMeses}
             </details>
+            ${explicacionHTML}
 
             <p class="per-seccion">💶 Adelantos y pagos que le haces</p>
             <div class="form-row">
