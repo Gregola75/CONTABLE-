@@ -1,0 +1,456 @@
+/* VERIFICACIÓN COMPLETA DE WANDERCONTABLE
+   Comprueba los cálculos de dinero, la integridad de los datos y los
+   flujos críticos en un navegador real, con casos de contabilidad reales. */
+const { chromium } = require('playwright-core');
+
+const R = { ok: 0, fallos: [] };
+function chk(area, nombre, condicion, detalle = '') {
+  if (condicion) { R.ok++; console.log(`  ✓ ${nombre}`); }
+  else { R.fallos.push({ area, nombre, detalle }); console.log(`  ✗ ${nombre}${detalle ? ' → ' + detalle : ''}`); }
+}
+const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < tol;
+
+(async () => {
+  const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' });
+  const page = await browser.newPage({ viewport: { width: 390, height: 900 } });
+  const erroresJS = [];
+  page.on('pageerror', e => erroresJS.push(e.message));
+  page.on('dialog', d => d.accept());
+  await page.goto('http://localhost:8904/index.html');
+  await page.waitForTimeout(800);
+
+  const limpiar = () => page.evaluate(async () => {
+    for (const r of await DB.todos()) await DB.borrar(r.id);
+    for (const p of await DB.provTodos()) await DB.provBorrar(p.id);
+    for (const t of await DB.perTodos()) await DB.perBorrar(t.id);
+    for (const g of await DB.pagoTodos()) await DB.pagoBorrar(g.id);
+  });
+
+  // ══════════════ 1. INFORME TRIMESTRAL ══════════════
+  console.log('\n═══ 1. INFORME TRIMESTRAL (lo que va a la gestoría) ═══');
+  await limpiar();
+  const inf = await page.evaluate(async () => {
+    // Trimestre 3 de 2026 (jul-sep): ingresos y gastos repartidos
+    await DB.guardar({ tipo: 'cierre', fecha: '2026-07-05', total: 1000, proveedor: '', creado: new Date().toISOString() });
+    await DB.guardar({ tipo: 'cierre', fecha: '2026-07-06', total: 500.55, proveedor: '', creado: new Date().toISOString() });
+    await DB.guardar({ tipo: 'cierre', fecha: '2026-08-01', total: 2000, mensual: true, proveedor: '', creado: new Date().toISOString() });
+    await DB.guardar({ tipo: 'cierre', fecha: '2026-09-30', total: 300, proveedor: '', creado: new Date().toISOString() });
+    // Fuera del trimestre: no deben contar
+    await DB.guardar({ tipo: 'cierre', fecha: '2026-06-30', total: 9999, proveedor: '', creado: new Date().toISOString() });
+    await DB.guardar({ tipo: 'cierre', fecha: '2026-10-01', total: 8888, proveedor: '', creado: new Date().toISOString() });
+    // Facturas del trimestre
+    await DB.guardar({ tipo: 'factura', fecha: '2026-07-10', proveedor: 'Distribuciones García S.L.', nif: 'B41234567', total: 121, baseImponible: 100, ivaTipo: 21, ivaCuota: 21, categoria: 'Mercancía', creado: new Date().toISOString() });
+    await DB.guardar({ tipo: 'factura', fecha: '2026-08-10', proveedor: 'Distribuciones García S.L.', nif: 'B41234567', total: 242, baseImponible: 200, ivaTipo: 21, ivaCuota: 42, categoria: 'Mercancía', creado: new Date().toISOString() });
+    await DB.guardar({ tipo: 'factura', fecha: '2026-09-01', proveedor: 'Inmobiliaria Sur S.A.', nif: 'A41999888', total: 816, baseImponible: 800, ivaTipo: 21, ivaCuota: 168, retTipo: 19, retCuota: 152, categoria: 'Alquiler', creado: new Date().toISOString() });
+    await DB.guardar({ tipo: 'factura', fecha: '2026-06-15', proveedor: 'Fuera', total: 500, creado: new Date().toISOString() });
+    const i = await INFORME.generar(2026, 3);
+    return { i, csv: INFORME.generarCSV(i) };
+  });
+  chk('informe', 'Ingresos del trimestre = 3.800,55 (no cuenta jun ni oct)', cerca(inf.i.totalIngresos, 3800.55), 'obtenido ' + inf.i.totalIngresos);
+  chk('informe', 'Gastos del trimestre = 1.179,00 (no cuenta junio)', cerca(inf.i.totalGastos, 1179), 'obtenido ' + inf.i.totalGastos);
+  chk('informe', 'Julio agrupa sus 2 cierres (1.500,55)', cerca(inf.i.ingresosPorMes[6].total, 1500.55));
+  chk('informe', 'Julio cuenta 2 días con cierre', inf.i.ingresosPorMes[6].dias === 2);
+  chk('informe', 'Agosto marcado como mes completo', inf.i.ingresosPorMes[7].mensual === true);
+  chk('informe', 'Agrupa las 2 facturas del mismo proveedor (363,00)', cerca(inf.i.gastosPorProveedor['Distribuciones García S.L.'].total, 363));
+  chk('informe', 'Conserva el NIF del proveedor', inf.i.gastosPorProveedor['Distribuciones García S.L.'].nif === 'B41234567');
+  chk('informe', 'El proveedor de fuera del trimestre no aparece', !inf.i.gastosPorProveedor['Fuera']);
+  chk('informe', 'CSV con formato español (coma decimal)', inf.csv.includes('3800,55') && inf.csv.includes(';'));
+  chk('informe', 'CSV con BOM para que Excel lea las tildes', inf.csv.charCodeAt(0) === 0xFEFF);
+  chk('informe', 'CSV incluye el resultado del trimestre', inf.csv.includes('RESULTADO DEL TRIMESTRE'));
+  chk('informe', 'El CSV NO incluye datos de personal ni previsión', !/PREVISI|SUELDO|EMPLEAD|N[ÓO]MINA/i.test(inf.csv));
+
+  // Trimestres: rangos correctos
+  const rangos = await page.evaluate(async () => {
+    const out = {};
+    for (const t of [1, 2, 3, 4]) { const i = await INFORME.generar(2026, t); out[t] = [i.desde, i.hasta]; }
+    const bis = await INFORME.generar(2024, 1); // año bisiesto
+    out.bisiesto = [bis.desde, bis.hasta];
+    return out;
+  });
+  chk('informe', 'T1 = 01/01 a 31/03', rangos[1][0] === '2026-01-01' && rangos[1][1] === '2026-03-31');
+  chk('informe', 'T2 = 01/04 a 30/06', rangos[2][0] === '2026-04-01' && rangos[2][1] === '2026-06-30');
+  chk('informe', 'T3 = 01/07 a 30/09', rangos[3][0] === '2026-07-01' && rangos[3][1] === '2026-09-30');
+  chk('informe', 'T4 = 01/10 a 31/12', rangos[4][0] === '2026-10-01' && rangos[4][1] === '2026-12-31');
+  chk('informe', 'Año bisiesto: T1 acaba el 31/03', rangos.bisiesto[1] === '2024-03-31');
+
+  // ══════════════ 2. PREVISIÓN DE IMPUESTOS ══════════════
+  console.log('\n═══ 2. PREVISIÓN DE IMPUESTOS (IVA, retenciones, IRPF) ═══');
+  const prev = await page.evaluate(async () => {
+    const i = await INFORME.generar(2026, 3);
+    return INFORME.prevision(i, { ivaVentas: 10, ivaGastos: 21, irpfActivo: true, irpf: 20 });
+  });
+  // Ingresos 3800,55 con IVA 10% → base 3455,05 ; IVA repercutido 345,50
+  chk('impuestos', 'Base de ingresos = ventas / 1,10', cerca(prev.baseIngresos, 3455.05, 0.02), 'obtenido ' + prev.baseIngresos);
+  chk('impuestos', 'IVA repercutido = ventas − base', cerca(prev.ivaRepercutido, 345.50, 0.02), 'obtenido ' + prev.ivaRepercutido);
+  // IVA soportado: 21 + 42 + 168 = 231
+  chk('impuestos', 'IVA soportado suma las cuotas reales (231,00)', cerca(prev.ivaSoportado, 231), 'obtenido ' + prev.ivaSoportado);
+  chk('impuestos', 'IVA del trimestre = repercutido − soportado', cerca(prev.ivaResultado, 345.50 - 231, 0.02), 'obtenido ' + prev.ivaResultado);
+  // Base de gastos: 100 + 200 + 800 = 1100 (el alquiler con retención cuenta su base real)
+  chk('impuestos', 'Base de gastos correcta con retención (1.100,00)', cerca(prev.baseGastos, 1100), 'obtenido ' + prev.baseGastos);
+  chk('impuestos', 'Retenciones a ingresar (152,00 del alquiler)', cerca(prev.retenciones, 152), 'obtenido ' + prev.retenciones);
+  chk('impuestos', 'Beneficio = base ingresos − base gastos', cerca(prev.beneficio, 3455.05 - 1100, 0.02), 'obtenido ' + prev.beneficio);
+  chk('impuestos', 'IRPF 20% del beneficio', cerca(prev.irpfEstimado, (3455.05 - 1100) * 0.2, 0.05), 'obtenido ' + prev.irpfEstimado);
+  chk('impuestos', 'Ninguna factura estimada (todas con IVA detectado)', prev.facturasEstimadas === 0);
+  chk('impuestos', 'Total a reservar = IVA + retenciones + IRPF',
+    cerca(prev.totalPrevisto, Math.max(0, prev.ivaResultado) + prev.retenciones + prev.irpfEstimado, 0.02));
+
+  // IVA a compensar (más gastos que ingresos) no debe sumar al total a reservar
+  const prevNeg = await page.evaluate(async () => {
+    for (const r of await DB.todos()) await DB.borrar(r.id);
+    await DB.guardar({ tipo: 'cierre', fecha: '2026-07-05', total: 110, proveedor: '', creado: new Date().toISOString() });
+    await DB.guardar({ tipo: 'factura', fecha: '2026-07-10', proveedor: 'X', total: 1210, baseImponible: 1000, ivaCuota: 210, creado: new Date().toISOString() });
+    const i = await INFORME.generar(2026, 3);
+    return INFORME.prevision(i, { ivaVentas: 10, ivaGastos: 21, irpfActivo: true, irpf: 20 });
+  });
+  chk('impuestos', 'IVA negativo se marca a compensar', prevNeg.ivaResultado < 0);
+  chk('impuestos', 'Un IVA a compensar no se suma como "a pagar"', cerca(prevNeg.totalPrevisto, 0), 'obtenido ' + prevNeg.totalPrevisto);
+  chk('impuestos', 'Sin beneficio no hay IRPF que pagar', cerca(prevNeg.irpfEstimado, 0));
+
+  // ══════════════ 3. CÁLCULOS DE FACTURA (IVA/base/retención) ══════════════
+  console.log('\n═══ 3. FORMULARIO DE FACTURA (autocálculos) ═══');
+  await limpiar();
+  await page.click('.tab[data-tab="facturas"]');
+  await page.click('#factura-manual');
+  await page.waitForTimeout(300);
+  await page.fill('#f-proveedor', 'Prueba S.L.');
+  await page.fill('#f-total', '121');
+  await page.selectOption('#f-ivatipo', '21');
+  await page.waitForTimeout(200);
+  const iva21 = await page.evaluate(() => ({ base: document.querySelector('#f-base').value, cuota: document.querySelector('#f-ivacuota').value }));
+  chk('factura', 'Total 121 con IVA 21% → base 100,00', cerca(parseFloat(iva21.base), 100), 'base=' + iva21.base);
+  chk('factura', 'Total 121 con IVA 21% → cuota 21,00', cerca(parseFloat(iva21.cuota), 21), 'cuota=' + iva21.cuota);
+
+  await page.selectOption('#f-ivatipo', '10');
+  await page.waitForTimeout(200);
+  const iva10 = await page.evaluate(() => ({ base: document.querySelector('#f-base').value, cuota: document.querySelector('#f-ivacuota').value }));
+  chk('factura', 'Cambiar a IVA 10% recalcula (base 110,00 / cuota 11,00)',
+    cerca(parseFloat(iva10.base), 110) && cerca(parseFloat(iva10.cuota), 11), `base=${iva10.base} cuota=${iva10.cuota}`);
+
+  // Varios tipos de IVA
+  await page.selectOption('#f-ivatipo', 'varios');
+  await page.waitForTimeout(200);
+  await page.fill('#f-iva21', '21');
+  await page.dispatchEvent('#f-iva21', 'input');
+  await page.fill('#f-iva10', '5');
+  await page.dispatchEvent('#f-iva10', 'input');
+  await page.waitForTimeout(200);
+  const varios = await page.evaluate(() => ({ cuota: document.querySelector('#f-ivacuota').value, base: document.querySelector('#f-base').value }));
+  chk('factura', 'Varios IVA: suma las cuotas (26,00)', cerca(parseFloat(varios.cuota), 26), 'cuota=' + varios.cuota);
+  chk('factura', 'Varios IVA: base = total − cuotas (95,00)', cerca(parseFloat(varios.base), 95), 'base=' + varios.base);
+
+  // Retención sobre la base
+  await page.selectOption('#f-ivatipo', '21');
+  await page.waitForTimeout(200);
+  await page.fill('#f-total', '816');
+  await page.dispatchEvent('#f-total', 'change');
+  await page.fill('#f-base', '800');
+  await page.selectOption('#f-rettipo', '19');
+  await page.waitForTimeout(200);
+  const ret = await page.inputValue('#f-retcuota');
+  chk('factura', 'Retención 19% sobre base 800 = 152,00', cerca(parseFloat(ret), 152), 'obtenido ' + ret);
+
+  // Guardar y comprobar que se persiste con todos los campos
+  await page.fill('#f-fecha', '2026-09-01');
+  await page.click('#factura-guardar');
+  await page.waitForTimeout(800);
+  const guardada = await page.evaluate(async () => (await DB.todos())[0]);
+  chk('factura', 'La factura se guarda con todos los datos',
+    guardada && guardada.proveedor === 'Prueba S.L.' && cerca(guardada.total, 816) && cerca(guardada.retCuota, 152) && guardada.retTipo === 19,
+    JSON.stringify(guardada && { p: guardada.proveedor, t: guardada.total, r: guardada.retCuota }));
+  chk('factura', 'Al guardar se le asigna identificador de sincronización', !!(guardada && guardada.sid && guardada.mod));
+  chk('factura', 'El proveedor nuevo se da de alta solo', await page.evaluate(async () => (await DB.provTodos()).some(p => p.nombre === 'Prueba S.L.')));
+  chk('factura', 'No se guarda un total vacío o negativo', await page.evaluate(async () => {
+    const antes = (await DB.todos()).length;
+    document.querySelector('#factura-manual').click();
+    await new Promise(r => setTimeout(r, 200));
+    document.querySelector('#f-total').value = '-5';
+    document.querySelector('#factura-guardar').click();
+    await new Promise(r => setTimeout(r, 400));
+    return (await DB.todos()).length === antes;
+  }));
+
+  // ══════════════ 4. COPIA DE SEGURIDAD ══════════════
+  console.log('\n═══ 4. COPIA DE SEGURIDAD (tu red de seguridad) ═══');
+  const backup = await page.evaluate(async () => {
+    // Un dato de cada tipo, con foto
+    const canvas = document.createElement('canvas');
+    canvas.width = 60; canvas.height = 60;
+    canvas.getContext('2d').fillRect(0, 0, 60, 60);
+    const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+    await DB.guardar({ tipo: 'factura', fecha: '2026-09-02', proveedor: 'Con Foto S.L.', total: 50, imagen: blob, ocrTexto: 'texto ocr', creado: new Date().toISOString() });
+    await DB.guardar({ tipo: 'cierre', fecha: '2026-09-03', total: 700, efectivo: 400, tarjeta: 300, proveedor: '', creado: new Date().toISOString() });
+    await DB.perGuardar({ nombre: 'Empleado Prueba', sueldoMensual: 900, diasMes: 26, horasJornada: 7.5, tramos: [{ objetivo: 13500, porcentaje: 1 }], dias: ['2026-09-01'], tardes: [{ fecha: '2026-09-02', horas: 2 }], faltas: ['2026-09-05'], notasDias: [{ fecha: '2026-09-02', texto: 'llegó tarde' }], creado: new Date().toISOString() });
+    const emp = (await DB.perTodos())[0];
+    await DB.pagoGuardar({ trabajadorSid: emp.sid, fecha: '2026-09-04', importe: 250, notas: 'adelanto', creado: new Date().toISOString() });
+
+    const datos = await DB.exportarTodo();
+    const antes = {
+      registros: (await DB.todos()).length,
+      proveedores: (await DB.provTodos()).length,
+      personal: (await DB.perTodos()).length,
+      pagos: (await DB.pagoTodos()).length
+    };
+    return { datos: JSON.parse(JSON.stringify(datos)), antes };
+  });
+  chk('copia', 'La copia incluye registros', backup.datos.registros.length === backup.antes.registros);
+  chk('copia', 'La copia incluye proveedores', Array.isArray(backup.datos.proveedores) && backup.datos.proveedores.length > 0);
+  chk('copia', 'La copia incluye el personal', Array.isArray(backup.datos.personal) && backup.datos.personal.length === 1);
+  chk('copia', 'La copia incluye los adelantos/pagos', Array.isArray(backup.datos.pagos) && backup.datos.pagos.length === 1);
+  chk('copia', 'Las fotos van dentro de la copia', backup.datos.registros.some(r => typeof r.imagen === 'string' && r.imagen.startsWith('data:')));
+  chk('copia', 'Los días, retrasos y notas del empleado se copian',
+    backup.datos.personal[0].dias.length === 1 && backup.datos.personal[0].tardes.length === 1 && backup.datos.personal[0].notasDias.length === 1);
+
+  // Restaurar sobre datos existentes NO debe duplicar
+  const restaurar = await page.evaluate(async (datos) => {
+    const antes = { r: (await DB.todos()).length, p: (await DB.perTodos()).length, g: (await DB.pagoTodos()).length };
+    await DB.importarTodo(datos);
+    const despues = { r: (await DB.todos()).length, p: (await DB.perTodos()).length, g: (await DB.pagoTodos()).length };
+    return { antes, despues };
+  }, backup.datos);
+  chk('copia', 'Restaurar la misma copia NO duplica registros', restaurar.antes.r === restaurar.despues.r,
+    `antes ${restaurar.antes.r} → después ${restaurar.despues.r}`);
+  chk('copia', 'Restaurar la misma copia NO duplica personal', restaurar.antes.p === restaurar.despues.p,
+    `antes ${restaurar.antes.p} → después ${restaurar.despues.p}`);
+  chk('copia', 'Restaurar la misma copia NO duplica adelantos', restaurar.antes.g === restaurar.despues.g,
+    `antes ${restaurar.antes.g} → después ${restaurar.despues.g}`);
+
+  // Restaurar en un dispositivo vacío recupera TODO, con las fotos
+  const restauraLimpio = await page.evaluate(async (datos) => {
+    for (const r of await DB.todos()) await DB.borrar(r.id);
+    for (const p of await DB.provTodos()) await DB.provBorrar(p.id);
+    for (const t of await DB.perTodos()) await DB.perBorrar(t.id);
+    for (const g of await DB.pagoTodos()) await DB.pagoBorrar(g.id);
+    await DB.importarTodo(datos);
+    const regs = await DB.todos();
+    const emp = (await DB.perTodos())[0];
+    return {
+      registros: regs.length,
+      conFoto: regs.filter(r => r.imagen instanceof Blob).length,
+      personal: (await DB.perTodos()).length,
+      pagos: (await DB.pagoTodos()).length,
+      empDias: emp ? emp.dias.length : 0,
+      cierreEfectivo: (regs.find(r => r.tipo === 'cierre') || {}).efectivo
+    };
+  }, backup.datos);
+  chk('copia', 'En un móvil nuevo se recuperan todos los registros', restauraLimpio.registros === backup.antes.registros,
+    `${restauraLimpio.registros} de ${backup.antes.registros}`);
+  chk('copia', 'Las fotos se recuperan como imágenes', restauraLimpio.conFoto >= 1);
+  chk('copia', 'Se recupera el personal con sus días', restauraLimpio.personal === 1 && restauraLimpio.empDias === 1);
+  chk('copia', 'Se recuperan los adelantos', restauraLimpio.pagos === 1);
+  chk('copia', 'Se recuperan los detalles del cierre (efectivo/tarjeta)', cerca(restauraLimpio.cierreEfectivo, 400));
+  chk('copia', 'Un archivo que no es copia da error claro', await page.evaluate(async () => {
+    try { await DB.importarTodo({ hola: 'mundo' }); return false; } catch (e) { return /copia de seguridad/i.test(e.message); }
+  }));
+
+  // ══════════════ 5. PERSONAL: SUELDOS Y COMISIONES ══════════════
+  console.log('\n═══ 5. PERSONAL (sueldos, objetivos, deuda) ═══');
+  await limpiar();
+  const personal = await page.evaluate(async () => {
+    // Ventas del mes: 20 días × 700 = 14.000, más un día de 500 con retraso
+    const dias = [];
+    for (let d = 1; d <= 20; d++) {
+      const f = `2026-09-${String(d).padStart(2, '0')}`;
+      await DB.guardar({ tipo: 'cierre', fecha: f, total: 700, proveedor: '', creado: new Date().toISOString() });
+      dias.push(f);
+    }
+    await DB.guardar({ tipo: 'cierre', fecha: '2026-09-21', total: 500, proveedor: '', creado: new Date().toISOString() });
+    // Objetivo pactado 13.500 → 1 %
+    await DB.perGuardar({
+      nombre: 'Santino', sueldoMensual: 900, diasMes: 26, horasJornada: 7.5,
+      tramos: [{ objetivo: 13500, porcentaje: 1 }, { objetivo: 20000, porcentaje: 2 }],
+      dias, tardes: [{ fecha: '2026-09-21', horas: 4 }], faltas: [], notasDias: [],
+      creado: new Date().toISOString()
+    });
+    return true;
+  });
+  await page.click('.tab[data-tab="personal"]');
+  await page.fill('#per-mes', '2026-09');
+  await page.dispatchEvent('#per-mes', 'change');
+  await page.waitForTimeout(900);
+  await page.click('#per-lista .per-toggle');
+  await page.waitForTimeout(500);
+  const txtPer = (await page.textContent('#per-lista .per-body')).replace(/\s+/g, ' ');
+  // Fijo: 21 días × 34,62 = 726,92 − descuento retraso (4/7,5 × 34,62 = 18,46) = 708,46
+  chk('personal', 'Precio del día = 900 ÷ 26 = 34,62', txtPer.includes('34,62'));
+  chk('personal', 'Descuento por 4 h de retraso = 18,46', txtPer.includes('18,46'));
+  chk('personal', 'Fijo del mes 708,46 (21 días − retraso)', txtPer.includes('708,46'), txtPer.slice(0, 400));
+  // Base de ventas: 14.000 + 500×3,5/7,5 (233,33) = 14.233,33 → supera 13.500 → 1 % = 142,33
+  chk('personal', 'Ventas del día con retraso en proporción (14.233,33)', txtPer.includes('14.233,33'));
+  chk('personal', 'Objetivo pactado 13.500 alcanzado → comisión 142,33', txtPer.includes('142,33'));
+  chk('personal', 'Le corresponde el mes = fijo + comisión (850,79)', txtPer.includes('850,79'), 'no encontrado');
+
+  // No llegar al objetivo → solo el fijo
+  const sinObjetivo = await page.evaluate(async () => {
+    const t = (await DB.perTodos())[0];
+    t.tramos = [{ objetivo: 20000, porcentaje: 1 }];
+    await DB.perGuardar(t);
+    document.querySelector('#per-mes').dispatchEvent(new Event('change'));
+    await new Promise(r => setTimeout(r, 900));
+    return document.querySelector('#per-lista').textContent.replace(/\s+/g, ' ');
+  });
+  chk('personal', 'Sin llegar al objetivo: solo el fijo pactado', sinObjetivo.includes('solo el fijo pactado'));
+  chk('personal', 'Sin comisión, le corresponde solo 708,46', sinObjetivo.includes('708,46'));
+
+  // ══════════════ 6. DEUDA ARRASTRADA Y LIQUIDACIÓN ══════════════
+  console.log('\n═══ 6. DEUDA ENTRE MESES Y FINIQUITO ═══');
+  const deuda = await page.evaluate(async () => {
+    for (const t of await DB.perTodos()) await DB.perBorrar(t.id);
+    for (const g of await DB.pagoTodos()) await DB.pagoBorrar(g.id);
+    // Empleado con 10 días en agosto (275) y 2 días en septiembre (55)
+    const dias = [];
+    for (let d = 1; d <= 10; d++) dias.push(`2026-08-${String(d).padStart(2, '0')}`);
+    dias.push('2026-09-01', '2026-09-02');
+    await DB.perGuardar({ nombre: 'Deudor', sueldoMensual: 715, diasMes: 26, horasJornada: 7.5, tramos: [], dias, tardes: [], faltas: [], notasDias: [], creado: new Date().toISOString() });
+    const t = (await DB.perTodos())[0];
+    // Le da 200 en septiembre para saldar lo viejo
+    await DB.pagoGuardar({ trabajadorSid: t.sid, fecha: '2026-09-01', importe: 200, notas: 'a cuenta', creado: new Date().toISOString() });
+    return true;
+  });
+  await page.fill('#per-mes', '2026-09');
+  await page.dispatchEvent('#per-mes', 'change');
+  await page.waitForTimeout(900);
+  const gen = (await page.textContent('#per-general')).replace(/\s+/g, ' ');
+  // Devengado total: 12 días × 27,50 = 330 ; entregado 200 → debe 130
+  chk('deuda', 'Visión general muestra la deuda TOTAL (130,00)', gen.includes('130,00'), gen.slice(0, 200));
+  chk('deuda', 'Total que debe al equipo', gen.includes('TOTAL QUE DEBES AL EQUIPO'));
+
+  // Pago posterior a la fecha de baja (caso crítico)
+  const trasBaja = await page.evaluate(async () => {
+    const t = (await DB.perTodos())[0];
+    t.fin = '2026-09-02'; // deja de trabajar el 2 de septiembre
+    await DB.perGuardar(t);
+    // Le paga lo que le debía en OCTUBRE (después de la baja)
+    await DB.pagoGuardar({ trabajadorSid: t.sid, fecha: '2026-10-05', importe: 130, notas: 'finiquito', creado: new Date().toISOString() });
+    document.querySelector('#per-mes').dispatchEvent(new Event('change'));
+    await new Promise(r => setTimeout(r, 900));
+    return document.querySelector('#per-lista').textContent.replace(/\s+/g, ' ');
+  });
+  chk('deuda', 'Un pago hecho DESPUÉS de la baja se descuenta de la deuda',
+    /No le debes nada/.test(trasBaja) && !/DEBES PAGARLE \(todo lo pendiente\)130,00/.test(trasBaja),
+    trasBaja.slice(0, 220));
+
+  // Finiquito pagado el mes siguiente a la baja (el caso real más habitual)
+  const finiquitoTardio = await page.evaluate(async () => {
+    for (const t of await DB.perTodos()) await DB.perBorrar(t.id);
+    for (const g of await DB.pagoTodos()) await DB.pagoBorrar(g.id);
+    const dias = [];
+    for (let d = 1; d <= 10; d++) dias.push(`2026-08-${String(d).padStart(2, '0')}`);
+    await DB.perGuardar({ nombre: 'Extrabajador', sueldoMensual: 715, diasMes: 26, horasJornada: 7.5, tramos: [], dias, tardes: [], faltas: [], notasDias: [], fin: '2026-08-10', creado: new Date().toISOString() });
+    const t = (await DB.perTodos())[0];
+    await DB.pagoGuardar({ trabajadorSid: t.sid, fecha: '2026-09-05', importe: 275, notas: 'finiquito', creado: new Date().toISOString() });
+    document.querySelector('#per-mes').value = '2026-08';
+    document.querySelector('#per-mes').dispatchEvent(new Event('change'));
+    await new Promise(r => setTimeout(r, 900));
+    return document.querySelector('#per-lista').textContent.replace(/\s+/g, ' ');
+  });
+  chk('deuda', 'Finiquito pagado el mes SIGUIENTE a la baja salda la deuda',
+    /Sin deuda/.test(finiquitoTardio) && !/DEBES PAGARLE/.test(finiquitoTardio),
+    finiquitoTardio.slice(0, 220));
+
+  // ══════════════ 7. LECTURA DE FACTURAS (OCR) ══════════════
+  console.log('\n═══ 7. DETECCIÓN AUTOMÁTICA DE FACTURAS ═══');
+  const ocr = await page.evaluate(() => {
+    const casos = [];
+    const conocidos = [{ nombre: 'Distribuciones García S.L.', nif: 'B41234567' }];
+    casos.push(['Factura con desglose', OCR.analizarFactura(`
+DISTRIBUCIONES GARCIA S.L.
+CIF: B41234567
+Fecha: 02/09/2026
+Base imponible 100,00
+IVA 21% 21,00
+TOTAL FACTURA 121,00`, conocidos)]);
+    casos.push(['Ticket con cambio', OCR.analizarFactura(`
+SUPERMERCADO EL AHORRO S.A.
+04/09/2026
+TOTAL 44,80
+ENTREGADO 50,00
+CAMBIO 5,20`, [])]);
+    casos.push(['Alquiler con retención', OCR.analizarFactura(`
+INMOBILIARIA SUR S.A.
+Fecha factura: 01/09/2026
+Vencimiento: 05/10/2026
+Base imponible 800,00
+IVA 21% 168,00
+Retención IRPF 19% 152,00
+TOTAL A PAGAR 816,00`, [])]);
+    casos.push(['Cierre Z con apertura', OCR.analizarCierre(`
+CIERRE Z
+FECHA APERTURA: 10/09/2026 20:00
+FECHA CIERRE: 11/09/2026 03:30
+FECHA IMPRESION: 11/09/2026 03:31
+TOTAL VENTAS 1.250,00
+EFECTIVO 800,00
+TARJETA 450,00`)]);
+    return casos;
+  });
+  const f1 = ocr[0][1], f2 = ocr[1][1], f3 = ocr[2][1], c1 = ocr[3][1];
+  chk('ocr', 'Reconoce al proveedor ya dado de alta', f1.proveedor === 'Distribuciones García S.L.');
+  chk('ocr', 'Detecta total, base e IVA', cerca(f1.total, 121) && cerca(f1.baseImponible, 100) && cerca(f1.ivaCuota, 21));
+  chk('ocr', 'Detecta la fecha de la factura', f1.fecha === '2026-09-02');
+  chk('ocr', 'En un ticket no confunde el cambio con el total', cerca(f2.total, 44.80), 'total=' + f2.total);
+  chk('ocr', 'Detecta la retención de IRPF del alquiler', f3.retTipo === 19 && cerca(f3.retCuota, 152));
+  chk('ocr', 'Usa la fecha de emisión, no la de vencimiento', f3.fecha === '2026-09-01');
+  chk('ocr', 'En el cierre usa la fecha de APERTURA', c1.fecha === '2026-09-10', 'fecha=' + c1.fecha);
+  chk('ocr', 'Detecta ventas, efectivo y tarjeta del cierre', cerca(c1.total, 1250) && cerca(c1.efectivo, 800) && cerca(c1.tarjeta, 450));
+
+  // ══════════════ 8. BÚSQUEDAS Y DUPLICADOS ══════════════
+  console.log('\n═══ 8. BÚSQUEDAS, FILTROS Y AVISOS ═══');
+  await limpiar();
+  const busq = await page.evaluate(async () => {
+    await DB.guardar({ tipo: 'factura', fecha: '2026-09-01', proveedor: 'Bebidas Pepe', total: 100, creado: new Date().toISOString() });
+    await DB.guardar({ tipo: 'factura', fecha: '2026-09-15', proveedor: 'Bebidas Pepe', total: 200, creado: new Date().toISOString() });
+    await DB.guardar({ tipo: 'factura', fecha: '2026-10-01', proveedor: 'Otro', total: 300, creado: new Date().toISOString() });
+    await DB.guardar({ tipo: 'cierre', fecha: '2026-09-10', total: 900, proveedor: '', creado: new Date().toISOString() });
+    return {
+      porProveedor: (await DB.buscar({ proveedor: 'bebidas' })).length,
+      porFechas: (await DB.buscar({ desde: '2026-09-01', hasta: '2026-09-30' })).length,
+      soloFacturas: (await DB.buscar({ tipo: 'factura' })).length,
+      soloCierres: (await DB.buscar({ tipo: 'cierre' })).length,
+      orden: (await DB.buscar({ tipo: 'factura' })).map(r => r.fecha)
+    };
+  });
+  chk('busqueda', 'Buscar por proveedor sin distinguir mayúsculas', busq.porProveedor === 2, 'encontrados ' + busq.porProveedor);
+  chk('busqueda', 'Filtrar por rango de fechas (septiembre)', busq.porFechas === 3, 'encontrados ' + busq.porFechas);
+  chk('busqueda', 'Filtrar solo facturas / solo cierres', busq.soloFacturas === 3 && busq.soloCierres === 1);
+  chk('busqueda', 'Resultados ordenados de más reciente a más antiguo',
+    busq.orden[0] === '2026-10-01' && busq.orden[busq.orden.length - 1] === '2026-09-01');
+
+  // ══════════════ 9. SEGURIDAD ══════════════
+  console.log('\n═══ 9. SEGURIDAD (PIN y cifrado de copias) ═══');
+  const seg = await page.evaluate(async () => {
+    await SEGURIDAD.establecerPIN('1234');
+    const ok = await SEGURIDAD.verificarPIN('1234');
+    const mal = await SEGURIDAD.verificarPIN('9999');
+    const activo = SEGURIDAD.pinActivado();
+    const guardadoEnClaro = JSON.stringify(localStorage).includes('"1234"');
+    // Cifrado de la copia
+    const cifrado = await SEGURIDAD.cifrarTexto('secreto contable', 'micontraseña');
+    const descifrado = await SEGURIDAD.descifrarTexto(cifrado, 'micontraseña');
+    let fallaConOtra = false;
+    try { await SEGURIDAD.descifrarTexto(cifrado, 'otra'); } catch (e) { fallaConOtra = true; }
+    SEGURIDAD.desactivarPIN();
+    return { ok, mal, activo, guardadoEnClaro, textoCifrado: JSON.stringify(cifrado), descifrado, fallaConOtra };
+  });
+  chk('seguridad', 'El PIN correcto abre la app', seg.ok === true);
+  chk('seguridad', 'El PIN incorrecto no abre', seg.mal === false);
+  chk('seguridad', 'El PIN NO se guarda en claro en el dispositivo', !seg.guardadoEnClaro);
+  chk('seguridad', 'La copia cifrada no contiene el texto legible', !seg.textoCifrado.includes('secreto contable'));
+  chk('seguridad', 'La copia cifrada se recupera con su contraseña', seg.descifrado === 'secreto contable');
+  chk('seguridad', 'Con otra contraseña la copia no se abre', seg.fallaConOtra);
+
+  // ══════════════ 10. ERRORES DE JAVASCRIPT ══════════════
+  console.log('\n═══ 10. ESTABILIDAD ═══');
+  chk('estabilidad', 'Ningún error de JavaScript durante toda la verificación',
+    erroresJS.length === 0, erroresJS.join(' | '));
+
+  await limpiar();
+  await browser.close();
+
+  console.log('\n' + '═'.repeat(56));
+  console.log(`RESULTADO: ${R.ok} comprobaciones correctas, ${R.fallos.length} fallos`);
+  if (R.fallos.length) {
+    console.log('\nFALLOS ENCONTRADOS:');
+    R.fallos.forEach(f => console.log(`  [${f.area}] ${f.nombre}${f.detalle ? '\n      → ' + f.detalle : ''}`));
+  }
+  process.exit(R.fallos.length ? 1 : 0);
+})();

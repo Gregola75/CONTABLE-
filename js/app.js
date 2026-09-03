@@ -1279,7 +1279,10 @@
       .filter(Boolean).sort();
     if (!fechas.length) return { total: 0, meses: [] };
     let mes = fechas[0].slice(0, 7);
-    const ultimo = (t.fin || hoyISO()).slice(0, 7);
+    // Hasta el último mes con actividad: si se le paga el finiquito después
+    // de la baja (lo normal), ese pago también tiene que descontarse
+    const ultimo = [(t.fin || hoyISO()).slice(0, 7), hoyISO().slice(0, 7), fechas[fechas.length - 1].slice(0, 7)]
+      .sort().pop();
     const meses = [];
     let total = 0;
     while (mes <= ultimo) {

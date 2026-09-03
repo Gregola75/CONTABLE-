@@ -1,0 +1,11 @@
+{
+  "name": "wandercontable-pruebas",
+  "private": true,
+  "description": "Verificación de la app: cálculos, datos y sincronización",
+  "scripts": {
+    "test": "bash ejecutar.sh"
+  },
+  "dependencies": {
+    "playwright-core": "^1.49.0"
+  }
+}
