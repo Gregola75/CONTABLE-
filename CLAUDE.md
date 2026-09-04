@@ -31,9 +31,12 @@ versión antigua.
 
 **Facturas e impuestos**
 - IVA español: 21 / 10 / 4 / 5 / 0 %, y facturas con varios tipos a la vez.
-- Casilla **"gasto personal o de casa"** (`personal: true`): el registro se
-  guarda y se ve en la app, pero **nunca** entra en el informe, el CSV, la
-  previsión de impuestos ni las estadísticas por proveedor.
+- Casilla **"gasto personal o de casa"** (`personal: true`): SÍ se envía a
+  la gestoría, pero en un **apartado aparte** del informe y del CSV ("Gastos
+  personales / de casa — a valorar por la gestoría"), sin sumarse a los gastos
+  del negocio ni al resultado: la gestoría decide qué parte es deducible. En
+  la previsión interna no se descuentan (prudencia) y no entran en las
+  estadísticas del negocio.
 - Al guardar una factura se avisa si ya existe otra con el mismo proveedor,
   fecha y total (contarla dos veces deduce IVA de más) y si el desglose no
   cuadra (`base + IVA − retención ≠ total`). Son avisos con confirmación, no

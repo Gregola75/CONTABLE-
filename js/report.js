@@ -33,10 +33,25 @@ const INFORME = (() => {
       }
     });
 
-    // Gastos por proveedor/servicio (facturas). Los gastos marcados como
-    // personales (casa) NO van a la gestoría: se dejan fuera de todo.
+    // Gastos por proveedor/servicio (facturas). Los marcados como personales
+    // (casa) van a la gestoría en un apartado aparte para que ella decida
+    // qué es deducible; no se mezclan con los del negocio.
     const facturas = registros.filter(r => r.tipo === 'factura' && !r.personal);
-    const personalesExcluidos = registros.filter(r => r.tipo === 'factura' && r.personal).length;
+    const personales = registros.filter(r => r.tipo === 'factura' && r.personal);
+    const personalesExcluidos = personales.length;
+    const agrupar = (lista) => {
+      const por = {};
+      lista.forEach(r => {
+        const clave = (r.proveedor || 'Sin proveedor').trim() || 'Sin proveedor';
+        if (!por[clave]) por[clave] = { total: 0, facturas: 0, categoria: r.categoria || '', nif: r.nif || '' };
+        por[clave].total += (r.total || 0);
+        por[clave].facturas += 1;
+        if (!por[clave].nif && r.nif) por[clave].nif = r.nif;
+      });
+      return por;
+    };
+    const gastosPersonales = agrupar(personales);
+    const totalPersonales = Object.values(gastosPersonales).reduce((s, g) => s + g.total, 0);
     const gastosPorProveedor = {};
     facturas.forEach(r => {
       const clave = (r.proveedor || 'Sin proveedor').trim() || 'Sin proveedor';
@@ -59,7 +74,7 @@ const INFORME = (() => {
       retCuota: (typeof r.retCuota === 'number') ? r.retCuota : null
     }));
 
-    return { anio, trimestre, desde, hasta, meses, ingresosPorMes, gastosPorProveedor, totalIngresos, totalGastos, facturasDetalle, personalesExcluidos };
+    return { anio, trimestre, desde, hasta, meses, ingresosPorMes, gastosPorProveedor, totalIngresos, totalGastos, facturasDetalle, personalesExcluidos, gastosPersonales, totalPersonales };
   }
 
   /* Previsión interna de impuestos del trimestre (orientativa, no se exporta).
@@ -126,7 +141,7 @@ const INFORME = (() => {
       : '';
 
     const avisoPersonales = prev.personalesExcluidos > 0
-      ? `<p class="hint">👤 ${prev.personalesExcluidos} gasto${prev.personalesExcluidos === 1 ? '' : 's'} marcado${prev.personalesExcluidos === 1 ? '' : 's'} como personal no ${prev.personalesExcluidos === 1 ? 'entra' : 'entran'} ni aquí ni en el informe de la gestoría.</p>`
+      ? `<p class="hint">👤 ${prev.personalesExcluidos} gasto${prev.personalesExcluidos === 1 ? '' : 's'} de casa/personal${prev.personalesExcluidos === 1 ? ' va' : ' van'} a la gestoría en su propio apartado. Aquí no se descuenta${prev.personalesExcluidos === 1 ? '' : 'n'} por prudencia: si la gestoría los deduce, pagarás menos de lo previsto.</p>`
       : '';
 
     return `
@@ -220,6 +235,13 @@ const INFORME = (() => {
       </tr>`).join('');
 
     const balance = inf.totalIngresos - inf.totalGastos;
+    const personalesOrdenados = Object.entries(inf.gastosPersonales || {}).sort((a, b) => b[1].total - a[1].total);
+    const filasPersonales = personalesOrdenados.map(([nombre, g]) => `
+      <tr>
+        <td>${escapar(nombre)}</td>
+        <td>${escapar(g.nif)}</td>
+        <td class="num">${eur(g.total)}</td>
+      </tr>`).join('');
 
     return `
       <h2 class="informe-titulo" style="font-size:1.05rem">Informe ${inf.trimestre}º trimestre ${inf.anio}</h2>
@@ -243,6 +265,17 @@ const INFORME = (() => {
           <tr class="total"><td>TOTAL GASTOS</td><td></td><td class="num">${eur(inf.totalGastos)}</td></tr>
         </tbody>
       </table>` : '<p class="vacio">No hay facturas en este trimestre.</p>'}
+
+      ${personalesOrdenados.length ? `
+      <h3 class="informe-titulo">👤 Gastos personales / de casa (a valorar por la gestoría)</h3>
+      <p class="txt-sec" style="font-size:.82rem">No están sumados en los gastos del negocio ni en el resultado. Se envían aparte para que la gestoría decida qué parte es deducible.</p>
+      <table class="informe-tabla">
+        <thead><tr><th>Concepto</th><th>NIF / CIF</th><th class="num">Total</th></tr></thead>
+        <tbody>
+          ${filasPersonales}
+          <tr class="total"><td>TOTAL PERSONALES</td><td></td><td class="num">${eur(inf.totalPersonales)}</td></tr>
+        </tbody>
+      </table>` : ''}
 
       <div class="informe-balance">
         <strong>Resultado del trimestre:</strong>
@@ -275,8 +308,18 @@ const INFORME = (() => {
         L.push(`${csvCampo(nombre)};${csvCampo(g.nif)};${num(g.total)}`);
       });
     L.push(`TOTAL GASTOS;;${num(inf.totalGastos)}`);
+    const personales = Object.entries(inf.gastosPersonales || {}).sort((a, b) => b[1].total - a[1].total);
+    if (personales.length) {
+      L.push('');
+      L.push('GASTOS PERSONALES / DE CASA (a valorar por la gestoria; no sumados en el negocio)');
+      L.push('Concepto;NIF/CIF;Total (EUR)');
+      personales.forEach(([nombre, g]) => {
+        L.push(`${csvCampo(nombre)};${csvCampo(g.nif)};${num(g.total)}`);
+      });
+      L.push(`TOTAL PERSONALES;;${num(inf.totalPersonales)}`);
+    }
     L.push('');
-    L.push(`RESULTADO DEL TRIMESTRE;;${num(inf.totalIngresos - inf.totalGastos)}`);
+    L.push(`RESULTADO DEL TRIMESTRE (negocio);;${num(inf.totalIngresos - inf.totalGastos)}`);
     return '\uFEFF' + L.join('\r\n');
   }
 

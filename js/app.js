@@ -860,7 +860,7 @@
       esFactura ? ['Proveedor', r.proveedor || '—'] : null,
       esFactura && r.nif ? ['NIF/CIF', r.nif] : null,
       esFactura ? ['Categoría', r.categoria || '—'] : null,
-      esFactura && r.personal ? ['Gasto personal', 'Sí — no va al informe de la gestoría'] : null,
+      esFactura && r.personal ? ['Gasto personal / de casa', 'Sí — va a la gestoría en apartado aparte'] : null,
       ['Total', INFORME.eur(r.total)],
       esFactura && typeof r.baseImponible === 'number' ? ['Base imponible', INFORME.eur(r.baseImponible)] : null,
       esFactura && r.ivaTipo != null ? ['Tipo IVA', r.ivaTipo === 'varios' ? 'Varios tipos' : r.ivaTipo + ' %'] : null,

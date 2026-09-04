@@ -491,12 +491,15 @@ TARJETA 450,00`)]);
     const est = await INFORME.estadisticas(null, null);
     return { csv: INFORME.generarCSV(i), html: INFORME.renderHTML(i), totalGastos: i.totalGastos, ivaSoportado: prev.ivaSoportado, excluidos: prev.personalesExcluidos, estNombres: est.map(e => e.nombre) };
   });
-  chk('fiscal', 'Un gasto personal NO suma en los gastos de la gestoría (121, no 201)', cerca(fiscal.totalGastos, 121), 'obtenido ' + fiscal.totalGastos);
-  chk('fiscal', 'Un gasto personal NO aparece en el CSV de la gestoría', !fiscal.csv.includes('Luz de mi casa'));
-  chk('fiscal', 'Un gasto personal NO aparece en la impresión del informe', !fiscal.html.includes('Luz de mi casa'));
-  chk('fiscal', 'Su IVA NO se deduce en la previsión (21, no 34,88)', cerca(fiscal.ivaSoportado, 21), 'obtenido ' + fiscal.ivaSoportado);
-  chk('fiscal', 'La previsión avisa de cuántos gastos personales se excluyeron', fiscal.excluidos === 1);
-  chk('fiscal', 'Tampoco entra en las estadísticas por proveedor', !fiscal.estNombres.includes('Luz de mi casa'));
+  chk('fiscal', 'Un gasto de casa NO se mezcla con los gastos del negocio (121, no 201)', cerca(fiscal.totalGastos, 121), 'obtenido ' + fiscal.totalGastos);
+  chk('fiscal', 'Un gasto de casa SÍ va al CSV de la gestoría, en su apartado propio',
+    fiscal.csv.includes('GASTOS PERSONALES') && fiscal.csv.includes('Luz de mi casa') && fiscal.csv.includes('TOTAL PERSONALES;;80,00'));
+  chk('fiscal', 'Y en la impresión del informe, en su apartado propio',
+    fiscal.html.includes('a valorar por la gestoría') && fiscal.html.includes('Luz de mi casa'));
+  chk('fiscal', 'El resultado del trimestre no lo resta (es del negocio)', fiscal.csv.includes('RESULTADO DEL TRIMESTRE (negocio);;379,00'));
+  chk('fiscal', 'Su IVA NO se descuenta en la previsión interna, por prudencia (21, no 34,88)', cerca(fiscal.ivaSoportado, 21), 'obtenido ' + fiscal.ivaSoportado);
+  chk('fiscal', 'La previsión avisa de cuántos gastos de casa hay', fiscal.excluidos === 1);
+  chk('fiscal', 'No entra en las estadísticas del negocio por proveedor', !fiscal.estNombres.includes('Luz de mi casa'));
 
   // Factura duplicada: aviso y, si se rechaza, no se guarda
   await page.click('.tab[data-tab="facturas"]');
