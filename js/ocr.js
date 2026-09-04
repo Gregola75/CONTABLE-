@@ -4,12 +4,18 @@
 const OCR = (() => {
   let workerPromise = null;
 
-  function obtenerWorker(onProgreso) {
+  let onProgresoActual = null; // el progreso llega al que esté leyendo ahora
+
+  function obtenerWorker() {
     if (!workerPromise) {
       workerPromise = Tesseract.createWorker('spa', 1, {
         logger: (m) => {
-          if (m.status === 'recognizing text' && onProgreso) {
-            onProgreso(Math.round(m.progress * 100));
+          if (!onProgresoActual) return;
+          if (m.status === 'recognizing text') {
+            onProgresoActual(Math.round(m.progress * 100), 'leyendo');
+          } else {
+            // Descargando o preparando el lector (solo la primera vez o tras actualizar)
+            onProgresoActual(Math.round((m.progress || 0) * 100), 'preparando');
           }
         }
       });
@@ -18,6 +24,12 @@ const OCR = (() => {
       workerPromise.catch(() => { workerPromise = null; });
     }
     return workerPromise;
+  }
+
+  /* Prepara el lector en segundo plano al abrir la app, para que la
+     primera foto no tenga que esperar la descarga ni el arranque. */
+  function precargar() {
+    try { obtenerWorker().catch(() => {}); } catch (e) { /* sin conexión: se reintenta con la foto */ }
   }
 
   /* Reduce la imagen para acelerar el OCR sin perder demasiada calidad. */
@@ -53,8 +65,9 @@ const OCR = (() => {
   }
 
   async function leerImagen(blob, onProgreso) {
+    onProgresoActual = onProgreso || null;
     const trabajo = (async () => {
-      const worker = await obtenerWorker(onProgreso);
+      const worker = await obtenerWorker();
       const canvas = await prepararImagen(blob);
       const { data } = await worker.recognize(canvas);
       return data.text || '';
@@ -579,5 +592,5 @@ const OCR = (() => {
     return { fecha: detectarFechaCierre(texto), total, efectivo, tarjeta };
   }
 
-  return { leerImagen, analizarFactura, analizarCierre, normalizarNumero };
+  return { leerImagen, precargar, analizarFactura, analizarCierre, normalizarNumero };
 })();

@@ -339,8 +339,10 @@
     let texto = '';
     if (file) {
       try {
-        texto = await OCR.leerImagen(file, (p) => {
-          $('#factura-progress-text').textContent = `Leyendo la imagen… ${p}%`;
+        texto = await OCR.leerImagen(file, (p, fase) => {
+          $('#factura-progress-text').textContent = fase === 'preparando'
+            ? `Preparando el lector de fotos… ${p}% (solo tarda la primera vez)`
+            : `Leyendo la imagen… ${p}%`;
         });
       } catch (e) {
         console.error(e);
@@ -543,8 +545,10 @@
     let texto = '';
     if (file) {
       try {
-        texto = await OCR.leerImagen(file, (p) => {
-          $('#cierre-progress-text').textContent = `Leyendo la imagen… ${p}%`;
+        texto = await OCR.leerImagen(file, (p, fase) => {
+          $('#cierre-progress-text').textContent = fase === 'preparando'
+            ? `Preparando el lector de fotos… ${p}% (solo tarda la primera vez)`
+            : `Leyendo la imagen… ${p}%`;
         });
       } catch (e) {
         console.error(e);
@@ -2337,6 +2341,10 @@
   if (navigator.storage && navigator.storage.persist) {
     navigator.storage.persist().catch(() => {});
   }
+
+  // Preparar el lector de fotos en segundo plano: cuando llegue la primera
+  // foto del día, ya está descargado y arrancado
+  setTimeout(() => { if (typeof OCR !== 'undefined' && OCR.precargar) OCR.precargar(); }, 3000);
 
   mostrarBloqueo(); // si hay PIN, la app arranca bloqueada
   crearComboProveedores('#f-proveedor');

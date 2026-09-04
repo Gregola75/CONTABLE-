@@ -7,7 +7,10 @@
    - Recursos externos (OCR, fuentes, pdf.js): caché primero, porque están
      versionados en su URL y no cambian. */
 
-const CACHE = 'contable-v38';
+const CACHE = 'contable-v39';
+// Los recursos externos (lector OCR ~15 MB, fuentes, pdf.js) van en una caché
+// aparte que NO se borra al actualizar la app: se descargan una sola vez.
+const CACHE_EXTERNOS = 'contable-externos-v1';
 const ARCHIVOS = [
   './',
   './index.html',
@@ -37,7 +40,7 @@ self.addEventListener('install', (e) => {
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys().then(claves =>
-      Promise.all(claves.filter(k => k !== CACHE).map(k => caches.delete(k)))
+      Promise.all(claves.filter(k => k !== CACHE && k !== CACHE_EXTERNOS).map(k => caches.delete(k)))
     ).then(() => self.clients.claim())
   );
 });
@@ -72,7 +75,7 @@ self.addEventListener('fetch', (e) => {
             url.href.includes('fonts.googleapis') || url.href.includes('fonts.gstatic') ||
             url.href.includes('gstatic.com/firebasejs'))) {
           const clon = resp.clone();
-          caches.open(CACHE).then(c => c.put(e.request, clon));
+          caches.open(CACHE_EXTERNOS).then(c => c.put(e.request, clon));
         }
         return resp;
       });
