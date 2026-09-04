@@ -88,6 +88,7 @@
       if (btn.dataset.tab === 'ajustes') { pintarStats(); pintarSeguridad(); pintarNube(); }
       if (btn.dataset.tab === 'consultar') buscar();
       if (btn.dataset.tab === 'personal') pintarPersonal();
+      if (btn.dataset.tab === 'cierres') pintarFacturacion();
     });
   });
 
@@ -381,6 +382,7 @@
     $('#f-rettipo').value = datos.retTipo != null && [19, 15, 7, 1].includes(datos.retTipo) ? String(datos.retTipo) : '';
     $('#f-retcuota').value = datos.retCuota != null ? datos.retCuota : '';
     $('#f-notas').value = '';
+    $('#f-personal').checked = false;
     $('#f-iva21').value = '';
     $('#f-iva10').value = '';
     $('#f-iva4').value = '';
@@ -469,14 +471,34 @@
     const nif = $('#f-nif').value.trim();
     const categoria = $('#f-categoria').value;
 
-    // Si es un proveedor nuevo y la casilla está marcada, darlo de alta
-    await altaProveedorSiNuevo(proveedor, nif, categoria);
-
     const ivaCuota = parseFloat($('#f-ivacuota').value);
     const base = parseFloat($('#f-base').value);
     const tipoStr = $('#f-ivatipo').value;
     const retCuota = parseFloat($('#f-retcuota').value);
     const retTipoStr = $('#f-rettipo').value;
+
+    // Aviso de factura duplicada (misma fecha, proveedor y total): contarla
+    // dos veces deduce IVA de más en la declaración
+    const idActual = registroEditando ? registroEditando.id : null;
+    const iguales = (await DB.buscar({ tipo: 'factura', desde: fecha, hasta: fecha }))
+      .filter(r => r.id !== idActual && Math.abs((r.total || 0) - total) < 0.005 &&
+        normalizarNombre(r.proveedor) === normalizarNombre(proveedor));
+    if (iguales.length && !confirm(
+      `⚠️ Ya hay una factura de "${proveedor}" del ${fmtFecha(fecha)} por ${INFORME.eur(total)}.\n\n` +
+      'Si la guardas, ese gasto y su IVA se contarán DOS VECES en el informe.\n\n¿Seguro que es otra factura distinta?')) return;
+
+    // Coherencia del desglose: base + IVA − retención tiene que dar el total
+    if (!isNaN(base) && !isNaN(ivaCuota)) {
+      const ret = isNaN(retCuota) ? 0 : retCuota;
+      const esperado = Math.round((base + ivaCuota - ret) * 100) / 100;
+      if (Math.abs(esperado - total) > 0.05 && !confirm(
+        `⚠️ Los números no cuadran: base ${INFORME.eur(base)} + IVA ${INFORME.eur(ivaCuota)}` +
+        `${ret ? ' − retención ' + INFORME.eur(ret) : ''} = ${INFORME.eur(esperado)}, pero el total es ${INFORME.eur(total)}.\n\n` +
+        'Revisa el desglose (es lo que va a la declaración). ¿Guardar de todas formas?')) return;
+    }
+
+    // Si es un proveedor nuevo y la casilla está marcada, darlo de alta
+    await altaProveedorSiNuevo(proveedor, nif, categoria);
 
     const desglose = tipoStr === 'varios' ? {
       v21: parseFloat($('#f-iva21').value) || null,
@@ -500,6 +522,7 @@
       ivaDesglose: desglose,
       retTipo: retTipoStr === '' ? null : +retTipoStr,
       retCuota: isNaN(retCuota) || retCuota <= 0 ? null : Math.round(retCuota * 100) / 100,
+      personal: $('#f-personal').checked,
       notas: $('#f-notas').value.trim(),
       imagen: facturaPendiente ? facturaPendiente.imagen : null,
       ocrTexto: facturaPendiente ? facturaPendiente.ocrTexto : ''
@@ -651,6 +674,7 @@
     $('#cierre-form-card').classList.add('hidden');
     toast(eraEdicion ? '✏️ Cierre corregido.' : '💾 Cierre guardado.');
     pintarRecientes();
+    pintarFacturacion();
     buscar();
   }));
 
@@ -659,6 +683,120 @@
     cierrePendiente = null;
     $('#cierre-form-card').classList.add('hidden');
   });
+
+  /* ---------- FACTURACIÓN: cómo va el mes ---------- */
+
+  const DIAS_SEMANA = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+  const diaSemanaDe = (iso) => DIAS_SEMANA[new Date(iso + 'T00:00:00').getDay()];
+  const r2 = (n) => Math.round(n * 100) / 100;
+
+  function mesAnteriorDe(mes) {
+    const [a, m] = mes.split('-').map(Number);
+    return m === 1 ? `${a - 1}-12` : `${a}-${String(m - 1).padStart(2, '0')}`;
+  }
+
+  async function pintarFacturacion() {
+    if (!$('#fac-mes').value) $('#fac-mes').value = hoyISO().slice(0, 7);
+    const mes = $('#fac-mes').value;
+    const mesAnt = mesAnteriorDe(mes);
+    const [cierres, cierresAnt] = await Promise.all([
+      DB.buscar({ tipo: 'cierre', desde: mes + '-01', hasta: mes + '-31' }),
+      DB.buscar({ tipo: 'cierre', desde: mesAnt + '-01', hasta: mesAnt + '-31' })
+    ]);
+    const div = $('#fac-resumen');
+    if (!cierres.length) {
+      div.innerHTML = '<p class="vacio">Aún no hay cierres anotados en este mes.</p>';
+      return;
+    }
+
+    // Ventas por día (los totales mensuales sin detalle diario cuentan en el total, no por día)
+    const porDia = new Map();
+    let totalMensuales = 0;
+    cierres.forEach(c => {
+      if (c.mensual) totalMensuales += (c.total || 0);
+      else porDia.set(c.fecha, r2((porDia.get(c.fecha) || 0) + (c.total || 0)));
+    });
+    const dias = [...porDia.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+    const totalDiarios = r2(dias.reduce((s, [, v]) => s + v, 0));
+    const total = r2(totalDiarios + totalMensuales);
+    const media = dias.length ? totalDiarios / dias.length : 0;
+
+    // Mes anterior, para comparar
+    const diasAnt = cierresAnt.filter(c => !c.mensual);
+    const totalAnt = r2(cierresAnt.reduce((s, c) => s + (c.total || 0), 0));
+    const mediaAnt = diasAnt.length ? diasAnt.reduce((s, c) => s + (c.total || 0), 0) / diasAnt.length : 0;
+
+    const hoy = hoyISO();
+    const esMesActual = mes === hoy.slice(0, 7);
+    const [a, m] = mes.split('-').map(Number);
+    const diasDelMes = new Date(a, m, 0).getDate();
+    const ultimoDiaContado = esMesActual ? Math.min(+hoy.slice(8), diasDelMes) : diasDelMes;
+
+    // Días que quedan sin cierre anotado (solo hasta hoy)
+    const sinCierre = [];
+    if (!totalMensuales) {
+      for (let d = 1; d <= ultimoDiaContado; d++) {
+        const f = `${mes}-${String(d).padStart(2, '0')}`;
+        if (!porDia.has(f) && !(esMesActual && f === hoy)) sinCierre.push(f);
+      }
+    }
+
+    // Mejor día y días más flojos
+    const orden = [...dias].sort((x, y) => y[1] - x[1]);
+    const mejor = orden[0];
+    const flojos = orden.slice(-Math.min(3, Math.max(0, orden.length - 1))).reverse();
+
+    // Media por día de la semana: cuáles flojean
+    const agg = Array.from({ length: 7 }, () => ({ s: 0, n: 0 }));
+    dias.forEach(([f, v]) => { const i = new Date(f + 'T00:00:00').getDay(); agg[i].s += v; agg[i].n++; });
+    const mediasSemana = agg.map(x => (x.n ? x.s / x.n : null));
+    const maxSemana = Math.max(1, ...mediasSemana.filter(x => x !== null));
+    const minSemana = Math.min(...mediasSemana.filter(x => x !== null));
+    const ordenSemana = [1, 2, 3, 4, 5, 6, 0]; // lunes a domingo
+    const semanaHTML = ordenSemana.filter(i => mediasSemana[i] !== null).map(i => `
+      <div class="fila-mes">
+        <span class="mes-etq">${DIAS_SEMANA[i]}${mediasSemana[i] === minSemana && dias.length >= 4 ? ' 🔻' : ''}</span>
+        <div class="barra"><div class="barra-fill" style="width:${Math.max(2, Math.round(mediasSemana[i] / maxSemana * 100))}%"></div></div>
+        <span class="mes-val">${INFORME.eur(mediasSemana[i])}</span>
+      </div>`).join('');
+
+    // Barras por día
+    const maxDia = Math.max(1, ...dias.map(([, v]) => v));
+    const flojosSet = new Set(flojos.map(([f]) => f));
+    const barrasHTML = dias.map(([f, v]) => `
+      <div class="fila-mes">
+        <span class="mes-etq">${+f.slice(8)} ${diaSemanaDe(f)}${mejor && f === mejor[0] ? ' 🥇' : (flojosSet.has(f) ? ' 🔻' : '')}</span>
+        <div class="barra"><div class="barra-fill" style="width:${Math.max(2, Math.round(v / maxDia * 100))}%"></div></div>
+        <span class="mes-val">${INFORME.eur(v)}</span>
+      </div>`).join('');
+
+    // Comparación con el mes anterior (por media diaria: justo aunque el mes no haya acabado)
+    let comparaHTML = '';
+    if (mediaAnt > 0 && media > 0) {
+      const dif = (media - mediaAnt) / mediaAnt * 100;
+      const signo = dif >= 0 ? '▲' : '▼';
+      comparaHTML = `<div class="stat-linea"><span>Frente a ${mesEnLetras(mesAnt + '-01')} (media ${INFORME.eur(mediaAnt)}/día · total ${INFORME.eur(totalAnt)})</span><strong class="${dif >= 0 ? 'txt-ok' : 'txt-bad'}">${signo} ${Math.abs(dif).toLocaleString('es-ES', { maximumFractionDigits: 1 })} %</strong></div>`;
+    } else if (totalAnt > 0) {
+      comparaHTML = `<div class="stat-linea"><span>${mesEnLetras(mesAnt + '-01')} cerró en</span><strong>${INFORME.eur(totalAnt)}</strong></div>`;
+    }
+
+    const ritmoHTML = esMesActual && dias.length >= 3 && ultimoDiaContado < diasDelMes
+      ? `<div class="stat-linea"><span>Si sigue a este ritmo, el mes cerraría en <small class="txt-sec">(orientativo)</small></span><strong>~${INFORME.eur(total + media * (diasDelMes - ultimoDiaContado))}</strong></div>`
+      : '';
+
+    div.innerHTML = `
+      <div class="stat-linea per-pendiente ok"><span>Facturado en ${mesEnLetras(mes + '-01')}</span><strong>${INFORME.eur(total)}</strong></div>
+      <div class="stat-linea"><span>${dias.length} día${dias.length === 1 ? '' : 's'} con cierre${totalMensuales ? ' + total mensual' : ''} · media</span><strong>${INFORME.eur(media)}/día</strong></div>
+      ${comparaHTML}
+      ${ritmoHTML}
+      ${mejor ? `<div class="stat-linea"><span>🥇 Mejor día: ${fmtFecha(mejor[0])} (${diaSemanaDe(mejor[0])})</span><strong class="txt-ok">${INFORME.eur(mejor[1])}</strong></div>` : ''}
+      ${flojos.length ? `<p class="hint" style="margin:10px 0 2px">🔻 Los días más flojos del mes:</p>${flojos.map(([f, v]) => `<div class="stat-linea"><span>${fmtFecha(f)} (${diaSemanaDe(f)})</span><strong class="txt-bad">${INFORME.eur(v)}</strong></div>`).join('')}` : ''}
+      ${sinCierre.length ? `<p class="hint" style="margin:10px 0 0;color:var(--oro)">⚠️ ${sinCierre.length} día${sinCierre.length === 1 ? '' : 's'} sin cierre anotado: ${sinCierre.slice(0, 6).map(f => +f.slice(8)).join(', ')}${sinCierre.length > 6 ? '…' : ''}</p>` : ''}
+      ${semanaHTML ? `<p class="hint" style="margin:12px 0 4px">📅 Media por día de la semana (🔻 el más flojo):</p>${semanaHTML}` : ''}
+      ${barrasHTML ? `<p class="hint" style="margin:12px 0 4px">Ventas de cada día:</p>${barrasHTML}` : ''}`;
+  }
+
+  $('#fac-mes').addEventListener('change', pintarFacturacion);
 
   /* ---------- Listas y detalle ---------- */
 
@@ -671,7 +809,7 @@
     const titulo = esFactura ? (r.proveedor || 'Sin proveedor') : (r.mensual ? 'Ventas del mes' : 'Cierre de caja');
     const sub = r.mensual
       ? mesEnLetras(r.fecha) + ' · mes completo'
-      : fmtFecha(r.fecha) + (esFactura && r.categoria ? ' · ' + escapar(r.categoria) : '');
+      : fmtFecha(r.fecha) + (esFactura && r.categoria ? ' · ' + escapar(r.categoria) : '') + (esFactura && r.personal ? ' · 👤 personal' : '');
     return `
       <div class="item" data-id="${r.id}">
         ${r._thumb
@@ -722,6 +860,7 @@
       esFactura ? ['Proveedor', r.proveedor || '—'] : null,
       esFactura && r.nif ? ['NIF/CIF', r.nif] : null,
       esFactura ? ['Categoría', r.categoria || '—'] : null,
+      esFactura && r.personal ? ['Gasto personal', 'Sí — no va al informe de la gestoría'] : null,
       ['Total', INFORME.eur(r.total)],
       esFactura && typeof r.baseImponible === 'number' ? ['Base imponible', INFORME.eur(r.baseImponible)] : null,
       esFactura && r.ivaTipo != null ? ['Tipo IVA', r.ivaTipo === 'varios' ? 'Varios tipos' : r.ivaTipo + ' %'] : null,
@@ -759,6 +898,7 @@
         cerrarModal();
         toast('🗑️ Registro eliminado.');
         pintarRecientes();
+        pintarFacturacion();
         buscar();
       }
     });
@@ -790,6 +930,7 @@
       $('#f-rettipo').value = r.retTipo != null ? String(r.retTipo) : '';
       $('#f-retcuota').value = r.retCuota != null ? r.retCuota : '';
       $('#f-notas').value = r.notas || '';
+      $('#f-personal').checked = !!r.personal;
       const d = r.ivaDesglose || {};
       $('#f-iva21').value = d.v21 != null ? d.v21 : '';
       $('#f-iva10').value = d.v10 != null ? d.v10 : '';
@@ -2365,6 +2506,7 @@
     cargarProveedores();
     if (document.querySelector('.tab[data-tab="consultar"]').classList.contains('active')) buscar();
     if (document.querySelector('.tab[data-tab="personal"]').classList.contains('active')) pintarPersonal();
+    if (document.querySelector('.tab[data-tab="cierres"]').classList.contains('active')) pintarFacturacion();
   });
   pintarNube();
 })();

@@ -15,7 +15,9 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
   const page = await browser.newPage({ viewport: { width: 390, height: 900 } });
   const erroresJS = [];
   page.on('pageerror', e => erroresJS.push(e.message));
-  page.on('dialog', d => d.accept());
+  let ultimoDialogo = '';
+  let aceptarDialogos = true;
+  page.on('dialog', d => { ultimoDialogo = d.message(); aceptarDialogos ? d.accept() : d.dismiss(); });
   await page.goto('http://localhost:8904/index.html');
   await page.waitForTimeout(800);
 
@@ -476,6 +478,100 @@ TARJETA 450,00`)]);
   chk('seguridad', 'La copia cifrada no contiene el texto legible', !seg.textoCifrado.includes('secreto contable'));
   chk('seguridad', 'La copia cifrada se recupera con su contraseña', seg.descifrado === 'secreto contable');
   chk('seguridad', 'Con otra contraseña la copia no se abre', seg.fallaConOtra);
+
+  // ══════════════ 9b. PROTECCIONES FISCALES ══════════════
+  console.log('\n═══ 9b. PROTECCIONES FISCALES (lo que va a la declaración) ═══');
+  await limpiar();
+  const fiscal = await page.evaluate(async () => {
+    await DB.guardar({ tipo: 'factura', fecha: '2026-07-10', proveedor: 'Bebidas Pepe', total: 121, baseImponible: 100, ivaCuota: 21, categoria: 'Mercancía', creado: new Date().toISOString() });
+    await DB.guardar({ tipo: 'factura', fecha: '2026-07-11', proveedor: 'Luz de mi casa', total: 80, baseImponible: 66.12, ivaCuota: 13.88, categoria: 'Luz', personal: true, creado: new Date().toISOString() });
+    await DB.guardar({ tipo: 'cierre', fecha: '2026-07-10', total: 500, proveedor: '', creado: new Date().toISOString() });
+    const i = await INFORME.generar(2026, 3);
+    const prev = INFORME.prevision(i, { ivaVentas: 10, ivaGastos: 21, irpfActivo: true, irpf: 20 });
+    const est = await INFORME.estadisticas(null, null);
+    return { csv: INFORME.generarCSV(i), html: INFORME.renderHTML(i), totalGastos: i.totalGastos, ivaSoportado: prev.ivaSoportado, excluidos: prev.personalesExcluidos, estNombres: est.map(e => e.nombre) };
+  });
+  chk('fiscal', 'Un gasto personal NO suma en los gastos de la gestoría (121, no 201)', cerca(fiscal.totalGastos, 121), 'obtenido ' + fiscal.totalGastos);
+  chk('fiscal', 'Un gasto personal NO aparece en el CSV de la gestoría', !fiscal.csv.includes('Luz de mi casa'));
+  chk('fiscal', 'Un gasto personal NO aparece en la impresión del informe', !fiscal.html.includes('Luz de mi casa'));
+  chk('fiscal', 'Su IVA NO se deduce en la previsión (21, no 34,88)', cerca(fiscal.ivaSoportado, 21), 'obtenido ' + fiscal.ivaSoportado);
+  chk('fiscal', 'La previsión avisa de cuántos gastos personales se excluyeron', fiscal.excluidos === 1);
+  chk('fiscal', 'Tampoco entra en las estadísticas por proveedor', !fiscal.estNombres.includes('Luz de mi casa'));
+
+  // Factura duplicada: aviso y, si se rechaza, no se guarda
+  await page.click('.tab[data-tab="facturas"]');
+  await page.click('#factura-manual');
+  await page.waitForTimeout(300);
+  await page.fill('#f-proveedor', 'Bebidas Pepe');
+  await page.fill('#f-fecha', '2026-07-10');
+  await page.fill('#f-total', '121');
+  aceptarDialogos = false; ultimoDialogo = '';
+  await page.click('#factura-guardar');
+  await page.waitForTimeout(700);
+  chk('fiscal', 'Avisa al guardar una factura duplicada (mismo proveedor, fecha y total)', /DOS VECES/.test(ultimoDialogo), ultimoDialogo.slice(0, 80));
+  chk('fiscal', 'Si dices que no, la duplicada NO se guarda',
+    await page.evaluate(async () => (await DB.todos()).filter(r => r.proveedor === 'Bebidas Pepe').length === 1));
+  aceptarDialogos = true;
+  await page.click('#factura-cancelar');
+
+  // Desglose que no cuadra: aviso
+  await page.click('#factura-manual');
+  await page.waitForTimeout(300);
+  await page.fill('#f-proveedor', 'Descuadre S.L.');
+  await page.fill('#f-fecha', '2026-07-12');
+  await page.fill('#f-total', '121');
+  await page.fill('#f-base', '100');
+  await page.fill('#f-ivacuota', '30');
+  aceptarDialogos = false; ultimoDialogo = '';
+  await page.click('#factura-guardar');
+  await page.waitForTimeout(700);
+  chk('fiscal', 'Avisa si base + IVA no cuadra con el total (100 + 30 ≠ 121)', /no cuadran/.test(ultimoDialogo), ultimoDialogo.slice(0, 80));
+  aceptarDialogos = true;
+  await page.click('#factura-cancelar');
+
+  // Un desglose correcto con retención NO avisa (800 + 168 − 152 = 816)
+  await page.click('#factura-manual');
+  await page.waitForTimeout(300);
+  await page.fill('#f-proveedor', 'Alquiler Local');
+  await page.fill('#f-fecha', '2026-07-13');
+  await page.fill('#f-total', '816');
+  await page.fill('#f-base', '800');
+  await page.fill('#f-ivacuota', '168');
+  await page.fill('#f-retcuota', '152');
+  ultimoDialogo = '';
+  await page.click('#factura-guardar');
+  await page.waitForTimeout(700);
+  chk('fiscal', 'Un desglose correcto con retención se guarda sin avisos', ultimoDialogo === '' &&
+    await page.evaluate(async () => (await DB.todos()).some(r => r.proveedor === 'Alquiler Local')));
+
+  // ══════════════ 9c. FACTURACIÓN: CÓMO VA EL MES ══════════════
+  console.log('\n═══ 9c. FACTURACIÓN (cómo va el mes) ═══');
+  await limpiar();
+  await page.evaluate(async () => {
+    const hoy = new Date();
+    const p = (n) => String(n).padStart(2, '0');
+    const mes = `${hoy.getFullYear()}-${p(hoy.getMonth() + 1)}`;
+    const ant = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
+    const mesAnt = `${ant.getFullYear()}-${p(ant.getMonth() + 1)}`;
+    // Este mes: 4 días → 100, 900, 300, 200 (mejor el 2º, flojos 100/200/300)
+    await DB.guardar({ tipo: 'cierre', fecha: `${mes}-01`, total: 100, proveedor: '', creado: new Date().toISOString() });
+    await DB.guardar({ tipo: 'cierre', fecha: `${mes}-02`, total: 900, proveedor: '', creado: new Date().toISOString() });
+    await DB.guardar({ tipo: 'cierre', fecha: `${mes}-03`, total: 300, proveedor: '', creado: new Date().toISOString() });
+    await DB.guardar({ tipo: 'cierre', fecha: `${mes}-04`, total: 200, proveedor: '', creado: new Date().toISOString() });
+    // Mes anterior: 2 días de 250 → media 250
+    await DB.guardar({ tipo: 'cierre', fecha: `${mesAnt}-10`, total: 250, proveedor: '', creado: new Date().toISOString() });
+    await DB.guardar({ tipo: 'cierre', fecha: `${mesAnt}-11`, total: 250, proveedor: '', creado: new Date().toISOString() });
+  });
+  await page.click('.tab[data-tab="cierres"]');
+  await page.waitForTimeout(800);
+  const fac = (await page.textContent('#fac-resumen')).replace(/\s+/g, ' ');
+  chk('facturacion', 'La pestaña se llama Facturación', (await page.textContent('.tab[data-tab="cierres"]')).includes('Facturación'));
+  chk('facturacion', 'Total del mes 1.500,00', /1\.?500,00/.test(fac), fac.slice(0, 120));
+  chk('facturacion', 'Media por día 375,00', fac.includes('375,00'));
+  chk('facturacion', '🥇 Mejor día con 900,00', /🥇 Mejor día.*900,00/.test(fac));
+  chk('facturacion', '🔻 Días más flojos (100, 200, 300)', fac.includes('más flojos') && fac.includes('100,00') && fac.includes('200,00'));
+  chk('facturacion', 'Compara con el mes anterior (media 250 → +50 %)', fac.includes('▲') && fac.includes('50'));
+  chk('facturacion', 'Media por día de la semana', fac.includes('Media por día de la semana'));
 
   // ══════════════ 10. ERRORES DE JAVASCRIPT ══════════════
   console.log('\n═══ 10. ESTABILIDAD ═══');

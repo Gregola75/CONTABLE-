@@ -31,13 +31,23 @@ versión antigua.
 
 **Facturas e impuestos**
 - IVA español: 21 / 10 / 4 / 5 / 0 %, y facturas con varios tipos a la vez.
+- Casilla **"gasto personal o de casa"** (`personal: true`): el registro se
+  guarda y se ve en la app, pero **nunca** entra en el informe, el CSV, la
+  previsión de impuestos ni las estadísticas por proveedor.
+- Al guardar una factura se avisa si ya existe otra con el mismo proveedor,
+  fecha y total (contarla dos veces deduce IVA de más) y si el desglose no
+  cuadra (`base + IVA − retención ≠ total`). Son avisos con confirmación, no
+  bloqueos.
 - Retención de IRPF típica del alquiler (19 %) y de profesionales (15 / 7 %).
   En una factura con retención, el total pagado ya lleva la retención
   descontada: `base = total − IVA + retención`.
 - La previsión de impuestos (IVA, retenciones, IRPF) es **solo interna**: nunca
   debe aparecer en el CSV ni en la impresión que va a la gestoría.
 
-**Cierres de caja**
+**Facturación (cierres de caja)**
+- La pestaña se llama "Facturación". Tiene el panel "Cómo va el mes": total,
+  media por día, comparación con el mes anterior por media diaria, mejor día,
+  días más flojos, media por día de la semana y días sin cierre anotado.
 - La fecha de un ticket Z es la de **apertura** de caja, no la de impresión
   (una caja abierta el 11 que cierra de madrugada el 12 es venta del 11).
 
@@ -81,7 +91,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 101 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 121 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.
 

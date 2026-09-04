@@ -37,7 +37,7 @@
 
 <nav class="tabs">
   <button class="tab active" data-tab="facturas">📄 Facturas</button>
-  <button class="tab" data-tab="cierres">💰 Cierres</button>
+  <button class="tab" data-tab="cierres">💰 Facturación</button>
   <button class="tab" data-tab="consultar">🔍 Consultar</button>
   <button class="tab" data-tab="personal">👥 Personal</button>
   <button class="tab" data-tab="informe">📊 Informe</button>
@@ -169,7 +169,11 @@
         <option value="Otros">Otros</option>
       </select>
     </div>
-    <div class="form-group">
+    <label class="check-linea">
+      <input type="checkbox" id="f-personal">
+      <span>👤 Gasto personal o de casa — <strong>no se incluye en el informe de la gestoría</strong> ni en la previsión de impuestos</span>
+    </label>
+    <div class="form-group" style="margin-top:10px">
       <label for="f-notas">Notas (opcional)</label>
       <input type="text" id="f-notas" placeholder="Ej.: pedido semanal">
     </div>
@@ -250,7 +254,7 @@
 <!-- ==================== CIERRES ==================== -->
 <section id="tab-cierres" class="tab-panel">
   <div class="card">
-    <h2>Cierre diario de caja</h2>
+    <h2>Facturación: cierre diario de caja</h2>
     <p class="hint">Haz una foto del ticket de cierre (Z) del día. El sistema intentará detectar el total de ventas.</p>
     <div class="photo-buttons">
       <label class="btn btn-primary btn-big">
@@ -319,9 +323,20 @@
   </div>
 
   <div class="card">
+    <h2>📈 Cómo va el mes</h2>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="fac-mes">Mes</label>
+        <input type="month" id="fac-mes">
+      </div>
+    </div>
+    <div id="fac-resumen"></div>
+  </div>
+
+  <div class="card">
     <h2>Últimos cierres</h2>
     <div id="cierres-recientes" class="lista"></div>
-    <button class="btn btn-secondary btn-big" id="ver-todos-cierres" style="margin-top:10px">📋 Ver todos los cierres</button>
+    <button class="btn btn-secondary btn-big" id="ver-todos-cierres" style="margin-top:10px">📋 Ver toda la facturación</button>
   </div>
 </section>
 

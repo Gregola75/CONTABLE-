@@ -33,9 +33,12 @@ const INFORME = (() => {
       }
     });
 
-    // Gastos por proveedor/servicio (facturas)
+    // Gastos por proveedor/servicio (facturas). Los gastos marcados como
+    // personales (casa) NO van a la gestoría: se dejan fuera de todo.
+    const facturas = registros.filter(r => r.tipo === 'factura' && !r.personal);
+    const personalesExcluidos = registros.filter(r => r.tipo === 'factura' && r.personal).length;
     const gastosPorProveedor = {};
-    registros.filter(r => r.tipo === 'factura').forEach(r => {
+    facturas.forEach(r => {
       const clave = (r.proveedor || 'Sin proveedor').trim() || 'Sin proveedor';
       if (!gastosPorProveedor[clave]) {
         gastosPorProveedor[clave] = { total: 0, facturas: 0, categoria: r.categoria || '', nif: r.nif || '' };
@@ -49,14 +52,14 @@ const INFORME = (() => {
     const totalGastos = Object.values(gastosPorProveedor).reduce((s, g) => s + g.total, 0);
 
     // Detalle de IVA de cada factura (solo para la previsión interna)
-    const facturasDetalle = registros.filter(r => r.tipo === 'factura').map(r => ({
+    const facturasDetalle = facturas.map(r => ({
       total: r.total || 0,
       baseImponible: (typeof r.baseImponible === 'number') ? r.baseImponible : null,
       ivaCuota: (typeof r.ivaCuota === 'number') ? r.ivaCuota : null,
       retCuota: (typeof r.retCuota === 'number') ? r.retCuota : null
     }));
 
-    return { anio, trimestre, desde, hasta, meses, ingresosPorMes, gastosPorProveedor, totalIngresos, totalGastos, facturasDetalle };
+    return { anio, trimestre, desde, hasta, meses, ingresosPorMes, gastosPorProveedor, totalIngresos, totalGastos, facturasDetalle, personalesExcluidos };
   }
 
   /* Previsión interna de impuestos del trimestre (orientativa, no se exporta).
@@ -112,7 +115,8 @@ const INFORME = (() => {
       irpfEstimado: irpfEstimado === null ? null : r2(irpfEstimado),
       totalPrevisto: r2(Math.max(0, ivaResultado) + retenciones + (irpfEstimado || 0)),
       facturasEstimadas,
-      numFacturas: (inf.facturasDetalle || []).length
+      numFacturas: (inf.facturasDetalle || []).length,
+      personalesExcluidos: inf.personalesExcluidos || 0
     };
   }
 
@@ -121,7 +125,12 @@ const INFORME = (() => {
       ? `<p class="hint">⚠️ En ${prev.facturasEstimadas} de ${prev.numFacturas} facturas no se detectó el IVA y se ha estimado al ${cfg.ivaGastos} %. Puedes corregirlo abriendo cada factura.</p>`
       : '';
 
+    const avisoPersonales = prev.personalesExcluidos > 0
+      ? `<p class="hint">👤 ${prev.personalesExcluidos} gasto${prev.personalesExcluidos === 1 ? '' : 's'} marcado${prev.personalesExcluidos === 1 ? '' : 's'} como personal no ${prev.personalesExcluidos === 1 ? 'entra' : 'entran'} ni aquí ni en el informe de la gestoría.</p>`
+      : '';
+
     return `
+      ${avisoPersonales}
       <table class="informe-tabla">
         <tbody>
           <tr><td>Ventas sin IVA (base)</td><td class="num">${eur(prev.baseIngresos)}</td></tr>
@@ -163,7 +172,7 @@ const INFORME = (() => {
     const filtros = { tipo: 'factura' };
     if (desde) filtros.desde = desde;
     if (hasta) filtros.hasta = hasta;
-    const facturas = await DB.buscar(filtros);
+    const facturas = (await DB.buscar(filtros)).filter(r => !r.personal);
 
     const por = {};
     facturas.forEach(r => {
