@@ -25,7 +25,7 @@ const INFORME = (() => {
     const ingresosPorMes = {};
     meses.forEach(m => { ingresosPorMes[m] = { total: 0, dias: 0, mensual: false }; });
     registros.filter(r => r.tipo === 'cierre').forEach(r => {
-      const mes = parseInt(r.fecha.slice(5, 7), 10) - 1;
+      const mes = parseInt(String(r.fecha || '').slice(5, 7), 10) - 1;
       if (ingresosPorMes[mes] !== undefined) {
         ingresosPorMes[mes].total += (r.total || 0);
         if (r.mensual) ingresosPorMes[mes].mensual = true;
@@ -173,7 +173,7 @@ const INFORME = (() => {
       p.total += (r.total || 0);
       p.facturas += 1;
       if (!p.nif && r.nif) p.nif = r.nif;
-      const mes = r.fecha.slice(0, 7); // YYYY-MM
+      const mes = String(r.fecha || '').slice(0, 7); // YYYY-MM
       p.porMes[mes] = (p.porMes[mes] || 0) + (r.total || 0);
     });
 
@@ -273,6 +273,9 @@ const INFORME = (() => {
 
   function csvCampo(s) {
     s = String(s || '');
+    // Que Excel no ejecute nada: si el texto empieza por =, +, - o @,
+    // se antepone un apóstrofe (inyección de fórmulas en CSV)
+    if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
     return /[;"\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   }
 

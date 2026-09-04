@@ -667,7 +667,7 @@
     const titulo = esFactura ? (r.proveedor || 'Sin proveedor') : (r.mensual ? 'Ventas del mes' : 'Cierre de caja');
     const sub = r.mensual
       ? mesEnLetras(r.fecha) + ' · mes completo'
-      : fmtFecha(r.fecha) + (esFactura && r.categoria ? ' · ' + r.categoria : '');
+      : fmtFecha(r.fecha) + (esFactura && r.categoria ? ' · ' + escapar(r.categoria) : '');
     return `
       <div class="item" data-id="${r.id}">
         ${r._thumb
@@ -1997,10 +1997,15 @@
     const facturas = lista.filter(r => r.tipo === 'factura');
     const cierres = lista.filter(r => r.tipo === 'cierre');
     const conFoto = lista.filter(r => r.imagen instanceof Blob).length;
+    let persistente = false;
+    try {
+      if (navigator.storage && navigator.storage.persisted) persistente = await navigator.storage.persisted();
+    } catch (e) { /* nada */ }
     $('#ajustes-stats').innerHTML = `
       <div class="stat-linea"><span>Facturas guardadas</span><strong>${facturas.length}</strong></div>
       <div class="stat-linea"><span>Cierres guardados</span><strong>${cierres.length}</strong></div>
-      <div class="stat-linea"><span>Registros con foto</span><strong>${conFoto}</strong></div>`;
+      <div class="stat-linea"><span>Registros con foto</span><strong>${conFoto}</strong></div>
+      <div class="stat-linea"><span>Protegido contra limpiezas del navegador</span><strong class="${persistente ? 'txt-ok' : 'txt-sec'}">${persistente ? '✅ Sí' : 'Aún no'}</strong></div>`;
   }
 
   $('#backup-exportar').addEventListener('click', async () => {
@@ -2325,6 +2330,12 @@
 
   if ('serviceWorker' in navigator && location.protocol === 'https:') {
     navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
+
+  // Almacenamiento persistente: que el navegador NUNCA borre la contabilidad
+  // por su cuenta si el móvil va justo de espacio
+  if (navigator.storage && navigator.storage.persist) {
+    navigator.storage.persist().catch(() => {});
   }
 
   mostrarBloqueo(); // si hay PIN, la app arranca bloqueada

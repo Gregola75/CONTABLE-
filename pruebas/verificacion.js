@@ -59,6 +59,45 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
   chk('informe', 'CSV incluye el resultado del trimestre', inf.csv.includes('RESULTADO DEL TRIMESTRE'));
   chk('informe', 'El CSV NO incluye datos de personal ni previsión', !/PREVISI|SUELDO|EMPLEAD|N[ÓO]MINA/i.test(inf.csv));
 
+  // Seguridad del CSV: un nombre malicioso no debe ejecutarse en Excel
+  const csvMalo = await page.evaluate(async () => {
+    await DB.guardar({ tipo: 'factura', fecha: '2026-07-20', proveedor: '=HYPERLINK("http://malo")', total: 10, creado: new Date().toISOString() });
+    const i = await INFORME.generar(2026, 3);
+    const csv = INFORME.generarCSV(i);
+    const linea = csv.split('\r\n').find(l => l.includes('HYPERLINK')) || '';
+    const r = (await DB.todos()).find(x => (x.proveedor || '').includes('HYPERLINK'));
+    if (r) await DB.borrar(r.id);
+    return linea;
+  });
+  chk('informe', 'CSV blindado contra fórmulas de Excel (inyección)',
+    csvMalo.includes("'=HYPERLINK") && !csvMalo.startsWith('='), csvMalo.slice(0, 40));
+
+  // Un nombre con HTML no debe ejecutarse en la lista de facturas
+  const xss = await page.evaluate(async () => {
+    await DB.guardar({ tipo: 'factura', fecha: '2026-07-21', proveedor: '<img src=x onerror=window.__xss=1>', categoria: '<b>cat</b>', total: 5, creado: new Date().toISOString() });
+    document.querySelector('.tab[data-tab="facturas"]').click();
+    await new Promise(r => setTimeout(r, 700));
+    const inyectado = window.__xss === 1 || !!document.querySelector('#facturas-recientes b');
+    const r = (await DB.todos()).find(x => (x.proveedor || '').includes('onerror'));
+    if (r) await DB.borrar(r.id);
+    return inyectado;
+  });
+  chk('informe', 'Un nombre con código HTML no se ejecuta en pantalla (XSS)', !xss);
+
+  // Un registro sin fecha (copia manipulada) no rompe el buscador ni el informe
+  const sinFecha = await page.evaluate(async () => {
+    await DB.guardar({ tipo: 'factura', proveedor: 'Sin Fecha', total: 5, creado: new Date().toISOString() });
+    try {
+      const b = await DB.buscar({});
+      await INFORME.generar(2026, 3);
+      await INFORME.estadisticas(null, null);
+      const r = (await DB.todos()).find(x => x.proveedor === 'Sin Fecha');
+      if (r) await DB.borrar(r.id);
+      return b.length > 0;
+    } catch (e) { return false; }
+  });
+  chk('informe', 'Un registro sin fecha no rompe búsquedas ni informes', sinFecha);
+
   // Trimestres: rangos correctos
   const rangos = await page.evaluate(async () => {
     const out = {};

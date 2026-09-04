@@ -114,7 +114,7 @@ const DB = (() => {
         if (!p.includes(filtros.proveedor.toLowerCase())) return false;
       }
       return true;
-    }).sort((a, b) => b.fecha.localeCompare(a.fecha) || (b.id - a.id));
+    }).sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || '')) || (b.id - a.id));
   }
 
   /* ==================== PROVEEDORES ====================
