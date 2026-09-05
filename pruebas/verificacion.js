@@ -576,6 +576,40 @@ TARJETA 450,00`)]);
   chk('facturacion', 'Compara con el mes anterior (media 250 → +50 %)', fac.includes('▲') && fac.includes('50'));
   chk('facturacion', 'Media por día de la semana', fac.includes('Media por día de la semana'));
 
+  // ══════════════ 9d. CUADRO DE MANDO DEL NEGOCIO ══════════════
+  console.log('\n═══ 9d. CUADRO DE MANDO (cómo va el negocio) ═══');
+  await limpiar();
+  await page.evaluate(async () => {
+    localStorage.removeItem('contable-trimestre-guardado');
+    const hoy = new Date(); const p = (n) => String(n).padStart(2, '0');
+    const mes = `${hoy.getFullYear()}-${p(hoy.getMonth() + 1)}`;
+    await DB.guardar({ tipo: 'cierre', fecha: `${mes}-01`, total: 1000, proveedor: '', creado: new Date().toISOString() });
+    await DB.guardar({ tipo: 'cierre', fecha: `${mes}-02`, total: 2000, proveedor: '', creado: new Date().toISOString() });
+    await DB.guardar({ tipo: 'factura', fecha: `${mes}-01`, proveedor: 'Bebidas Pepe', total: 700, categoria: 'Mercancía', creado: new Date().toISOString() });
+    await DB.guardar({ tipo: 'factura', fecha: `${mes}-02`, proveedor: 'Endesa', total: 200, categoria: 'Luz', creado: new Date().toISOString() });
+    await DB.guardar({ tipo: 'factura', fecha: `${mes}-02`, proveedor: 'Alquiler casa', total: 100, categoria: 'Alquiler', personal: true, creado: new Date().toISOString() });
+    // Empleado: 2 días a 900/26 = 69,23 devengado
+    await DB.perGuardar({ nombre: 'Juan', sueldoMensual: 900, diasMes: 26, horasJornada: 7.5, tramos: [], dias: [`${mes}-01`, `${mes}-02`], tardes: [], faltas: [], notasDias: [], creado: new Date().toISOString() });
+  });
+  await page.click('.tab[data-tab="informe"]');
+  await page.waitForTimeout(900);
+  let res = (await page.textContent('#res-contenido')).replace(/\s+/g, ' ');
+  let al = (await page.textContent('#res-alertas')).replace(/\s+/g, ' ');
+  chk('cuadro', 'Ingresos del mes 3.000,00', /3\.?000,00/.test(res), res.slice(0, 120));
+  chk('cuadro', 'Gastos del negocio 900,00 (el de casa no se resta)', res.includes('−900,00'));
+  chk('cuadro', 'Personal devengado 69,23', res.includes('69,23'));
+  chk('cuadro', 'TE QUEDA 2.030,77 (3000 − 900 − 69,23)', /2\.?030,77/.test(res) && res.includes('TE QUEDA'));
+  chk('cuadro', 'Margen 68 %', res.includes('margen 68 %'));
+  chk('cuadro', 'Gasto de casa aparte (100,00)', res.includes('Gastos de casa') && res.includes('100,00'));
+  chk('cuadro', 'Mercancía con su % sobre ventas (23%)', res.includes('Mercancía') && res.includes('23%'));
+  chk('cuadro', 'Alerta de trimestre cerrado sin guardar', al.includes('trimestre'));
+  chk('cuadro', 'Alerta de facturas sin desglose de IVA (2)', al.includes('2 facturas sin desglose de IVA'));
+  await page.click('#res-tri-hecho');
+  await page.waitForTimeout(600);
+  al = (await page.textContent('#res-alertas')).replace(/\s+/g, ' ');
+  chk('cuadro', '"Ya lo hice" quita el aviso del trimestre', !al.includes('trimestre'));
+  await page.evaluate(() => localStorage.removeItem('contable-trimestre-guardado'));
+
   // ══════════════ 10. ERRORES DE JAVASCRIPT ══════════════
   console.log('\n═══ 10. ESTABILIDAD ═══');
   chk('estabilidad', 'Ningún error de JavaScript durante toda la verificación',

@@ -40,7 +40,7 @@
   <button class="tab" data-tab="cierres">💰 Facturación</button>
   <button class="tab" data-tab="consultar">🔍 Consultar</button>
   <button class="tab" data-tab="personal">👥 Personal</button>
-  <button class="tab" data-tab="informe">📊 Informe</button>
+  <button class="tab" data-tab="informe">📊 Informes</button>
   <button class="tab" data-tab="ajustes">⚙️</button>
 </nav>
 
@@ -505,6 +505,19 @@
 
 <!-- ==================== INFORME ==================== -->
 <section id="tab-informe" class="tab-panel">
+  <div class="card">
+    <h2>📊 Cuadro de mando del negocio</h2>
+    <p class="hint">Cómo va el mes de verdad: lo que entra, lo que sale (compras, alquiler, luz, personal…) y lo que te queda. Importes con IVA, solo para ti.</p>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="res-mes">Mes</label>
+        <input type="month" id="res-mes">
+      </div>
+    </div>
+    <div id="res-alertas"></div>
+    <div id="res-contenido"></div>
+  </div>
+
   <div class="card">
     <h2>Informe trimestral para la gestoría</h2>
     <p class="hint">Elige el trimestre. El informe incluye los <strong>ingresos por mes</strong> y los <strong>gastos por proveedor o servicio</strong>.</p>

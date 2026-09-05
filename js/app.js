@@ -89,6 +89,7 @@
       if (btn.dataset.tab === 'consultar') buscar();
       if (btn.dataset.tab === 'personal') pintarPersonal();
       if (btn.dataset.tab === 'cierres') pintarFacturacion();
+      if (btn.dataset.tab === 'informe') pintarResumen();
     });
   });
 
@@ -1171,6 +1172,122 @@
     $('#vista-lista').classList.remove('active');
     buscar();
   });
+
+  /* ---------- CUADRO DE MANDO: cómo va el negocio este mes ---------- */
+
+  const CLAVE_TRIMESTRE = 'contable-trimestre-guardado';
+
+  /* Último trimestre ya cerrado (para recordar guardar la copia) */
+  function ultimoTrimestreCerrado() {
+    const hoy = new Date();
+    const tActual = Math.floor(hoy.getMonth() / 3) + 1;
+    return tActual === 1 ? { anio: hoy.getFullYear() - 1, t: 4 } : { anio: hoy.getFullYear(), t: tActual - 1 };
+  }
+
+  /* Coste de personal devengado en un mes (todos los empleados) */
+  async function costePersonalMes(mes, cierresMes) {
+    const trabajadores = await DB.perTodos();
+    let total = 0;
+    for (const t of trabajadores) {
+      const ventasT = ventasParaTrabajador(t, cierresMes, mes);
+      total += calcularMes(t, ventasT, [], mes).devengado;
+    }
+    return r2(total);
+  }
+
+  async function datosMes(mes) {
+    const regs = await DB.buscar({ desde: mes + '-01', hasta: mes + '-31' });
+    const cierres = regs.filter(r => r.tipo === 'cierre');
+    const facturas = regs.filter(r => r.tipo === 'factura' && !r.personal);
+    const personalesCasa = regs.filter(r => r.tipo === 'factura' && r.personal);
+    const ingresos = r2(cierres.reduce((s, r) => s + (r.total || 0), 0));
+    const gastos = r2(facturas.reduce((s, r) => s + (r.total || 0), 0));
+    const porCategoria = {};
+    facturas.forEach(r => {
+      const c = r.categoria || 'Otros';
+      porCategoria[c] = r2((porCategoria[c] || 0) + (r.total || 0));
+    });
+    const personal = await costePersonalMes(mes, cierres);
+    const sinIVA = facturas.filter(r => typeof r.ivaCuota !== 'number').length;
+    return {
+      ingresos, gastos, personal, porCategoria, sinIVA,
+      facturas: facturas.length, cierres: cierres.filter(c => !c.mensual).length,
+      casa: r2(personalesCasa.reduce((s, r) => s + (r.total || 0), 0)),
+      beneficio: r2(ingresos - gastos - personal)
+    };
+  }
+
+  async function pintarResumen() {
+    if (!$('#res-mes').value) $('#res-mes').value = hoyISO().slice(0, 7);
+    const mes = $('#res-mes').value;
+    const mesAnt = mesAnteriorDe(mes);
+    const [d, ant] = await Promise.all([datosMes(mes), datosMes(mesAnt)]);
+    const hoy = hoyISO();
+    const esMesActual = mes === hoy.slice(0, 7);
+
+    // ── Alertas: lo que necesita tu atención ──
+    const alertas = [];
+    const tri = ultimoTrimestreCerrado();
+    const claveTri = `${tri.anio}-T${tri.t}`;
+    if (localStorage.getItem(CLAVE_TRIMESTRE) !== claveTri) {
+      alertas.push(`<div class="alerta"><span>📦 El <strong>${tri.t}º trimestre de ${tri.anio}</strong> ya cerró: genera el informe, descarga el CSV y el PDF, haz la copia de seguridad y guárdalos en Drive.</span><button class="btn btn-small" id="res-tri-hecho">Ya lo hice ✓</button></div>`);
+    }
+    if (esMesActual) {
+      const cierresMes = await DB.buscar({ tipo: 'cierre', desde: mes + '-01', hasta: mes + '-31' });
+      if (!cierresMes.some(c => c.mensual)) {
+        const conCierre = new Set(cierresMes.map(c => c.fecha));
+        const faltan = [];
+        for (let dia = 1; dia < +hoy.slice(8); dia++) {
+          const f = `${mes}-${String(dia).padStart(2, '0')}`;
+          if (!conCierre.has(f)) faltan.push(dia);
+        }
+        if (faltan.length) alertas.push(`<div class="alerta">⚠️ <strong>${faltan.length} día${faltan.length === 1 ? '' : 's'} sin cierre</strong> este mes: ${faltan.slice(0, 8).join(', ')}${faltan.length > 8 ? '…' : ''}. Sin cierre no hay ingreso anotado.</div>`);
+      }
+    }
+    if (d.sinIVA) alertas.push(`<div class="alerta">🧾 <strong>${d.sinIVA} factura${d.sinIVA === 1 ? '' : 's'} sin desglose de IVA</strong> este mes: la previsión de impuestos lo estima. Ábrelas y pon el IVA para afinar.</div>`);
+    const trabajadores = await DB.perTodos();
+    const pagos = await DB.pagoTodos();
+    let deudaEquipo = 0;
+    const cacheC = new Map();
+    const cierresDe = async (m) => { if (!cacheC.has(m)) cacheC.set(m, await DB.buscar({ tipo: 'cierre', desde: m + '-01', hasta: m + '-31' })); return cacheC.get(m); };
+    for (const t of trabajadores.filter(x => !x.liquidado)) {
+      const deuda = await desgloseDeuda(t, pagos.filter(p => p.trabajadorSid === t.sid), cierresDe);
+      if (deuda.total > 0) deudaEquipo += deuda.total;
+    }
+    if (deudaEquipo > 0) alertas.push(`<div class="alerta">👥 Debes <strong>${INFORME.eur(deudaEquipo)}</strong> al equipo en total (ver pestaña Personal).</div>`);
+    $('#res-alertas').innerHTML = alertas.length ? alertas.join('') : '<p class="hint txt-ok" style="margin-bottom:8px">✅ Todo al día: sin avisos pendientes.</p>';
+    const btnTri = $('#res-tri-hecho');
+    if (btnTri) btnTri.addEventListener('click', () => { localStorage.setItem(CLAVE_TRIMESTRE, claveTri); pintarResumen(); toast('📦 Trimestre marcado como guardado.'); });
+
+    // ── Números del mes ──
+    const pct = (parte) => d.ingresos > 0 ? ` <small class="txt-sec">(${Math.round(parte / d.ingresos * 100)} % de las ventas)</small>` : '';
+    const comparar = (ahora, antes) => {
+      if (!antes) return '';
+      const dif = (ahora - antes) / Math.abs(antes) * 100;
+      return ` <small class="${dif >= 0 ? 'txt-ok' : 'txt-bad'}">${dif >= 0 ? '▲' : '▼'} ${Math.abs(dif).toLocaleString('es-ES', { maximumFractionDigits: 0 })} %</small>`;
+    };
+    const cats = Object.entries(d.porCategoria).sort((a, b) => b[1] - a[1]);
+    const maxCat = Math.max(1, d.personal, ...cats.map(c => c[1]));
+    const filaCat = (nombre, valor) => `
+      <div class="fila-mes">
+        <span class="mes-etq" style="width:88px">${escapar(nombre)}</span>
+        <div class="barra"><div class="barra-fill" style="width:${Math.max(2, Math.round(valor / maxCat * 100))}%"></div></div>
+        <span class="mes-val" style="width:120px">${INFORME.eur(valor)}${d.ingresos > 0 ? ` <small class="txt-sec">${Math.round(valor / d.ingresos * 100)}%</small>` : ''}</span>
+      </div>`;
+    const margen = d.ingresos > 0 ? Math.round(d.beneficio / d.ingresos * 100) : null;
+
+    $('#res-contenido').innerHTML = `
+      <div class="stat-linea"><span>💰 Ingresos (${d.cierres} cierre${d.cierres === 1 ? '' : 's'})</span><strong class="txt-ok">${INFORME.eur(d.ingresos)}${comparar(d.ingresos, ant.ingresos)}</strong></div>
+      <div class="stat-linea"><span>📄 Gastos del negocio (${d.facturas} factura${d.facturas === 1 ? '' : 's'})${pct(d.gastos)}</span><strong class="txt-bad">−${INFORME.eur(d.gastos)}${comparar(d.gastos, ant.gastos)}</strong></div>
+      <div class="stat-linea"><span>👥 Personal (sueldos + comisiones devengados)${pct(d.personal)}</span><strong class="txt-bad">−${INFORME.eur(d.personal)}${comparar(d.personal, ant.personal)}</strong></div>
+      <div class="stat-linea per-pendiente ${d.beneficio >= 0 ? 'ok' : ''}"><span>${d.beneficio >= 0 ? '✅ TE QUEDA' : '🔴 PIERDES'}${margen !== null ? ` <small class="txt-sec">margen ${margen} %</small>` : ''}</span><strong>${INFORME.eur(Math.abs(d.beneficio))}${comparar(d.beneficio, ant.beneficio)}</strong></div>
+      ${d.casa ? `<div class="stat-linea"><span>👤 Gastos de casa (aparte, no restan)</span><span class="txt-sec">${INFORME.eur(d.casa)}</span></div>` : ''}
+      ${cats.length || d.personal ? `<p class="hint" style="margin:12px 0 4px">En qué se va el dinero (y qué % de las ventas es cada cosa):</p>${cats.map(([n, v]) => filaCat(n, v)).join('')}${d.personal ? filaCat('Personal', d.personal) : ''}` : ''}
+      ${ant.ingresos || ant.gastos ? `<p class="hint" style="margin:12px 0 0">${mesEnLetras(mesAnt + '-01')}: ingresos ${INFORME.eur(ant.ingresos)} · gastos ${INFORME.eur(ant.gastos)} · personal ${INFORME.eur(ant.personal)} · te quedó ${INFORME.eur(ant.beneficio)}</p>` : ''}
+      <p class="hint" style="margin:10px 0 0">Referencias de hostelería: mercancía ≈ 25-35 % de las ventas, personal ≈ 25-35 %. Si algo se dispara, ahí está el problema.</p>`;
+  }
+
+  $('#res-mes').addEventListener('change', pintarResumen);
 
   /* ---------- INFORME ---------- */
 
@@ -2507,6 +2624,7 @@
     if (document.querySelector('.tab[data-tab="consultar"]').classList.contains('active')) buscar();
     if (document.querySelector('.tab[data-tab="personal"]').classList.contains('active')) pintarPersonal();
     if (document.querySelector('.tab[data-tab="cierres"]').classList.contains('active')) pintarFacturacion();
+    if (document.querySelector('.tab[data-tab="informe"]').classList.contains('active')) pintarResumen();
   });
   pintarNube();
 })();

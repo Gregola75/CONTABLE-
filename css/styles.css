@@ -843,6 +843,22 @@ select { appearance: none; -webkit-appearance: none; }
 }
 .per-baja .btn { margin-top: 8px; width: 100%; }
 
+/* Alertas del cuadro de mando */
+.alerta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border-radius: 10px;
+  background: #241d08;
+  border: 1px solid #4a3d12;
+  color: var(--texto);
+  font-size: .86rem;
+}
+.alerta .btn { flex-shrink: 0; }
+
 /* Estadísticas ajustes */
 .stat-linea { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--borde); font-size: .9rem; }
 

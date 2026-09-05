@@ -54,6 +54,14 @@ versión antigua.
 - La fecha de un ticket Z es la de **apertura** de caja, no la de impresión
   (una caja abierta el 11 que cierra de madrugada el 12 es venta del 11).
 
+**Cuadro de mando** (pestaña Informes, arriba; solo interno)
+- Por mes: ingresos, gastos del negocio, coste de personal devengado, lo que
+  queda y el margen, con % de cada partida sobre las ventas y comparación con
+  el mes anterior. Los gastos de casa se muestran aparte y no restan.
+- Alertas: trimestre cerrado pendiente de guardar (botón "Ya lo hice", clave
+  `contable-trimestre-guardado` en localStorage), días sin cierre, facturas
+  sin desglose de IVA y deuda total con el equipo.
+
 **Personal** (pestaña privada, tampoco sale en el informe de la gestoría)
 - Sueldo mensual pactado con ~1 día libre a la semana → **precio del día =
   sueldo ÷ días de trabajo al mes** (26 por defecto, configurable por persona).
@@ -94,7 +102,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 121 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 132 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.
 
