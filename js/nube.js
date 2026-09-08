@@ -133,9 +133,13 @@ const NUBE = (() => {
 
   /* ---------- Sesión ---------- */
 
-  function iniciar(callback) {
-    avisarUI = callback || (() => {});
-    if (!disponible) { estado = 'apagado'; return; }
+  let arrancado = false;
+
+  /* Arranca Firebase una sola vez. Lo llama iniciar() al abrir la app y,
+     por si acaso, entrar(): así funciona aunque se pulse el botón antes. */
+  function arrancarFirebase() {
+    if (arrancado || !disponible) return;
+    arrancado = true;
     firebase.initializeApp(CONFIG);
     auth = firebase.auth();
     db = firebase.firestore();
@@ -155,8 +159,16 @@ const NUBE = (() => {
     });
   }
 
+  function iniciar(callback) {
+    if (callback) avisarUI = callback;
+    if (!disponible) { estado = 'apagado'; avisarUI(); return; }
+    arrancarFirebase();
+    avisarUI();
+  }
+
   async function entrar() {
     if (!disponible) throw new Error('No se pudo cargar Firebase (¿sin conexión?). Inténtalo con internet.');
+    arrancarFirebase();
     cambiarEstado('conectando');
     const proveedor = new firebase.auth.GoogleAuthProvider();
     try {

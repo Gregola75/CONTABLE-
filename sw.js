@@ -2,12 +2,13 @@
    (los datos ya viven en el dispositivo; esto cachea la propia app).
 
    Estrategia:
-   - Páginas y archivos propios: RED PRIMERO (siempre la última versión
-     publicada si hay conexión) con la copia en caché como respaldo offline.
+   - Páginas y archivos propios: CACHÉ PRIMERO (arranque instantáneo) con
+     actualización en segundo plano; al publicar una versión nueva (cambia
+     CACHE) el service worker se reinstala con todos los archivos frescos.
    - Recursos externos (OCR, fuentes, pdf.js): caché primero, porque están
      versionados en su URL y no cambian. */
 
-const CACHE = 'contable-v42';
+const CACHE = 'contable-v43';
 // Los recursos externos (lector OCR ~15 MB, fuentes, pdf.js) van en una caché
 // aparte que NO se borra al actualizar la app: se descargan una sola vez.
 const CACHE_EXTERNOS = 'contable-externos-v1';
@@ -51,17 +52,23 @@ self.addEventListener('fetch', (e) => {
   const esPropio = url.origin === self.location.origin;
 
   if (esPropio) {
-    // Red primero: los cambios publicados se ven a la primera recarga
+    // Caché primero (la app arranca al instante, sin esperar a internet) y
+    // actualización en segundo plano: la versión nueva queda lista para la
+    // siguiente apertura. Además, cada versión nueva de sw.js reinstala todo.
     e.respondWith(
-      fetch(new Request(e.request, { cache: 'no-cache' }))
-        .then(resp => {
-          if (resp.ok) {
-            const clon = resp.clone();
-            caches.open(CACHE).then(c => c.put(e.request, clon));
-          }
-          return resp;
-        })
-        .catch(() => caches.match(e.request).then(res => res || caches.match('./index.html')))
+      caches.match(e.request).then(enCache => {
+        const red = fetch(new Request(e.request, { cache: 'no-cache' }))
+          .then(resp => {
+            if (resp.ok) {
+              const clon = resp.clone();
+              caches.open(CACHE).then(c => c.put(e.request, clon));
+            }
+            return resp;
+          })
+          .catch(() => null);
+        if (enCache) { e.waitUntil(red); return enCache; }
+        return red.then(resp => resp || caches.match('./index.html'));
+      })
     );
     return;
   }

@@ -2591,7 +2591,12 @@
   /* ---------- Arranque ---------- */
 
   if ('serviceWorker' in navigator && location.protocol === 'https:') {
+    const habiaControlador = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js').catch(() => {});
+    // Cuando se instala una versión nueva, avisar (la app arranca desde caché)
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (habiaControlador) toast('🆕 Actualización instalada. Cierra y abre la app para usarla.', 7000);
+    });
   }
 
   // Almacenamiento persistente: que el navegador NUNCA borre la contabilidad
@@ -2600,9 +2605,13 @@
     navigator.storage.persist().catch(() => {});
   }
 
-  // Preparar el lector de fotos en segundo plano: cuando llegue la primera
-  // foto del día, ya está descargado y arrancado
-  setTimeout(() => { if (typeof OCR !== 'undefined' && OCR.precargar) OCR.precargar(); }, 3000);
+  // Preparar el lector de fotos en segundo plano, pero SIN estorbar al
+  // arranque: unos segundos después y cuando el móvil esté libre
+  const precargarOCR = () => { if (typeof OCR !== 'undefined' && OCR.precargar && !document.hidden) OCR.precargar(); };
+  setTimeout(() => {
+    if ('requestIdleCallback' in window) requestIdleCallback(precargarOCR, { timeout: 10000 });
+    else precargarOCR();
+  }, 8000);
 
   mostrarBloqueo(); // si hay PIN, la app arranca bloqueada
   crearComboProveedores('#f-proveedor');
@@ -2615,8 +2624,9 @@
   cargarProveedores();
 
   // Nube: al cambiar la sesión o llegar datos de otro dispositivo,
-  // refrescar las listas en pantalla
-  NUBE.iniciar(() => {
+  // refrescar las listas en pantalla. Arranca un momento después de pintar
+  // la app para que el desbloqueo vaya fluido.
+  setTimeout(() => NUBE.iniciar(() => {
     pintarNube();
     pintarRecientes();
     pintarProveedores();
@@ -2625,6 +2635,6 @@
     if (document.querySelector('.tab[data-tab="personal"]').classList.contains('active')) pintarPersonal();
     if (document.querySelector('.tab[data-tab="cierres"]').classList.contains('active')) pintarFacturacion();
     if (document.querySelector('.tab[data-tab="informe"]').classList.contains('active')) pintarResumen();
-  });
+  }), 1200);
   pintarNube();
 })();

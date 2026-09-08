@@ -29,6 +29,10 @@
     <button class="btn btn-ghost" id="lock-olvido">He olvidado mi PIN</button>
   </div>
 </div>
+<script>
+  // Si hay PIN, enseñar el bloqueo al instante, sin esperar al resto de la app
+  try { if (localStorage.getItem('contable-sec')) document.getElementById('lock-screen').classList.remove('hidden'); } catch (e) { /* nada */ }
+</script>
 
 <header class="app-header">
   <h1>WANDERCONTABLE</h1>
