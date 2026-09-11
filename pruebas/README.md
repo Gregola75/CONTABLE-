@@ -12,7 +12,7 @@ bash pruebas/ejecutar.sh
 
 Al final dice `✅ TODO CORRECTO` o lista los fallos encontrados.
 
-## Qué se comprueba (101 comprobaciones)
+## Qué se comprueba (154 comprobaciones)
 
 **Informe trimestral** — que los ingresos y gastos del trimestre son los
 correctos, que no se cuelan registros de otros meses, que se agrupan las
@@ -36,6 +36,14 @@ restaurar la misma copia dos veces **no duplica nada**.
 por retrasos, ventas del día con retraso contadas por horas, objetivos
 alcanzados o no, deuda arrastrada entre meses y liquidaciones (incluido el
 caso de pagar el finiquito el mes siguiente a la baja).
+
+**Trabajadores ya liquidados** — que al abonar el finiquito queda apuntado como
+entrega, que su ficha se puede abrir y enseña **todas** las entregas (no solo las
+del mes), el cuadre entre lo que le correspondió y lo que se le pagó, el desglose
+mes a mes con la cuenta explicada, que su calendario es de solo lectura y tocarlo
+no le cambia los días, que en el historial se ve esa misma ficha, que el texto que
+se le envía no lleva nada del negocio ni de la app, y que reabrir la ficha lo
+devuelve a los activos sin borrarle ningún pago.
 
 **Lectura de facturas (OCR)** — reconocimiento del proveedor por NIF, totales
 sin confundir el cambio de un ticket, retención del alquiler, fecha de emisión

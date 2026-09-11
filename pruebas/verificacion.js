@@ -388,6 +388,150 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
     /Sin deuda/.test(finiquitoTardio) && !/DEBES PAGARLE/.test(finiquitoTardio),
     finiquitoTardio.slice(0, 220));
 
+  // ══════════════ 6b. FICHA DE UN TRABAJADOR YA LIQUIDADO ══════════════
+  // Con esto el dueño puede contestar a un ex-empleado que discute su cuenta.
+  console.log('\n═══ 6b. FICHA DE UN LIQUIDADO (verificar lo que le pagaste) ═══');
+  await page.evaluate(async () => {
+    for (const t of await DB.perTodos()) await DB.perBorrar(t.id);
+    for (const g of await DB.pagoTodos()) await DB.pagoBorrar(g.id);
+    // 10 días en agosto (275,00) y 2 en septiembre (55,00) → le corresponden 330,00
+    const dias = [];
+    for (let d = 1; d <= 10; d++) dias.push(`2026-08-${String(d).padStart(2, '0')}`);
+    dias.push('2026-09-01', '2026-09-02');
+    await DB.perGuardar({
+      nombre: 'Antiguo', sueldoMensual: 715, diasMes: 26, horasJornada: 7.5, tramos: [],
+      dias, tardes: [], faltas: [], notasDias: [], fin: '2026-09-02', creado: new Date().toISOString()
+    });
+    const t = (await DB.perTodos())[0];
+    await DB.pagoGuardar({ trabajadorSid: t.sid, fecha: '2026-09-01', importe: 200, notas: 'a cuenta', creado: new Date().toISOString() });
+  });
+  await page.fill('#per-mes', '2026-09');
+  await page.dispatchEvent('#per-mes', 'change');
+  await page.waitForTimeout(900);
+
+  // Abre la ficha (activa o liquidada): el cuerpo puede no existir o estar plegado
+  const abrirFicha = async (caja) => {
+    const yaAbierta = await page.evaluate(c => {
+      const b = document.querySelector(c + ' .per-body');
+      return !!b && !b.classList.contains('hidden');
+    }, caja);
+    if (!yaAbierta) { await page.click(caja + ' .per-toggle'); await page.waitForTimeout(900); }
+  };
+
+  // Se liquida por el camino de verdad: el botón de abonar el finiquito
+  await abrirFicha('#per-lista');
+  await page.click('#per-lista .per-abonar');
+  await page.waitForTimeout(1100);
+  const trasAbonar = await page.evaluate(async () => {
+    const t = (await DB.perTodos())[0];
+    const pagos = (await DB.pagoTodos()).filter(p => p.trabajadorSid === t.sid);
+    return { liquidado: t.liquidado, pagos: pagos.map(p => ({ importe: p.importe, finiquito: p.finiquito === true })) };
+  });
+  chk('liquidado', 'Al abonar queda marcado como liquidado con su fecha', /^\d{4}-\d{2}-\d{2}$/.test(trasAbonar.liquidado || ''), String(trasAbonar.liquidado));
+  chk('liquidado', 'Se apunta la entrega del finiquito (130,00) marcada como tal',
+    trasAbonar.pagos.length === 2 && trasAbonar.pagos.some(p => cerca(p.importe, 130) && p.finiquito), JSON.stringify(trasAbonar.pagos));
+
+  // La ficha se puede abrir (antes era una tarjeta muerta)
+  chk('liquidado', 'La ficha de un liquidado ya se puede abrir',
+    await page.evaluate(() => !!document.querySelector('#per-lista .per-toggle[data-sid]')));
+  await abrirFicha('#per-lista');
+  const txtLiq = (await page.textContent('#per-lista .per-body')).replace(/\s+/g, ' ');
+
+  chk('liquidado', 'Se ven TODAS sus entregas, no solo las del mes elegido',
+    txtLiq.includes('200,00') && txtLiq.includes('130,00'), txtLiq.slice(0, 220));
+  chk('liquidado', 'El finiquito sale identificado', /Liquidación final/.test(txtLiq));
+  chk('liquidado', 'El cuadre compara lo que le correspondió con lo que le pagaste',
+    txtLiq.includes('Le correspondió en todo su tiempo') && txtLiq.includes('Le pagaste en total'));
+  chk('liquidado', 'El cuadre sale a cero: se le pagó todo (330,00)',
+    /Cuadra/.test(txtLiq) && (txtLiq.match(/330,00/g) || []).length >= 2, txtLiq.slice(0, 300));
+  chk('liquidado', 'Desglose mes a mes: agosto 275,00 y septiembre 55,00',
+    /Agosto 2026/.test(txtLiq) && txtLiq.includes('275,00') && /Septiembre 2026/.test(txtLiq) && txtLiq.includes('55,00'));
+  chk('liquidado', 'La cuenta explicada también está aquí (715 ÷ 26 = 27,50 el día)',
+    txtLiq.includes('27,50') && /De dónde sale cada número/.test(txtLiq));
+  chk('liquidado', 'Una ficha liquidada no trae botones de borrar entregas',
+    await page.evaluate(() => document.querySelectorAll('#per-lista .pago-borrar').length === 0));
+
+  // El calendario es la prueba de los días: se ve, pero no se toca
+  const cal = await page.evaluate(() => ({
+    celdas: document.querySelectorAll('#per-lista .cal-lectura .dia').length,
+    botones: document.querySelectorAll('#per-lista .cal-lectura button').length,
+    trabajados: document.querySelectorAll('#per-lista .cal-lectura .dia.on').length
+  }));
+  chk('liquidado', 'Su calendario se muestra en solo lectura, sin botones', cal.celdas > 0 && cal.botones === 0, JSON.stringify(cal));
+  chk('liquidado', 'Los días que trabajó siguen viéndose marcados (no se apagan)', cal.trabajados > 0, JSON.stringify(cal));
+  const diasTrasClic = await page.evaluate(async () => {
+    const det = document.querySelector('#per-lista details.ocr-details');
+    if (det) det.open = true;
+    await new Promise(r => setTimeout(r, 200));
+    const celda = document.querySelector('#per-lista .cal-lectura .dia.on');
+    if (celda) celda.click();
+    await new Promise(r => setTimeout(r, 600));
+    const t = (await DB.perTodos())[0];
+    return { dias: t.dias.length, tardes: (t.tardes || []).length, faltas: (t.faltas || []).length };
+  });
+  chk('liquidado', 'Tocar un día de un liquidado NO le cambia los días',
+    diasTrasClic.dias === 12 && diasTrasClic.tardes === 0 && diasTrasClic.faltas === 0, JSON.stringify(diasTrasClic));
+
+  // El texto que se le envía: toda su cuenta y nada del negocio
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'share', { value: undefined, configurable: true });
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: () => Promise.reject(new Error('sin portapapeles')) }, configurable: true
+    });
+  });
+  await page.click('#per-lista .per-compartir');
+  await page.waitForTimeout(700);
+  const envio = await page.textContent('#modal-body pre');
+  chk('liquidado', 'El texto para enviarle lleva toda su etapa, no un solo mes',
+    /Agosto 2026/.test(envio) && /Septiembre 2026/.test(envio), envio.slice(0, 160));
+  chk('liquidado', 'El texto lleva el total pagado y el cuadre',
+    /Total pagado: 330,00/.test(envio) && /CUADRE/.test(envio), envio.slice(-160));
+  chk('liquidado', 'El texto que se le envía no lleva nada del negocio ni de la app',
+    !/wander|contable/i.test(envio), envio.slice(0, 120));
+  await page.click('#modal-cerrar');
+  await page.waitForTimeout(300);
+
+  // Pasados los días de memoria, la MISMA ficha vive en el historial
+  await page.evaluate(async () => {
+    const t = (await DB.perTodos())[0];
+    const d = new Date(); d.setDate(d.getDate() - 30);
+    t.liquidado = d.toISOString().slice(0, 10);
+    await DB.perGuardar(t);
+    document.querySelector('#per-mes').dispatchEvent(new Event('change'));
+    await new Promise(r => setTimeout(r, 1100));
+  });
+  chk('liquidado', 'Pasados los días de memoria baja al historial y sale de la lista',
+    await page.evaluate(() => !!document.querySelector('#per-historial .per-toggle') &&
+      !document.querySelector('#per-lista .per-toggle')));
+  await abrirFicha('#per-historial');
+  const txtHist = (await page.textContent('#per-historial .per-body')).replace(/\s+/g, ' ');
+  chk('liquidado', 'En el historial se ve exactamente la misma ficha completa',
+    txtHist.includes('200,00') && txtHist.includes('130,00') && /Agosto 2026/.test(txtHist) &&
+    txtHist.includes('27,50') && /Cuadra/.test(txtHist), txtHist.slice(0, 240));
+
+  // Reabrir: la única forma de corregir una liquidación equivocada
+  await page.click('#per-historial .per-reabrir');
+  await page.waitForTimeout(1100);
+  const reabierto = await page.evaluate(async () => {
+    const t = (await DB.perTodos())[0];
+    return {
+      liquidado: t.liquidado,
+      pagos: (await DB.pagoTodos()).length,
+      enLista: !!document.querySelector('#per-lista .per-toggle'),
+      historial: document.querySelector('#per-historial').textContent
+    };
+  });
+  chk('liquidado', 'Reabrir devuelve al trabajador con los activos', !reabierto.liquidado && reabierto.enLista, JSON.stringify(reabierto.liquidado));
+  chk('liquidado', 'Reabrir NO borra ninguna de las entregas que le hiciste', reabierto.pagos === 2, 'quedan ' + reabierto.pagos);
+  chk('liquidado', 'El historial vuelve a quedar vacío', /Sin trabajadores antiguos/.test(reabierto.historial));
+  const trasReabrir = await page.evaluate(async () => {
+    const btn = document.querySelector('#per-lista .cal .dia:not([disabled])');
+    if (btn) btn.click();
+    await new Promise(r => setTimeout(r, 700));
+    return (await DB.perTodos())[0].dias.length;
+  });
+  chk('liquidado', 'Reabierto, su calendario se puede volver a tocar', trasReabrir !== 12, 'días: ' + trasReabrir);
+
   // ══════════════ 7. LECTURA DE FACTURAS (OCR) ══════════════
   console.log('\n═══ 7. DETECCIÓN AUTOMÁTICA DE FACTURAS ═══');
   const ocr = await page.evaluate(() => {

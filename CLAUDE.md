@@ -83,6 +83,15 @@ versión antigua.
   principal muestra el total pendiente; el detalle por meses va plegado.
 - Al dar de baja, se calcula el finiquito completo; al abonarlo queda 10 días
   visible y luego pasa al historial como prueba de pago.
+- **Un trabajador liquidado conserva su ficha entera y comprobable**, tanto esos
+  10 días como ya en el historial: todas las entregas que se le hicieron (con el
+  finiquito marcado), el cuadre (lo que le correspondió frente a lo que se le
+  pagó) y, mes a mes, su calendario y la cuenta explicada paso a paso. Es la
+  prueba con la que contestarle si discute su cuenta, y se le puede enviar
+  entera por WhatsApp con el mismo texto neutro. Su calendario queda en **solo
+  lectura** (se pinta con `<span>`, no con botones desactivados, porque
+  `.dia:disabled` taparía los días trabajados). Para corregir algo hay que
+  **reabrir la ficha**, que la devuelve a los activos sin borrar ningún pago.
 
 ## Sincronización en la nube
 
@@ -102,7 +111,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 132 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 154 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.
 

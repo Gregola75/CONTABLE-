@@ -1445,7 +1445,7 @@
 
   /* Calendario del mes: un botón por día, los trabajados en claro y
      con un puntito los días que tienen nota apuntada */
-  function calendarioHTML(t, mes) {
+  function calendarioHTML(t, mes, soloLectura = false) {
     const [a, m] = mes.split('-').map(Number);
     const nDias = new Date(a, m, 0).getDate();
     const primerDiaSemana = (new Date(a, m - 1, 1).getDay() + 6) % 7; // lunes = 0
@@ -1461,10 +1461,21 @@
       // Antes de su inicio (o después de su baja) no trabajaba: en negro, sin poder tocar
       const bloqueado = (t.inicio && fecha < t.inicio) || (t.fin && fecha > t.fin);
       const clase = trabajados.has(fecha) ? 'on' : (tardes.has(fecha) ? 'tarde' : (faltas.has(fecha) ? 'falta' : ''));
-      celdas += `<button type="button" class="dia ${clase} ${conNota.has(fecha) ? 'con-nota' : ''}"${bloqueado ? ' disabled' : ''} data-sid="${t.sid}" data-fecha="${fecha}">${d}</button>`;
+      const nota = conNota.has(fecha) ? 'con-nota' : '';
+      if (soloLectura) {
+        // Ficha ya liquidada: los días se ven, pero no se pueden tocar.
+        // Se usan <span> y no un botón desactivado porque el estilo de
+        // ":disabled" pintaría de negro también los días que sí trabajó.
+        celdas += `<span class="dia ${clase || (bloqueado ? 'fuera' : '')} ${nota}">${d}</span>`;
+      } else {
+        celdas += `<button type="button" class="dia ${clase} ${nota}"${bloqueado ? ' disabled' : ''} data-sid="${t.sid}" data-fecha="${fecha}">${d}</button>`;
+      }
     }
-    return `<div class="cal">${cab}${celdas}</div>
-      <p class="hint" style="margin:0 0 8px">Toques en el día → 1: trabajó · 2: ⏰ llegó tarde · 3: faltó · 4: nada. En negro: aún no trabajaba.</p>`;
+    const pie = soloLectura
+      ? 'En claro los días que trabajó, ⏰ los que llegó tarde y en rojo los que faltó. Su cuenta ya está liquidada: no se pueden cambiar.'
+      : 'Toques en el día → 1: trabajó · 2: ⏰ llegó tarde · 3: faltó · 4: nada. En negro: aún no trabajaba.';
+    return `<div class="cal${soloLectura ? ' cal-lectura' : ''}">${cab}${celdas}</div>
+      <p class="hint" style="margin:0 0 8px">${pie}</p>`;
   }
 
   /* Colores de los trabajadores (paleta validada para el tema oscuro).
@@ -1536,7 +1547,7 @@
   /* Deuda completa con un trabajador, mes a mes: lo devengado desde que
      empezó (hasta su baja u hoy) menos todo lo entregado. Devuelve el total
      y el desglose por meses para poder verlo en detalle. */
-  async function desgloseDeuda(t, pagosT, cierresDeMes) {
+  async function desgloseDeuda(t, pagosT, cierresDeMes, conDetalle = false) {
     const fechas = [t.inicio || '', ...(t.dias || []), ...fechasTardes(t), ...pagosT.map(p => p.fecha || '')]
       .filter(Boolean).sort();
     if (!fechas.length) return { total: 0, meses: [] };
@@ -1549,11 +1560,18 @@
     let total = 0;
     while (mes <= ultimo) {
       const cierresMes = await cierresDeMes(mes);
-      const devengado = calcularMes(t, ventasParaTrabajador(t, cierresMes, mes), [], mes).devengado;
-      const entregado = Math.round(pagosT.filter(p => (p.fecha || '').startsWith(mes))
-        .reduce((s, p) => s + (p.importe || 0), 0) * 100) / 100;
+      // Siempre con detalle: el total sale idéntico (conDetalle solo cambia la
+      // forma de devolverlo) y así no hay dos caminos que puedan dar números
+      // distintos. Ojo: a calcularMes se le pasa .total, nunca el objeto.
+      const ventasDet = ventasParaTrabajador(t, cierresMes, mes, true);
+      const pagosMes = pagosT.filter(p => (p.fecha || '').startsWith(mes));
+      const calc = calcularMes(t, ventasDet.total, pagosMes, mes);
+      const devengado = calc.devengado;
+      const entregado = calc.entregado;
       if (devengado || entregado) {
-        meses.push({ mes, devengado, entregado, saldo: Math.round((devengado - entregado) * 100) / 100 });
+        const fila = { mes, devengado, entregado, saldo: Math.round((devengado - entregado) * 100) / 100 };
+        if (conDetalle) { fila.calc = calc; fila.ventasDet = ventasDet; fila.pagos = pagosMes; }
+        meses.push(fila);
       }
       total += devengado - entregado;
       mes = mesSiguiente(mes);
@@ -1765,6 +1783,190 @@
     return lineas.join('\n');
   }
 
+  /* Las líneas de "la cuenta bien explicada" de un mes: de dónde sale cada
+     número, paso a paso. Se usan igual en la ficha de un trabajador en activo
+     y en la de uno ya liquidado, para que digan exactamente lo mismo. */
+  function explicacionLineas(t, c, ventasDet, pasado = false) {
+    const fijoDia = (t.sueldoMensual || 0) / (t.diasMes || 26);
+    const jornada = t.horasJornada || 7.5;
+    const ventasT = ventasDet.total;
+    const ex = [];
+    ex.push(`Precio del día: ${INFORME.eur(t.sueldoMensual || 0)} ÷ ${t.diasMes || 26} días = <strong>${INFORME.eur(fijoDia)}</strong>`);
+    ex.push(`Fijo: ${c.dias.length} día${c.dias.length === 1 ? '' : 's'} trabajado${c.dias.length === 1 ? '' : 's'} × ${INFORME.eur(fijoDia)} = ${INFORME.eur(Math.round(fijoDia * c.dias.length * 100) / 100)}`);
+    c.tardes.filter(x => x.horas > 0).forEach(x => {
+      ex.push(`⏰ ${fmtFecha(x.fecha)}: llegó ${x.horas} h tarde → se descuentan ${INFORME.eur(Math.round(fijoDia * Math.min(1, x.horas / jornada) * 100) / 100)} del fijo`);
+    });
+    ventasDet.detalleTardes.filter(l => l.horas > 0).forEach(l => {
+      ex.push(`⏰ ${fmtFecha(l.fecha)}: la venta del día fue ${INFORME.eur(l.ventaDia)}, pero solo estuvo ${l.horasTrabajadas} de ${jornada} h → para su objetivo cuentan ${INFORME.eur(l.ventaDia)} ÷ ${jornada} × ${l.horasTrabajadas} = <strong>${INFORME.eur(l.cuenta)}</strong>`);
+    });
+    if (tramosDe(t).length) {
+      ex.push(`Ventas que cuentan para su objetivo: <strong>${INFORME.eur(ventasT)}</strong> (solo sus días; los de retraso, en proporción)`);
+      ex.push(c.tramoActual
+        ? `Objetivo de ${INFORME.eur(c.tramoActual.objetivo)} alcanzado → ${c.tramoActual.porcentaje} % de ${INFORME.eur(ventasT)} = <strong>${INFORME.eur(c.comision)}</strong>`
+        : `No llegó al objetivo${c.siguiente ? ` de ${INFORME.eur(c.siguiente.objetivo)}` : ''} → sin comisión: cobra solo el fijo pactado`);
+    }
+    ex.push(`${pasado ? 'Le correspondió ese mes' : 'Le corresponde el mes'}: fijo ${INFORME.eur(c.fijo)} + comisión ${INFORME.eur(c.comision)} = <strong>${INFORME.eur(c.devengado)}</strong>`);
+    return ex;
+  }
+
+  /* Las mismas líneas, plegadas, tal como salen en la ficha de un activo. */
+  function explicacionPlegada(t, c, ventasDet) {
+    return `
+        <details class="ocr-details" style="margin:8px 0 0">
+          <summary>📖 Ver la cuenta bien explicada (para enseñársela)</summary>
+          ${explicacionLineas(t, c, ventasDet).map(l => `<div class="stat-linea"><span style="width:100%">${l}</span></div>`).join('')}
+        </details>`;
+  }
+
+  /* Texto con TODA su cuenta (no solo un mes), para enviárselo al trabajador.
+     Neutro a propósito: solo sus datos, nada del negocio ni de quien lo manda. */
+  function resumenTextoCompleto(t, deuda, pagosT) {
+    const lineas = [];
+    lineas.push(`Cuenta completa de ${t.nombre}`);
+    if (t.inicio || t.fin) {
+      lineas.push(`${t.inicio ? 'Del ' + fmtFecha(t.inicio) : ''}${t.fin ? ' al ' + fmtFecha(t.fin) : ''}`.trim());
+    }
+    lineas.push('');
+    lineas.push('LO QUE LE CORRESPONDIÓ, MES A MES');
+    deuda.meses.forEach(m => {
+      const c = m.calc;
+      const dias = c ? `${c.dias.length} día${c.dias.length === 1 ? '' : 's'} · ` : '';
+      const detalle = c ? `fijo ${INFORME.eur(c.fijo)} + comisión ${INFORME.eur(c.comision)} = ` : '';
+      lineas.push(`${mesEnLetras(m.mes + '-01')}: ${dias}${detalle}${INFORME.eur(m.devengado)}`);
+    });
+    const correspondio = Math.round(deuda.meses.reduce((s, m) => s + m.devengado, 0) * 100) / 100;
+    lineas.push(`Total que le correspondió: ${INFORME.eur(correspondio)}`);
+    lineas.push('');
+    lineas.push('LO QUE SE LE PAGÓ');
+    if (!pagosT.length) lineas.push('(no hay ninguna entrega apuntada)');
+    pagosT.forEach(p => {
+      lineas.push(`${p.fecha ? fmtFecha(p.fecha) : 'sin fecha'}: ${INFORME.eur(p.importe)}${p.notas ? ` (${p.notas})` : ''}`);
+    });
+    const pagado = Math.round(pagosT.reduce((s, p) => s + (p.importe || 0), 0) * 100) / 100;
+    lineas.push(`Total pagado: ${INFORME.eur(pagado)}`);
+    lineas.push('');
+    const dif = Math.round((correspondio - pagado) * 100) / 100;
+    lineas.push(Math.abs(dif) < 0.01
+      ? 'CUADRE: está todo pagado, no queda nada pendiente.'
+      : (dif > 0 ? `CUADRE: queda pendiente ${INFORME.eur(dif)}.`
+                 : `CUADRE: se pagaron ${INFORME.eur(-dif)} de más.`));
+    return lineas.join('\n');
+  }
+
+  /* Ficha completa de un trabajador ya liquidado: cada entrega que se le hizo y
+     de dónde sale cada número, mes a mes. Es la MISMA ficha en la lista (los
+     primeros días) y en el historial, para que no puedan decir cosas distintas.
+     No mira el mes elegido arriba: cubre toda su etapa.
+     Devuelve el HTML y el texto neutro para enviárselo. */
+  async function fichaLiquidacionHTML(t, i, pagosT, cierresDeMes, pie = '') {
+    const totalPagado = r2(pagosT.reduce((s, p) => s + (p.importe || 0), 0));
+    const abierta = perAbiertos.has(t.sid);
+    const cabecera = `
+        <div class="per-cab per-toggle" data-sid="${t.sid}">
+          <div style="min-width:0">
+            <div class="stat-prov-nombre">${pdot(t, i)} ${escapar(t.nombre)}</div>
+            <div class="stat-prov-nif">Trabajó ${t.inicio ? 'del ' + fmtFecha(t.inicio) : ''}${t.fin ? ' al ' + fmtFecha(t.fin) : ''} · ✔️ liquidado el ${fmtFecha(t.liquidado)}</div>
+          </div>
+          <div class="per-resumen-cab"><strong class="txt-ok">${INFORME.eur(totalPagado)}</strong><span class="per-flecha">${abierta ? '▲' : '▼'}</span></div>
+        </div>`;
+
+    // Cerrada no se calcula nada: así el historial no rehace todas las cuentas
+    // cada vez que tocas cualquier cosa en la pestaña.
+    if (!abierta) {
+      return {
+        texto: '',
+        html: `
+        <div class="prov-form per-card">
+          ${cabecera}
+          <p class="hint" style="margin:8px 0 0">Toca su nombre para ver todo lo que le pagaste y cómo se calculó.</p>
+          ${pie}
+        </div>`
+      };
+    }
+
+    const deuda = await desgloseDeuda(t, pagosT, cierresDeMes, true);
+    const correspondio = r2(deuda.meses.reduce((s, m) => s + m.devengado, 0));
+    const diferencia = r2(correspondio - totalPagado);
+
+    // Una entrega sin fecha suma en el total pero no cae en ningún mes: hay que
+    // decirlo, en vez de enseñar un cuadre que no cuadra sin explicar por qué.
+    const repartido = r2(deuda.meses.reduce((s, m) => s + m.entregado, 0));
+    const sinFecha = pagosT.filter(p => !p.fecha).length;
+    const avisoSinFecha = (sinFecha || Math.abs(repartido - totalPagado) >= 0.01)
+      ? `<p class="hint txt-bad" style="margin:6px 0 0">⚠️ Hay ${sinFecha || 1} entrega(s) sin fecha, por eso el reparto mes a mes no suma lo mismo que el total. Ponles fecha para que la cuenta cuadre.</p>`
+      : '';
+
+    let cuadreTxt, cuadreClase;
+    if (Math.abs(diferencia) < 0.01) { cuadreTxt = '✓ Cuadra: no quedó nada pendiente'; cuadreClase = 'txt-ok'; }
+    else if (diferencia > 0) { cuadreTxt = 'Quedó sin pagarle ' + INFORME.eur(diferencia); cuadreClase = 'txt-bad'; }
+    else { cuadreTxt = 'Se le pagó de más ' + INFORME.eur(-diferencia); cuadreClase = 'txt-sec'; }
+
+    const esFiniquito = (p) => p.finiquito === true || /finiquito|liquidación final/i.test(p.notas || '');
+    const filaPago = (p) => `
+          <div class="per-pago">
+            <span>${p.fecha ? fmtFecha(p.fecha) : '⚠️ sin fecha'}${esFiniquito(p) ? ' · 🏁' : ''}${p.notas ? ' · ' + escapar(p.notas) : ''}</span>
+            <span>${INFORME.eur(p.importe)}</span>
+          </div>`;
+
+    const pagosHTML = pagosT.length
+      ? pagosT.map(filaPago).join('')
+      : '<p class="vacio" style="padding:6px">No hay ninguna entrega apuntada a su nombre.</p>';
+
+    const mesesHTML = deuda.meses.map(m => {
+      const c = m.calc;
+      const saldoTxt = Math.abs(m.saldo) < 0.01
+        ? 'cuadró ✓'
+        : (m.saldo > 0 ? 'quedó debiendo ' + INFORME.eur(m.saldo) : 'le diste ' + INFORME.eur(-m.saldo) + ' de más');
+      const notasMes = (t.notasDias || []).filter(n => (n.fecha || '').startsWith(m.mes))
+        .sort((a, b) => a.fecha.localeCompare(b.fecha));
+      return `
+          <details class="ocr-details">
+            <summary>${mesEnLetras(m.mes + '-01')} · le correspondió ${INFORME.eur(m.devengado)} · le diste ${INFORME.eur(m.entregado)} · ${saldoTxt}</summary>
+            ${calendarioHTML(t, m.mes, true)}
+            <div class="stat-linea"><span>Asistencia</span><span>${c.dias.length} día${c.dias.length === 1 ? '' : 's'} trabajado${c.dias.length === 1 ? '' : 's'}${c.tardes.length ? ` · <strong class="txt-oro">⏰ ${c.tardes.length}</strong>` : ''}${c.faltas.length ? ` · <strong class="txt-bad">${c.faltas.length} falta${c.faltas.length === 1 ? '' : 's'}</strong>` : ''}</span></div>
+            ${c.descuentoTardes > 0 ? `<div class="stat-linea"><span>Descuento por retrasos (${c.horasTarde} h de ${t.horasJornada || 7.5} h/jornada)</span><strong class="txt-bad">−${INFORME.eur(c.descuentoTardes)}</strong></div>` : ''}
+            <p class="per-seccion">📖 De dónde sale cada número</p>
+            ${explicacionLineas(t, c, m.ventasDet, true).map(l => `<div class="stat-linea"><span style="width:100%">${l}</span></div>`).join('')}
+            <p class="per-seccion">💶 Lo que le diste ese mes</p>
+            ${m.pagos.length ? m.pagos.map(filaPago).join('') : '<p class="vacio" style="padding:6px">Ese mes no le diste nada.</p>'}
+            ${notasMes.length ? `<p class="per-seccion">📝 Notas de ese mes</p>${notasMes.map(n => `<div class="per-pago"><span>📝 ${fmtFecha(n.fecha)} · ${escapar(n.texto)}</span></div>`).join('')}` : ''}
+          </details>`;
+    }).join('');
+
+    return {
+      texto: resumenTextoCompleto(t, deuda, pagosT),
+      html: `
+        <div class="prov-form per-card">
+          ${cabecera}
+          <div class="per-body">
+            <div class="per-baja">
+              <div>✔️ Abonado y liquidado el <strong>${fmtFecha(t.liquidado)}</strong></div>
+              <div>Esta ficha es tu prueba: cada entrega que le hiciste y de dónde sale cada número. Aquí no se puede cambiar nada; si necesitas corregir algo, usa «Reabrir su ficha» al final.</div>
+            </div>
+
+            <p class="per-seccion">📌 El resumen que cuadra</p>
+            <div class="stat-linea"><span>Le correspondió en todo su tiempo</span><strong>${INFORME.eur(correspondio)}</strong></div>
+            <div class="stat-linea"><span>Le pagaste en total (todas las entregas)</span><strong>${INFORME.eur(totalPagado)}</strong></div>
+            <div class="stat-linea"><span>Diferencia</span><strong class="${cuadreClase}">${cuadreTxt}</strong></div>
+            ${avisoSinFecha}
+
+            <p class="per-seccion">💶 Todo lo que le pagaste (${pagosT.length} entrega${pagosT.length === 1 ? '' : 's'})</p>
+            ${pagosHTML}
+            <div class="stat-linea"><span><strong>TOTAL PAGADO</strong></span><strong>${INFORME.eur(totalPagado)}</strong></div>
+
+            <p class="per-seccion">📅 Mes a mes, con la cuenta explicada</p>
+            ${mesesHTML || '<p class="vacio" style="padding:6px">No hay ningún mes con movimiento.</p>'}
+
+            <div class="form-actions">
+              <button class="btn btn-small per-compartir" data-sid="${t.sid}">📤 Enviar su cuenta completa (WhatsApp…)</button>
+              <button class="btn btn-small per-reabrir" data-sid="${t.sid}">↩️ Reabrir su ficha (corregir algo)</button>
+            </div>
+            ${pie}
+          </div>
+        </div>`
+    };
+  }
+
   async function pintarPersonal() {
     if (!$('#per-mes').value) $('#per-mes').value = hoyISO().slice(0, 7);
     const mes = mesPersonal();
@@ -1778,7 +1980,8 @@
       `Ventas del negocio en ${mesEnLetras(mes + '-01')}: <strong class="ingreso">${INFORME.eur(ventasNegocio)}</strong> (según tus cierres)`;
 
     const activos = trabajadores.filter(t => !t.liquidado || diasDesde(t.liquidado) < DIAS_EN_MEMORIA);
-    const historial = trabajadores.filter(t => t.liquidado && diasDesde(t.liquidado) >= DIAS_EN_MEMORIA);
+    const historial = trabajadores.filter(t => t.liquidado && diasDesde(t.liquidado) >= DIAS_EN_MEMORIA)
+      .sort((a, b) => (b.liquidado || '').localeCompare(a.liquidado || ''));
 
     const cacheCierres = new Map([[mes, cierresMes]]);
     const cierresDeMes = async (m) => {
@@ -1796,21 +1999,12 @@
         .sort((a, b) => (a.fecha || '').localeCompare(b.fecha || ''));
       const pagosMes = pagosT.filter(p => (p.fecha || '').startsWith(mes));
 
-      // Ya abonado: tarjeta compacta hasta que pase al historial
+      // Ya abonado: ficha completa para poder comprobar sus pagos y sus cuentas
       if (t.liquidado) {
-        const totalPagado = pagosT.reduce((s, p) => s + (p.importe || 0), 0);
-        tarjetas.push(`
-          <div class="prov-form per-card">
-            <div class="per-cab">
-              <div>
-                <div class="stat-prov-nombre">${pdot(t, i)} ${escapar(t.nombre)}</div>
-                <div class="stat-prov-nif">Trabajó ${t.inicio ? 'del ' + fmtFecha(t.inicio) : ''}${t.fin ? ' al ' + fmtFecha(t.fin) : ''}</div>
-              </div>
-            </div>
-            <div class="stat-linea"><span>✔️ Abonado y liquidado el</span><strong class="txt-ok">${fmtFecha(t.liquidado)}</strong></div>
-            <div class="stat-linea"><span>Total pagado en todo su tiempo</span><strong>${INFORME.eur(totalPagado)}</strong></div>
-            <p class="hint" style="margin:8px 0 0">Pasará al historial en ${Math.max(1, DIAS_EN_MEMORIA - diasDesde(t.liquidado))} día(s).</p>
-          </div>`);
+        const pieMemoria = `<p class="hint" style="margin:8px 0 0">Pasará al historial en ${Math.max(1, DIAS_EN_MEMORIA - diasDesde(t.liquidado))} día(s). Allí seguirás teniendo toda esta información.</p>`;
+        const ficha = await fichaLiquidacionHTML(t, i, pagosT, cierresDeMes, pieMemoria);
+        if (ficha.texto) resumenes.set(t.sid, ficha.texto);
+        tarjetas.push(ficha.html);
         continue;
       }
 
@@ -1820,29 +2014,7 @@
       const abierta = perAbiertos.has(t.sid);
 
       // 📖 La cuenta bien explicada, paso a paso (para enseñársela al empleado)
-      const fijoDia = (t.sueldoMensual || 0) / (t.diasMes || 26);
-      const jornada = t.horasJornada || 7.5;
-      const ex = [];
-      ex.push(`Precio del día: ${INFORME.eur(t.sueldoMensual || 0)} ÷ ${t.diasMes || 26} días = <strong>${INFORME.eur(fijoDia)}</strong>`);
-      ex.push(`Fijo: ${c.dias.length} día${c.dias.length === 1 ? '' : 's'} trabajado${c.dias.length === 1 ? '' : 's'} × ${INFORME.eur(fijoDia)} = ${INFORME.eur(Math.round(fijoDia * c.dias.length * 100) / 100)}`);
-      c.tardes.filter(x => x.horas > 0).forEach(x => {
-        ex.push(`⏰ ${fmtFecha(x.fecha)}: llegó ${x.horas} h tarde → se descuentan ${INFORME.eur(Math.round(fijoDia * Math.min(1, x.horas / jornada) * 100) / 100)} del fijo`);
-      });
-      ventasDet.detalleTardes.filter(l => l.horas > 0).forEach(l => {
-        ex.push(`⏰ ${fmtFecha(l.fecha)}: la venta del día fue ${INFORME.eur(l.ventaDia)}, pero solo estuvo ${l.horasTrabajadas} de ${jornada} h → para su objetivo cuentan ${INFORME.eur(l.ventaDia)} ÷ ${jornada} × ${l.horasTrabajadas} = <strong>${INFORME.eur(l.cuenta)}</strong>`);
-      });
-      if (tramosDe(t).length) {
-        ex.push(`Ventas que cuentan para su objetivo: <strong>${INFORME.eur(ventasT)}</strong> (solo sus días; los de retraso, en proporción)`);
-        ex.push(c.tramoActual
-          ? `Objetivo de ${INFORME.eur(c.tramoActual.objetivo)} alcanzado → ${c.tramoActual.porcentaje} % de ${INFORME.eur(ventasT)} = <strong>${INFORME.eur(c.comision)}</strong>`
-          : `No llegó al objetivo${c.siguiente ? ` de ${INFORME.eur(c.siguiente.objetivo)}` : ''} → sin comisión: cobra solo el fijo pactado`);
-      }
-      ex.push(`Le corresponde el mes: fijo ${INFORME.eur(c.fijo)} + comisión ${INFORME.eur(c.comision)} = <strong>${INFORME.eur(c.devengado)}</strong>`);
-      const explicacionHTML = `
-        <details class="ocr-details" style="margin:8px 0 0">
-          <summary>📖 Ver la cuenta bien explicada (para enseñársela)</summary>
-          ${ex.map(l => `<div class="stat-linea"><span style="width:100%">${l}</span></div>`).join('')}
-        </details>`;
+      const explicaHTML = explicacionPlegada(t, c, ventasDet);
 
       const comisionTxt = c.tramoActual
         ? `✅ Objetivo de ${INFORME.eur(c.tramoActual.objetivo)} alcanzado → ${c.tramoActual.porcentaje} % = <strong>${INFORME.eur(c.comision)}</strong>`
@@ -1936,7 +2108,7 @@
               ${arrastre !== 0 ? `<div class="stat-linea"><span>Arrastre de meses anteriores</span><strong class="${arrastre > 0 ? 'txt-bad' : 'txt-sec'}">${arrastre > 0 ? '+' : ''}${INFORME.eur(arrastre)}</strong></div>` : ''}
               ${filasMeses}
             </details>
-            ${explicacionHTML}
+            ${explicaHTML}
 
             <p class="per-seccion">💶 Adelantos y pagos que le haces</p>
             <div class="form-row">
@@ -1997,19 +2169,26 @@
     // Gráfico del mes, rentabilidad e historial de antiguos
     $('#per-grafico').innerHTML = graficoPersonalHTML(trabajadores, cierresMes, mes);
     $('#per-renta').innerHTML = rentabilidadHTML(trabajadores, cierresMes, mes);
-    $('#per-historial').innerHTML = historial.length
-      ? historial.map(t => {
-          const totalPagado = pagos.filter(p => p.trabajadorSid === t.sid).reduce((s, p) => s + (p.importe || 0), 0);
-          return `
-            <div class="stat-linea">
-              <span>${escapar(t.nombre)}<br><small class="txt-sec">${t.inicio ? 'del ' + fmtFecha(t.inicio) : ''}${t.fin ? ' al ' + fmtFecha(t.fin) : ''} · ✔️ abonado el ${fmtFecha(t.liquidado)}</small></span>
-              <strong>${INFORME.eur(totalPagado)}</strong>
-            </div>`;
-        }).join('')
+    // Historial: la MISMA ficha completa, lo más reciente arriba
+    const fichasHist = [];
+    for (const t of historial) {
+      const pagosT = pagos.filter(p => p.trabajadorSid === t.sid)
+        .sort((a, b) => (a.fecha || '').localeCompare(b.fecha || ''));
+      const ficha = await fichaLiquidacionHTML(t, trabajadores.indexOf(t), pagosT, cierresDeMes);
+      if (ficha.texto) resumenes.set(t.sid, ficha.texto);
+      fichasHist.push(ficha.html);
+    }
+    $('#per-historial').innerHTML = fichasHist.length
+      ? fichasHist.join('')
       : '<p class="vacio">Sin trabajadores antiguos todavía.</p>';
 
+    // Los mismos botones tienen que funcionar en las fichas de arriba y en las
+    // del historial. OJO: esto va DESPUÉS de pintar los dos contenedores.
+    const cajasPer = [div, $('#per-historial')];
+    const enCajas = (sel, fn) => cajasPer.forEach(c => c.querySelectorAll(sel).forEach(fn));
+
     // Abrir / cerrar la ficha de cada empleado
-    div.querySelectorAll('.per-toggle').forEach(cab => {
+    enCajas('.per-toggle', cab => {
       cab.addEventListener('click', () => {
         const sid = cab.dataset.sid;
         if (perAbiertos.has(sid)) perAbiertos.delete(sid);
@@ -2019,10 +2198,14 @@
     });
 
     // Día del calendario: 1 toque = trabajó, 2 = faltó, 3 = nada
-    div.querySelectorAll('.cal .dia').forEach(btn => {
+    enCajas('.cal:not(.cal-lectura) .dia', btn => {
       btn.addEventListener('click', guardarConAviso(async () => {
         const t = (await DB.perTodos()).find(x => x.sid === btn.dataset.sid);
         if (!t) return;
+        if (t.liquidado) {
+          toast('Su cuenta ya está liquidada. Para cambiar algo, pulsa antes «Reabrir su ficha».', 4500);
+          return;
+        }
         const f = btn.dataset.fecha;
         const dias = new Set(t.dias || []);
         const tardes = tardesDe(t);
@@ -2050,7 +2233,7 @@
     });
 
     // Apuntar nota de un día
-    div.querySelectorAll('.nota-apuntar').forEach(btn => {
+    enCajas('.nota-apuntar', btn => {
       btn.addEventListener('click', guardarConAviso(async () => {
         const card = btn.closest('.per-card');
         const fecha = card.querySelector('.nota-fecha').value;
@@ -2067,7 +2250,7 @@
     });
 
     // Borrar nota de un día
-    div.querySelectorAll('.nota-borrar').forEach(btn => {
+    enCajas('.nota-borrar', btn => {
       btn.addEventListener('click', guardarConAviso(async () => {
         if (!confirm('¿Eliminar esta nota?')) return;
         const t = (await DB.perTodos()).find(x => x.sid === btn.dataset.sid);
@@ -2079,7 +2262,7 @@
     });
 
     // Abonar el finiquito y liquidar
-    div.querySelectorAll('.per-abonar').forEach(btn => {
+    enCajas('.per-abonar', btn => {
       btn.addEventListener('click', guardarConAviso(async () => {
         const t = (await DB.perTodos()).find(x => x.sid === btn.dataset.sid);
         if (!t) return;
@@ -2092,7 +2275,7 @@
         if (finiquito > 0) {
           await DB.pagoGuardar({
             trabajadorSid: t.sid, fecha: hoyISO(),
-            importe: finiquito, notas: 'Liquidación final (finiquito)',
+            importe: finiquito, notas: 'Liquidación final (finiquito)', finiquito: true,
             creado: new Date().toISOString()
           });
         }
@@ -2103,8 +2286,22 @@
       }));
     });
 
+    // Reabrir a un liquidado (si te equivocaste o hay que corregir algo)
+    enCajas('.per-reabrir', btn => {
+      btn.addEventListener('click', guardarConAviso(async () => {
+        const t = (await DB.perTodos()).find(x => x.sid === btn.dataset.sid);
+        if (!t) return;
+        if (!confirm(`Se volverá a abrir la ficha de "${t.nombre}" para poder corregir días, sueldo u objetivos.\n\nLo que ya le pagaste NO se borra. Si alguna entrega está mal, bórrala después desde su lista.\n\n¿Continuar?`)) return;
+        t.liquidado = '';
+        await DB.perGuardar(t);
+        perAbiertos.add(t.sid);
+        toast('↩️ Ficha reabierta. Vuelve a aparecer arriba con el resto.');
+        pintarPersonal();
+      }));
+    });
+
     // Dar de baja: abre la ficha y lleva directo al campo de la fecha
-    div.querySelectorAll('.per-dar-baja').forEach(btn => {
+    enCajas('.per-dar-baja', btn => {
       btn.addEventListener('click', async () => {
         const t = (await DB.perTodos()).find(x => x.id === +btn.dataset.id);
         if (!t) return;
@@ -2119,7 +2316,7 @@
     });
 
     // Compartir el resumen del trabajador (texto neutro)
-    div.querySelectorAll('.per-compartir').forEach(btn => {
+    enCajas('.per-compartir', btn => {
       btn.addEventListener('click', async () => {
         const texto = resumenes.get(btn.dataset.sid);
         if (!texto) return;
@@ -2140,7 +2337,7 @@
     });
 
     // Editar trabajador
-    div.querySelectorAll('.per-editar').forEach(btn => {
+    enCajas('.per-editar', btn => {
       btn.addEventListener('click', async () => {
         const t = (await DB.perTodos()).find(x => x.id === +btn.dataset.id);
         if (t) abrirFormPersonal(t);
@@ -2148,7 +2345,7 @@
     });
 
     // Apuntar entrega
-    div.querySelectorAll('.pago-apuntar').forEach(btn => {
+    enCajas('.pago-apuntar', btn => {
       btn.addEventListener('click', guardarConAviso(async () => {
         const card = btn.closest('.per-card');
         const importe = parseFloat(card.querySelector('.pago-importe').value);
@@ -2168,7 +2365,7 @@
     });
 
     // Borrar entrega
-    div.querySelectorAll('.pago-borrar').forEach(btn => {
+    enCajas('.pago-borrar', btn => {
       btn.addEventListener('click', guardarConAviso(async () => {
         if (!confirm('¿Eliminar esta entrega?')) return;
         await DB.pagoBorrar(+btn.dataset.id);

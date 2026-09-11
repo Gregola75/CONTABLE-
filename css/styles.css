@@ -758,6 +758,17 @@ select { appearance: none; -webkit-appearance: none; }
   border-color: #17171b;
   cursor: not-allowed;
 }
+/* Calendario de solo lectura (trabajador ya liquidado): se ve, no se toca.
+   Se usan <span>, no botones desactivados, porque ".dia:disabled" pintaría de
+   negro también los días que sí trabajó y se perdería la prueba. */
+.cal .dia { text-align: center; }
+.cal-lectura .dia { cursor: default; }
+.cal .dia.fuera {
+  background: #000;
+  color: #2e2e34;
+  border-color: #17171b;
+}
+
 .cal .dia { position: relative; }
 .cal .dia.con-nota::after {
   content: '';
