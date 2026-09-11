@@ -71,7 +71,18 @@ versión antigua.
   su fecha de inicio (o posteriores a su baja) salen bloqueados.
 - **Retrasos**: descuentan del fijo la parte proporcional
   (`horas de retraso ÷ horas de jornada × precio del día`). Jornada por
-  defecto 7,5 h (el local abre de 20:00 a 3:30).
+  defecto 7,5 h (el local abre de 20:00 a 3:30). El descuento se calcula con el
+  **precio del día ya redondeado** y **día a día**, no sobre la suma del mes, para
+  que el desglose que se le enseña al trabajador cuadre al céntimo si lo comprueba
+  con una calculadora. Nunca puede pasar del fijo del mes (llegar tarde hace perder
+  como mucho el día, nunca más). El fijo bruto se escribe como
+  `sueldo ÷ días del mes × días trabajados`, **no** como `precio del día × días`,
+  porque lo segundo no cuadra a mano (900 ÷ 26 son 34,615…, no 34,62 justos).
+- La ficha de cada trabajador, activo o liquidado, tiene el apartado **"Dónde se le
+  descontó por llegar tarde"**: una fila por día con las horas que estuvo, lo que
+  cobró ese día frente a un día normal y lo que se le quitó. Va también en el texto
+  que se le envía por WhatsApp. Un día marcado como retraso pero con 0 horas dice
+  que se le pagó entero, para que no parezca un olvido.
 - **Comisiones por objetivos**: tramos de ventas; se aplica el % del tramo más
   alto alcanzado. Si no llega al primer objetivo, cobra **solo el fijo**.
   Los objetivos son la cifra pactada y no se prorratean nunca.
@@ -111,7 +122,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 154 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 182 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.
 

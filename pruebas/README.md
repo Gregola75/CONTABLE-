@@ -12,7 +12,7 @@ bash pruebas/ejecutar.sh
 
 Al final dice `✅ TODO CORRECTO` o lista los fallos encontrados.
 
-## Qué se comprueba (154 comprobaciones)
+## Qué se comprueba (182 comprobaciones)
 
 **Informe trimestral** — que los ingresos y gastos del trimestre son los
 correctos, que no se cuelan registros de otros meses, que se agrupan las
@@ -36,6 +36,14 @@ restaurar la misma copia dos veces **no duplica nada**.
 por retrasos, ventas del día con retraso contadas por horas, objetivos
 alcanzados o no, deuda arrastrada entre meses y liquidaciones (incluido el
 caso de pagar el finiquito el mes siguiente a la baja).
+
+**Retrasos** — que la ficha dice el día exacto en que se le descontó, las horas
+que estuvo y lo que cobró ese día frente a un día normal; que las tres líneas del
+fijo cuadran (`726,92 − 18,46 = 708,46`); que con **varios retrasos en un mes** las
+filas suman exactamente el total; que un retraso sin horas dice que se le pagó el
+día entero; que llegar más tarde que la jornada descuenta como mucho ese día y el
+fijo nunca sale negativo; que unas horas guardadas como texto no inflan el total; y
+que todo esto sale también en el texto que se le envía, sin nombrar el negocio.
 
 **Trabajadores ya liquidados** — que al abonar el finiquito queda apuntado como
 entrega, que su ficha se puede abrir y enseña **todas** las entregas (no solo las

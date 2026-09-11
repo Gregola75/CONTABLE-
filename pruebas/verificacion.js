@@ -532,6 +532,172 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
   });
   chk('liquidado', 'Reabierto, su calendario se puede volver a tocar', trasReabrir !== 12, 'días: ' + trasReabrir);
 
+  // ══════════════ 6c. RETRASOS: DÓNDE SE LE DESCONTÓ ══════════════
+  // "No puede cobrar lo mismo un día normal que uno que llega tarde": el desglose
+  // día a día tiene que cuadrar al céntimo aunque el empleado lo haga a mano.
+  console.log('\n═══ 6c. RETRASOS (dónde se le descontó) ═══');
+  const sembrarTrabajador = async (ficha, cierres) => {
+    await page.evaluate(async ({ ficha, cierres }) => {
+      for (const t of await DB.perTodos()) await DB.perBorrar(t.id);
+      for (const g of await DB.pagoTodos()) await DB.pagoBorrar(g.id);
+      for (const r of await DB.todos()) await DB.borrar(r.id);
+      for (const c of cierres) {
+        await DB.guardar({ tipo: 'cierre', fecha: c.fecha, total: c.total, proveedor: '', creado: new Date().toISOString() });
+      }
+      await DB.perGuardar(Object.assign({
+        sueldoMensual: 900, diasMes: 26, horasJornada: 7.5, tramos: [],
+        dias: [], tardes: [], faltas: [], notasDias: [], creado: new Date().toISOString()
+      }, ficha));
+    }, { ficha, cierres });
+    await page.fill('#per-mes', '2026-09');
+    await page.dispatchEvent('#per-mes', 'change');
+    await page.waitForTimeout(900);
+    const abierta = await page.evaluate(() => {
+      const b = document.querySelector('#per-lista .per-body');
+      return !!b && !b.classList.contains('hidden');
+    });
+    if (!abierta) { await page.click('#per-lista .per-toggle'); await page.waitForTimeout(800); }
+    return (await page.textContent('#per-lista .per-body')).replace(/\s+/g, ' ');
+  };
+  const dd = (n) => `2026-09-${String(n).padStart(2, '0')}`;
+
+  // --- Caso 1: un retraso de 4 h, con cierre ese día (el caso real) ---
+  const dias20 = []; const cierres20 = [];
+  for (let d = 1; d <= 20; d++) { dias20.push(dd(d)); cierres20.push({ fecha: dd(d), total: 700 }); }
+  cierres20.push({ fecha: dd(21), total: 500 });
+  const txtR = await sembrarTrabajador(
+    { nombre: 'Retraso', dias: dias20, tardes: [{ fecha: dd(21), horas: 4 }], tramos: [{ objetivo: 13500, porcentaje: 1 }] },
+    cierres20);
+
+  chk('retrasos', 'El fijo se escribe como 900,00 ÷ 26 × 21, que cuadra a mano',
+    /900,00\s*€?\s*÷\s*26\s*×\s*21/.test(txtR), txtR.slice(0, 300));
+  chk('retrasos', 'Ya no aparece la multiplicación que no cuadra (727,02)', !txtR.includes('727,02'));
+  chk('retrasos', 'Se ve el fijo bruto antes de descontar (726,92)', txtR.includes('726,92'));
+  chk('retrasos', 'Las tres filas cuadran: 726,92 − 18,46 = 708,46',
+    txtR.includes('726,92') && txtR.includes('18,46') && txtR.includes('708,46'), txtR.slice(0, 400));
+  chk('retrasos', 'Dice el día exacto y las horas de retraso',
+    /21\/09\/2026/.test(txtR) && /llegó 4 h tarde/.test(txtR), txtR.slice(0, 600));
+  chk('retrasos', 'Dice cuántas horas estuvo ese día (3,5 h de 7,5 h)',
+    /3,5 h de las 7,5 h/.test(txtR), txtR.slice(0, 600));
+  chk('retrasos', 'Dice lo que cobró ese día frente a un día normal (16,16 en vez de 34,62)',
+    /cobró 16,16 € en vez de 34,62 €/.test(txtR), txtR.slice(0, 700));
+  chk('retrasos', 'Explica el efecto de ese día en su objetivo (233,33 de 500,00)',
+    txtR.includes('233,33') && txtR.includes('500,00'));
+  chk('retrasos', 'Lleva el total descontado por llegar tarde',
+    /TOTAL DESCONTADO POR LLEGAR TARDE/i.test(txtR) && txtR.includes('18,46'));
+  chk('retrasos', 'Invita a comprobar la resta (726,92 − 18,46 = 708,46)',
+    /726,92 € − 18,46 € = 708,46 €/.test(txtR), txtR.slice(-400));
+  chk('retrasos', 'Las horas se escriben con coma, no con punto', !/\d\.\d+ h/.test(txtR));
+
+  // --- Caso 2: VARIOS retrasos el mismo mes (prueba de que suma exacto) ---
+  const dias17 = []; for (let d = 1; d <= 17; d++) dias17.push(dd(d));
+  const txtM = await sembrarTrabajador({
+    nombre: 'Varios', dias: dias17,
+    tardes: [{ fecha: dd(18), horas: 4 }, { fecha: dd(19), horas: 2 },
+             { fecha: dd(20), horas: 1 }, { fecha: dd(21), horas: 3 }]
+  }, []);
+  chk('retrasos', 'Con 4 retrasos hay una fila por cada día (18,46 · 9,23 · 4,62 · 13,85)',
+    ['18,46', '9,23', '4,62', '13,85'].every(v => txtM.includes(v)), txtM.slice(0, 800));
+  chk('retrasos', 'Las 4 filas suman exactamente el total descontado (46,16, no 46,15)',
+    txtM.includes('46,16') && !txtM.includes('46,15'), txtM.slice(0, 800));
+  chk('retrasos', 'El fijo con 4 retrasos: 726,92 − 46,16 = 680,76',
+    txtM.includes('680,76') && !txtM.includes('680,77'), txtM.slice(0, 500));
+
+  // --- Caso 3: retraso apuntado sin horas ---
+  const txt0 = await sembrarTrabajador(
+    { nombre: 'SinHoras', dias: dias20, tardes: [{ fecha: dd(21), horas: 0 }] }, []);
+  chk('retrasos', 'Un retraso sin horas dice que se le pagó el día entero',
+    /Se le pagó el día entero/i.test(txt0), txt0.slice(0, 500));
+  chk('retrasos', 'Un retraso sin horas no descuenta nada del fijo (726,92)',
+    txt0.includes('726,92') && !/TOTAL DESCONTADO/i.test(txt0), txt0.slice(0, 400));
+
+  // --- Caso 4: llegó más tarde que toda su jornada ---
+  const txtX = await sembrarTrabajador(
+    { nombre: 'MuyTarde', dias: dias20, tardes: [{ fecha: dd(21), horas: 9 }] }, []);
+  chk('retrasos', 'Si llega más tarde que su jornada, ese día no cobra nada',
+    /No llegó a hacer ninguna hora/.test(txtX) && /no cobró nada/.test(txtX), txtX.slice(0, 600));
+  chk('retrasos', 'Y el descuento es como mucho un día entero (34,62)',
+    txtX.includes('34,62') && !txtX.includes('41,54'), txtX.slice(0, 600));
+
+  // --- Caso 5: todos los días con retraso completo → el fijo nunca sale negativo ---
+  const tardesTodas = []; for (let d = 1; d <= 21; d++) tardesTodas.push({ fecha: dd(d), horas: 8 });
+  const txtNeg = await sembrarTrabajador({ nombre: 'TodoTarde', dias: [], tardes: tardesTodas }, []);
+  const fijoNeg = await page.evaluate(() => {
+    const fila = [...document.querySelectorAll('#per-lista .stat-linea')]
+      .find(el => /FIJO DEL MES/.test(el.textContent));
+    return fila ? fila.lastElementChild.textContent.replace(/[^\d.,−-]/g, '').trim() : 'no encontrado';
+  });
+  chk('retrasos', 'Con todos los días de retraso completo el fijo no sale negativo',
+    fijoNeg === '0,00', 'obtenido ' + fijoNeg);
+  chk('retrasos', 'Y avisa de que el descuento se topa al fijo del mes',
+    /no puede pasar del fijo del mes/i.test(txtNeg), txtNeg.slice(0, 500));
+
+  // --- Caso 6: horas guardadas como texto (copia manipulada o dato viejo) ---
+  const horasTexto = await page.evaluate(async () => {
+    const t = (await DB.perTodos())[0];
+    t.dias = ['2026-09-01', '2026-09-02', '2026-09-03'];
+    t.tardes = [{ fecha: '2026-09-02', horas: '4' }, { fecha: '2026-09-03', horas: '2' }];
+    await DB.perGuardar(t);
+    document.querySelector('#per-mes').dispatchEvent(new Event('change'));
+    await new Promise(r => setTimeout(r, 900));
+    const txt = document.querySelector('#per-lista .per-body').textContent.replace(/\s+/g, ' ');
+    const m = txt.match(/\((\d+) días?, ([\d,]+) h\)/);
+    return m ? m[2] : txt.slice(0, 200);
+  });
+  chk('retrasos', 'Unas horas guardadas como texto no inflan el total (6 h, no 42)',
+    horasTexto === '6', 'obtenido ' + horasTexto);
+
+  // --- Caso 7: retraso sin cierre de ventas ese día ---
+  const txtSC = await sembrarTrabajador(
+    { nombre: 'SinCierre', dias: dias17, tardes: [{ fecha: dd(18), horas: 4 }] }, []);
+  chk('retrasos', 'Un día de retraso sin cierre se explica igual y no inventa ventas',
+    /llegó 4 h tarde/.test(txtSC) && !/le contaron/.test(txtSC), txtSC.slice(0, 500));
+
+  // --- Caso 8: el texto que se le envía por WhatsApp ---
+  await sembrarTrabajador(
+    { nombre: 'Envio', dias: dias20, tardes: [{ fecha: dd(21), horas: 4 }], tramos: [{ objetivo: 13500, porcentaje: 1 }] },
+    cierres20);
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'share', { value: undefined, configurable: true });
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: () => Promise.reject(new Error('sin portapapeles')) }, configurable: true
+    });
+  });
+  await page.click('#per-lista .per-compartir');
+  await page.waitForTimeout(700);
+  const envioMes = await page.textContent('#modal-body pre');
+  chk('retrasos', 'El resumen de WhatsApp dice dónde se le descontó por llegar tarde',
+    /DÓNDE SE LE DESCONTÓ POR LLEGAR TARDE/.test(envioMes) && envioMes.includes('18,46'), envioMes.slice(0, 300));
+  chk('retrasos', 'El resumen dice lo que cobró ese día en vez de un día normal',
+    /cobró 16,16 € en vez de 34,62 €/.test(envioMes), envioMes.slice(0, 400));
+  chk('retrasos', 'El resumen enseña de dónde sale el fijo (726,92 − 18,46 = 708,46)',
+    envioMes.includes('726,92') && envioMes.includes('708,46'), envioMes.slice(0, 400));
+  chk('retrasos', 'El resumen con el desglose sigue sin nombrar el negocio ni la app',
+    !/wander|contable/i.test(envioMes), envioMes.slice(0, 120));
+  await page.click('#modal-cerrar');
+  await page.waitForTimeout(300);
+
+  // --- Caso 9: en la ficha de un liquidado se ve el mismo desglose ---
+  await page.evaluate(async () => {
+    const t = (await DB.perTodos())[0];
+    t.fin = '2026-09-21'; t.liquidado = '2026-09-22';
+    await DB.perGuardar(t);
+    document.querySelector('#per-mes').dispatchEvent(new Event('change'));
+    await new Promise(r => setTimeout(r, 1100));
+  });
+  const cajaLiq = await page.evaluate(() =>
+    document.querySelector('#per-historial .per-toggle') ? '#per-historial' : '#per-lista');
+  const yaAbierta = await page.evaluate(c => {
+    const b = document.querySelector(c + ' .per-body');
+    return !!b && !b.classList.contains('hidden');
+  }, cajaLiq);
+  if (!yaAbierta) { await page.click(cajaLiq + ' .per-toggle'); await page.waitForTimeout(900); }
+  const txtLiqR = (await page.textContent(cajaLiq + ' .per-body')).replace(/\s+/g, ' ');
+  chk('retrasos', 'La ficha de un liquidado enseña dónde se le descontó por llegar tarde',
+    /Dónde se le descontó por llegar tarde/i.test(txtLiqR) && txtLiqR.includes('18,46'), txtLiqR.slice(0, 500));
+  chk('retrasos', 'Y ahí el desglose no va metido en otro plegable dentro del mes',
+    await page.evaluate(c => !document.querySelector(c + ' details details'), cajaLiq));
+
   // ══════════════ 7. LECTURA DE FACTURAS (OCR) ══════════════
   console.log('\n═══ 7. DETECCIÓN AUTOMÁTICA DE FACTURAS ═══');
   const ocr = await page.evaluate(() => {
