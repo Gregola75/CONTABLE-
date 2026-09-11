@@ -12,7 +12,7 @@ bash pruebas/ejecutar.sh
 
 Al final dice `✅ TODO CORRECTO` o lista los fallos encontrados.
 
-## Qué se comprueba (182 comprobaciones)
+## Qué se comprueba (200 comprobaciones)
 
 **Informe trimestral** — que los ingresos y gastos del trimestre son los
 correctos, que no se cuelan registros de otros meses, que se agrupan las
@@ -36,6 +36,12 @@ restaurar la misma copia dos veces **no duplica nada**.
 por retrasos, ventas del día con retraso contadas por horas, objetivos
 alcanzados o no, deuda arrastrada entre meses y liquidaciones (incluido el
 caso de pagar el finiquito el mes siguiente a la baja).
+
+**Objetivos en los resúmenes** — que el objetivo pactado, lo facturado en sus días
+y lo que faltó para llegar salen en la ficha, en la del liquidado (en pasado) y en
+los dos textos que se le envían; que al alcanzar un tramo se dice su comisión y lo
+que faltó para el de arriba; que un trabajador sin tramos no enseña el bloque; y que
+**en ningún caso se le enseña la facturación del local**.
 
 **Retrasos** — que la ficha dice el día exacto en que se le descontó, las horas
 que estuvo y lo que cobró ese día frente a un día normal; que las tres líneas del

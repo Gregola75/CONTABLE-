@@ -86,6 +86,14 @@ versión antigua.
 - **Comisiones por objetivos**: tramos de ventas; se aplica el % del tramo más
   alto alcanzado. Si no llega al primer objetivo, cobra **solo el fijo**.
   Los objetivos son la cifra pactada y no se prorratean nunca.
+- El apartado **"🎯 Su objetivo"** sale en la ficha del activo, en cada mes de la
+  del liquidado y en los dos textos que se le envían: el objetivo pactado (el primer
+  tramo), lo **facturado en sus días** y lo que faltó para llegar. Si alcanza un tramo
+  se dice cuál y su comisión, y además lo que faltó para el de arriba si lo hay.
+  **Nunca se le enseña la facturación del local**: solo la base de sus días. Si no
+  tiene tramos pactados, el bloque no aparece. En el resumen de toda su etapa se
+  añade el total facturado en sus días, avisando de que los objetivos son de cada
+  mes y no se suman.
 - **Base de ventas de cada empleado**: solo los días que él trabajó. Los días
   con retraso cuentan en proporción a sus horas
   (`venta del día ÷ horas de jornada × horas trabajadas`). Sus días libres o
@@ -122,7 +130,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 182 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 200 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.
 

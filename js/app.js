@@ -1799,7 +1799,14 @@
     lineas.push(c.descuentoTardes > 0
       ? `Fijo: ${INFORME.eur(t.sueldoMensual || 0)} ÷ ${t.diasMes || 26} × ${c.dias.length} días = ${INFORME.eur(c.fijoBruto)} − ${INFORME.eur(c.descuentoTardes)} = ${INFORME.eur(c.fijo)}`
       : `Fijo: ${INFORME.eur(t.sueldoMensual || 0)} ÷ ${t.diasMes || 26} × ${c.dias.length} días = ${INFORME.eur(c.fijo)}`);
-    if (tramosDe(t).length) lineas.push(`Comisión: ${INFORME.eur(c.comision)}`);
+    const objetivo = objetivoLineas(t, c, (ventasDet && ventasDet.total) || 0);
+    if (objetivo.length) {
+      lineas.push('');
+      lineas.push('SU OBJETIVO');
+      objetivo.forEach(l => lineas.push(l));
+      lineas.push('');
+      lineas.push(`Comisión: ${INFORME.eur(c.comision)}`);
+    }
     lineas.push(`Corresponde este mes: ${INFORME.eur(c.devengado)}`);
     const pagosMes = pagosT.filter(p => (p.fecha || '').startsWith(mes));
     lineas.push(`Recibido este mes: ${INFORME.eur(c.entregado)}`);
@@ -1939,6 +1946,57 @@
             <div class="stat-linea"><span><strong>FIJO DEL MES</strong> <small class="txt-sec">(sale a ${INFORME.eur(precioDeUnDia(t))} el día)</small></span><strong>${INFORME.eur(c.fijo)}</strong></div>`;
   }
 
+  /* El objetivo pactado, lo que se facturó en SUS días y lo que faltó para llegar.
+     Solo sus cifras: nunca la facturación del local, porque esto se le envía a él.
+     Sale del mismo cálculo que la comisión, así que la pantalla y el mensaje que
+     se le manda no pueden decir cosas distintas. */
+  function objetivoLineas(t, c, ventasT, pasado = false) {
+    const tramos = tramosDe(t);
+    if (!tramos.length) return [];
+    const falta = (obj) => Math.round(Math.max(0, obj - ventasT) * 100) / 100;
+    const lineas = [];
+    lineas.push(`Objetivo pactado: ${INFORME.eur(tramos[0].objetivo)}`);
+    lineas.push(`Facturado en sus días: ${INFORME.eur(ventasT)}`);
+    if (c.tramoActual) {
+      lineas.push(c.tramoActual.objetivo === tramos[0].objetivo
+        ? `✅ Objetivo alcanzado → ${c.tramoActual.porcentaje} % = ${INFORME.eur(c.comision)}`
+        : `✅ Alcanzado el objetivo de ${INFORME.eur(c.tramoActual.objetivo)} → ${c.tramoActual.porcentaje} % = ${INFORME.eur(c.comision)}`);
+      if (c.siguiente) {
+        lineas.push(`Para el siguiente (${INFORME.eur(c.siguiente.objetivo)} → ${c.siguiente.porcentaje} %) le ${pasado ? 'faltaron' : 'faltan'} ${INFORME.eur(falta(c.siguiente.objetivo))}`);
+      }
+    } else {
+      lineas.push(`${pasado ? 'Faltaron' : 'Faltan'} ${INFORME.eur(falta(tramos[0].objetivo))} para llegar al objetivo`);
+      lineas.push(`→ ${pasado ? 'ese mes' : 'este mes'} sin comisión: cobra solo el fijo pactado`);
+    }
+    return lineas;
+  }
+
+  /* Lo mismo para la ficha. Devuelve '' si no tiene objetivos pactados. */
+  function objetivoHTML(t, c, ventasT, pasado = false) {
+    const lineas = objetivoLineas(t, c, ventasT, pasado);
+    if (!lineas.length) {
+      return `
+            <div class="stat-linea"><span>Comisión</span><span class="txt-sec">Sin comisiones pactadas</span></div>`;
+    }
+    const tramos = tramosDe(t);
+    const filas = [
+      `<div class="stat-linea"><span>Objetivo pactado</span><strong>${INFORME.eur(tramos[0].objetivo)}</strong></div>`,
+      `<div class="stat-linea"><span>Facturado en sus días <small class="txt-sec">(solo sus días; los de retraso, en proporción a sus horas)</small></span><strong>${INFORME.eur(ventasT)}</strong></div>`
+    ];
+    if (c.tramoActual) {
+      filas.push(`<div class="stat-linea"><span>${c.tramoActual.objetivo === tramos[0].objetivo ? '✅ Objetivo alcanzado' : `✅ Alcanzado el objetivo de ${INFORME.eur(c.tramoActual.objetivo)}`} → ${c.tramoActual.porcentaje} %</span><strong class="txt-ok">${INFORME.eur(c.comision)}</strong></div>`);
+      if (c.siguiente) {
+        filas.push(`<div class="per-siguiente">Para el siguiente objetivo (${INFORME.eur(c.siguiente.objetivo)} → ${c.siguiente.porcentaje} %) le ${pasado ? 'faltaron' : 'faltan'} <strong>${INFORME.eur(Math.round(Math.max(0, c.siguiente.objetivo - ventasT) * 100) / 100)}</strong></div>`);
+      }
+    } else {
+      filas.push(`<div class="stat-linea"><span>${pasado ? 'Faltaron' : 'Faltan'} para llegar al objetivo</span><strong class="txt-bad">${INFORME.eur(Math.round(Math.max(0, tramos[0].objetivo - ventasT) * 100) / 100)}</strong></div>`);
+      filas.push(`<div class="per-siguiente">${pasado ? 'Ese mes' : 'Este mes'} sin comisión: cobra solo el fijo pactado</div>`);
+    }
+    return `
+            <p class="per-seccion">🎯 Su objetivo</p>
+            ${filas.join('\n            ')}`;
+  }
+
   /* Las líneas de "la cuenta bien explicada" de un mes: de dónde sale cada
      número, paso a paso. Se usan igual en la ficha de un trabajador en activo
      y en la de uno ya liquidado, para que digan exactamente lo mismo. */
@@ -1999,9 +2057,19 @@
         });
         lineas.push(`   (fijo: ${INFORME.eur(t.sueldoMensual || 0)} ÷ ${t.diasMes || 26} × ${c.dias.length} = ${INFORME.eur(c.fijoBruto)} − ${INFORME.eur(c.descuentoTardes)} = ${INFORME.eur(c.fijo)})`);
       }
+      if (c) {
+        objetivoLineas(t, c, (m.ventasDet && m.ventasDet.total) || 0, true)
+          .forEach(l => lineas.push(`   ${l}`));
+      }
     });
     const correspondio = Math.round(deuda.meses.reduce((s, m) => s + m.devengado, 0) * 100) / 100;
     lineas.push(`Total que le correspondió: ${INFORME.eur(correspondio)}`);
+    const facturado = Math.round(deuda.meses.reduce(
+      (s, m) => s + ((m.ventasDet && m.ventasDet.total) || 0), 0) * 100) / 100;
+    if (facturado > 0) {
+      lineas.push(`Facturado en sus días, en total: ${INFORME.eur(facturado)}`);
+      lineas.push('(los objetivos son de cada mes y no se suman: cada mes empieza de cero)');
+    }
     lineas.push('');
     lineas.push('LO QUE SE LE PAGÓ');
     if (!pagosT.length) lineas.push('(no hay ninguna entrega apuntada)');
@@ -2092,6 +2160,7 @@
             <div class="stat-linea"><span>Asistencia</span><span>${c.dias.length} día${c.dias.length === 1 ? '' : 's'} trabajado${c.dias.length === 1 ? '' : 's'}${c.tardes.length ? ` · <strong class="txt-oro">⏰ ${c.tardes.length}</strong>` : ''}${c.faltas.length ? ` · <strong class="txt-bad">${c.faltas.length} falta${c.faltas.length === 1 ? '' : 's'}</strong>` : ''}</span></div>
             ${fijoLineasHTML(t, c)}
             ${retrasosHTML(t, c, m.ventasDet, false)}
+            ${objetivoHTML(t, c, m.ventasDet.total, true)}
             <p class="per-seccion">📖 De dónde sale cada número</p>
             ${explicacionLineas(t, c, m.ventasDet, true).map(l => `<div class="stat-linea"><span style="width:100%">${l}</span></div>`).join('')}
             <p class="per-seccion">💶 Lo que le diste ese mes</p>
@@ -2183,15 +2252,6 @@
       // 📖 La cuenta bien explicada, paso a paso (para enseñársela al empleado)
       const explicaHTML = explicacionPlegada(t, c, ventasDet);
 
-      const comisionTxt = c.tramoActual
-        ? `✅ Objetivo de ${INFORME.eur(c.tramoActual.objetivo)} alcanzado → ${c.tramoActual.porcentaje} % = <strong>${INFORME.eur(c.comision)}</strong>`
-        : (tramosDe(t).length ? 'Aún sin objetivo alcanzado: solo el fijo pactado' : 'Sin comisiones pactadas');
-      const notaVentas = tramosDe(t).length
-        ? `<p class="hint" style="margin:2px 0 0">Para su objetivo cuentan las ventas de sus días trabajados (los de retraso, en proporción a sus horas): <strong>${INFORME.eur(ventasT)}</strong> este mes.</p>` : '';
-      const siguienteTxt = c.siguiente
-        ? `<div class="per-siguiente">Faltan <strong>${INFORME.eur(Math.max(0, c.siguiente.objetivo - ventasT))}</strong> de ventas para el ${c.tramoActual ? 'siguiente' : 'primer'} objetivo (${INFORME.eur(c.siguiente.objetivo)} → ${c.siguiente.porcentaje} %)</div>`
-        : '';
-
       // Deuda TOTAL con él (este mes + lo arrastrado de meses anteriores)
       const deuda = await desgloseDeuda(t, pagosT, cierresDeMes);
       const arrastre = Math.round((deuda.total - c.pendiente) * 100) / 100;
@@ -2262,9 +2322,7 @@
             <div class="stat-linea"><span>Asistencia del mes</span><span>${c.dias.length} trabajado${c.dias.length === 1 ? '' : 's'}${c.tardes.length ? ` · <strong class="txt-oro">⏰ ${c.tardes.length} tarde${c.tardes.length === 1 ? '' : 's'}${c.horasTarde ? ` (${numH(c.horasTarde)} h)` : ''}</strong>` : ''}${c.faltas.length ? ` · <strong class="txt-bad">${c.faltas.length} falta${c.faltas.length === 1 ? '' : 's'}</strong>` : ''}</span></div>
             ${fijoLineasHTML(t, c)}
             ${retrasosHTML(t, c, ventasDet, true)}
-            <div class="stat-linea"><span>Comisión</span><span style="text-align:right">${comisionTxt}</span></div>
-            ${notaVentas}
-            ${siguienteTxt}
+            ${objetivoHTML(t, c, ventasT)}
             <div class="stat-linea per-pendiente ${deuda.total > 0 ? '' : 'ok'}"><span>${deuda.total >= 0 ? 'LE DEBES EN TOTAL' : 'TE DEBE (adelantado de más)'}</span><strong>${INFORME.eur(Math.abs(deuda.total))}</strong></div>
             <div class="stat-linea"><span>Entregado en total (todos los adelantos y pagas)</span><strong>${INFORME.eur(entregadoTotal)}</strong></div>
             <details class="ocr-details" style="margin:6px 0 0">

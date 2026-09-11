@@ -8,7 +8,7 @@
    - Recursos externos (OCR, fuentes, pdf.js): caché primero, porque están
      versionados en su URL y no cambian. */
 
-const CACHE = 'contable-v45';
+const CACHE = 'contable-v46';
 // Los recursos externos (lector OCR ~15 MB, fuentes, pdf.js) van en una caché
 // aparte que NO se borra al actualizar la app: se descargan una sola vez.
 const CACHE_EXTERNOS = 'contable-externos-v1';

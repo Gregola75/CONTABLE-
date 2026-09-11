@@ -698,6 +698,123 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
   chk('retrasos', 'Y ahí el desglose no va metido en otro plegable dentro del mes',
     await page.evaluate(c => !document.querySelector(c + ' details details'), cajaLiq));
 
+  // ══════════════ 6d. EL OBJETIVO EN LOS RESÚMENES ══════════════
+  // "Objetivo pactado, facturado tanto, y lo que faltó para llegar": tiene que
+  // salir igual en la ficha y en lo que se le envía, y sin datos del local.
+  console.log('\n═══ 6d. EL OBJETIVO EN LOS RESÚMENES ═══');
+  const conObjetivo = (totalDia) => {
+    const dias = []; const cierres = [];
+    for (let d = 1; d <= 20; d++) { dias.push(dd(d)); cierres.push({ fecha: dd(d), total: totalDia }); }
+    cierres.push({ fecha: dd(21), total: 500 });
+    return { dias, cierres };
+  };
+  const tramos2 = [{ objetivo: 13500, porcentaje: 1 }, { objetivo: 20000, porcentaje: 2 }];
+  const leerEnvio = async () => {
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, 'share', { value: undefined, configurable: true });
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { writeText: () => Promise.reject(new Error('sin portapapeles')) }, configurable: true
+      });
+    });
+    await page.click('#per-lista .per-compartir');
+    await page.waitForTimeout(700);
+    const txt = await page.textContent('#modal-body pre');
+    await page.click('#modal-cerrar');
+    await page.waitForTimeout(300);
+    return txt;
+  };
+
+  // --- Alcanza el primer tramo y tiene otro por encima ---
+  const alcanza = conObjetivo(700);
+  const txtOk = await sembrarTrabajador(
+    { nombre: 'ConObjetivo', dias: alcanza.dias, tardes: [{ fecha: dd(21), horas: 4 }], tramos: tramos2 },
+    alcanza.cierres);
+  chk('objetivos', 'La ficha dice el objetivo pactado (13.500,00)',
+    /Objetivo pactado/.test(txtOk) && txtOk.includes('13.500,00'), txtOk.slice(0, 400));
+  chk('objetivos', 'La ficha dice lo facturado en SUS días (14.233,33)',
+    /Facturado en sus días/.test(txtOk) && txtOk.includes('14.233,33'), txtOk.slice(0, 400));
+  chk('objetivos', 'Dice que alcanzó el objetivo con su comisión (1 % = 142,33)',
+    /✅ Objetivo alcanzado/.test(txtOk) && txtOk.includes('142,33'), txtOk.slice(0, 500));
+  chk('objetivos', 'Y lo que le faltó para el siguiente tramo (20.000,00 → 5766,67)',
+    txtOk.includes('20.000,00') && txtOk.includes('5766,67'), txtOk.slice(0, 600));
+
+  const envioOk = await leerEnvio();
+  chk('objetivos', 'El WhatsApp del mes lleva el objetivo, lo facturado y la comisión',
+    /SU OBJETIVO/.test(envioOk) && envioOk.includes('13.500,00') &&
+    envioOk.includes('14.233,33') && envioOk.includes('142,33'), envioOk.slice(0, 400));
+  chk('objetivos', 'El WhatsApp NO le enseña la facturación del local (14.500,00)',
+    !envioOk.includes('14.500,00'), envioOk.slice(0, 200));
+  chk('objetivos', 'El WhatsApp con el objetivo sigue sin nombrar el negocio ni la app',
+    !/wander|contable/i.test(envioOk));
+
+  // --- No llega al primer tramo ---
+  const noLlega = conObjetivo(500);
+  const txtNo = await sembrarTrabajador(
+    { nombre: 'SinLlegar', dias: noLlega.dias, tardes: [{ fecha: dd(21), horas: 4 }], tramos: tramos2 },
+    noLlega.cierres);
+  chk('objetivos', 'Si no llega, dice cuánto le faltó (10.233,33 de 13.500 → 3266,67)',
+    txtNo.includes('10.233,33') && txtNo.includes('3266,67') && /Faltan/.test(txtNo), txtNo.slice(0, 500));
+  chk('objetivos', 'Y que ese mes cobra solo el fijo',
+    /solo el fijo pactado/.test(txtNo), txtNo.slice(0, 500));
+  const envioNo = await leerEnvio();
+  chk('objetivos', 'El WhatsApp dice lo que le faltó para el objetivo',
+    /SU OBJETIVO/.test(envioNo) && envioNo.includes('3266,67') && /solo el fijo/.test(envioNo), envioNo.slice(0, 400));
+  chk('objetivos', 'Y tampoco ahí se le enseña la facturación del local (10.500,00)',
+    !envioNo.includes('10.500,00'), envioNo.slice(0, 200));
+
+  // --- Sin objetivos pactados: el bloque no sale ---
+  const txtSin = await sembrarTrabajador(
+    { nombre: 'SinTramos', dias: noLlega.dias, tardes: [], tramos: [] }, noLlega.cierres);
+  chk('objetivos', 'Un trabajador sin objetivos no enseña el bloque',
+    !/Objetivo pactado/.test(txtSin) && /Sin comisiones pactadas/.test(txtSin), txtSin.slice(0, 400));
+  const envioSin = await leerEnvio();
+  chk('objetivos', 'Y su WhatsApp tampoco habla de objetivos',
+    !/SU OBJETIVO/.test(envioSin), envioSin.slice(0, 300));
+
+  // --- Ficha de un liquidado: el mismo bloque, en pasado ---
+  await sembrarTrabajador(
+    { nombre: 'Liquidado', dias: alcanza.dias, tardes: [{ fecha: dd(21), horas: 4 }], tramos: tramos2 },
+    alcanza.cierres);
+  await page.evaluate(async () => {
+    const t = (await DB.perTodos())[0];
+    t.fin = '2026-09-21'; t.liquidado = '2026-09-22';
+    await DB.perGuardar(t);
+    document.querySelector('#per-mes').dispatchEvent(new Event('change'));
+    await new Promise(r => setTimeout(r, 1100));
+  });
+  const cajaObj = await page.evaluate(() =>
+    document.querySelector('#per-historial .per-toggle') ? '#per-historial' : '#per-lista');
+  const abiertaObj = await page.evaluate(c => {
+    const b = document.querySelector(c + ' .per-body');
+    return !!b && !b.classList.contains('hidden');
+  }, cajaObj);
+  if (!abiertaObj) { await page.click(cajaObj + ' .per-toggle'); await page.waitForTimeout(900); }
+  const txtLiqObj = (await page.textContent(cajaObj + ' .per-body')).replace(/\s+/g, ' ');
+  chk('objetivos', 'La ficha de un liquidado enseña su objetivo mes a mes',
+    /Objetivo pactado/.test(txtLiqObj) && txtLiqObj.includes('13.500,00') &&
+    txtLiqObj.includes('14.233,33'), txtLiqObj.slice(0, 500));
+  chk('objetivos', 'Y ahí se escribe en pasado (le faltaron)',
+    /le faltaron/.test(txtLiqObj) && !/le faltan /.test(txtLiqObj), txtLiqObj.slice(0, 600));
+
+  const envioEtapa = await page.evaluate(async (caja) => {
+    Object.defineProperty(navigator, 'share', { value: undefined, configurable: true });
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: () => Promise.reject(new Error('no')) }, configurable: true
+    });
+    document.querySelector(caja + ' .per-compartir').click();
+    await new Promise(r => setTimeout(r, 700));
+    const txt = document.querySelector('#modal-body pre').textContent;
+    document.querySelector('#modal-cerrar').click();
+    return txt;
+  }, cajaObj);
+  chk('objetivos', 'El WhatsApp de toda su etapa lleva el objetivo de cada mes',
+    /Objetivo pactado: 13\.500,00/.test(envioEtapa) && envioEtapa.includes('14.233,33'), envioEtapa.slice(0, 500));
+  chk('objetivos', 'Y el total facturado en sus días, avisando de que los objetivos son mensuales',
+    /Facturado en sus días, en total/.test(envioEtapa) && /cada mes empieza de cero/.test(envioEtapa), envioEtapa.slice(-400));
+  chk('objetivos', 'El resumen de toda la etapa sigue sin nombrar el negocio ni la app',
+    !/wander|contable/i.test(envioEtapa));
+  await page.waitForTimeout(300);
+
   // ══════════════ 7. LECTURA DE FACTURAS (OCR) ══════════════
   console.log('\n═══ 7. DETECCIÓN AUTOMÁTICA DE FACTURAS ═══');
   const ocr = await page.evaluate(() => {
