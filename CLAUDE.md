@@ -83,6 +83,16 @@ versión antigua.
   cobró ese día frente a un día normal y lo que se le quitó. Va también en el texto
   que se le envía por WhatsApp. Un día marcado como retraso pero con 0 horas dice
   que se le pagó entero, para que no parezca un olvido.
+- **La regla se le explica con palabras al propio trabajador**, no solo el resultado:
+  "se cobra por día trabajado, la jornada es de X h y el día sale a Y €; el día que se
+  llega tarde se paga solo la parte del día que se estuvo". Y en cada día se enseña la
+  división hecha (`horas ÷ jornada × precio del día = descuento`). La división se
+  escribe sobre el **descuento**, no sobre lo cobrado, porque el descuento es lo que la
+  app calcula de verdad y así las dos líneas cuadran al céntimo si las comprueba a mano.
+- Existe el **total de toda su etapa**: cuántos días llegó tarde y cuánto se le descontó
+  en total. En la ficha de un liquidado sale **arriba, junto al cuadre**, sin tener que
+  desplegar ningún mes, y en el texto de toda su etapa va en un apartado propio con
+  todos los días. Antes la ficha se leía como "esto era, se te dio, ya está pagado".
 - **Comisiones por objetivos**: tramos de ventas; se aplica el % del tramo más
   alto alcanzado. Si no llega al primer objetivo, cobra **solo el fijo**.
   Los objetivos son la cifra pactada y no se prorratean nunca.
@@ -130,7 +140,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 200 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 211 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.
 

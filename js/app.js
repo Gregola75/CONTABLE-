@@ -1788,11 +1788,19 @@
     const retrasos = detalleRetrasos(t, c, ventasDet).filter(r => r.horas > 0);
     if (retrasos.length) {
       lineas.push('');
-      lineas.push('DÓNDE SE LE DESCONTÓ POR LLEGAR TARDE');
+      lineas.push('POR QUÉ SE LE DESCONTÓ DINERO ALGUNOS DÍAS');
+      reglaRetrasoLineas(t).forEach(l => lineas.push(l));
       retrasos.forEach(r => {
-        lineas.push(`${fmtFecha(r.fecha)}: llegó ${numH(r.horas)} h tarde, estuvo ${numH(r.horasTrabajadas)} h de ${numH(r.jornada)} h`);
-        lineas.push(`   ese día cobró ${INFORME.eur(r.cobra)} en vez de ${INFORME.eur(r.precioDia)}  →  −${INFORME.eur(r.descuento)}`);
+        lineas.push('');
+        lineas.push(`${fmtFecha(r.fecha)} — llegó ${numH(r.horas)} h tarde`);
+        lineas.push(r.horasTrabajadas > 0
+          ? `   Estuvo ${numH(r.horasTrabajadas)} h de las ${numH(r.jornada)} h de su jornada.`
+          : `   No llegó a hacer ninguna hora de las ${numH(r.jornada)} h de su jornada.`);
+        lineas.push(`   Se le descuenta: ${numH(r.horas)} h ÷ ${numH(r.jornada)} h × ${INFORME.eur(r.precioDia)} = ${INFORME.eur(r.descuento)}`);
+        lineas.push(`   Ese día cobró ${INFORME.eur(r.cobra)} en vez de ${INFORME.eur(r.precioDia)}  →  −${INFORME.eur(r.descuento)}`);
       });
+      lineas.push('');
+      lineas.push(`Llegó tarde ${retrasos.length} día${retrasos.length === 1 ? '' : 's'} este mes.`);
       lineas.push(`Total descontado por llegar tarde: −${INFORME.eur(c.descuentoTardes)}`);
     }
     lineas.push('');
@@ -1826,6 +1834,37 @@
 
   /* Las horas, escritas como en español: 2,5 h y no 2.5 h */
   const numH = (h) => Number(h || 0).toLocaleString('es-ES', { maximumFractionDigits: 2 });
+
+  /* La regla del retraso explicada con palabras, para que la entienda el propio
+     trabajador. Hasta ahora solo estaba escrita en el formulario donde se le da de
+     alta, o sea donde él no la ve nunca. */
+  function reglaRetrasoLineas(t) {
+    const jornada = numH(t.horasJornada || 7.5);
+    return [
+      `Se cobra por día trabajado. La jornada es de ${jornada} h y el día sale a ${INFORME.eur(precioDeUnDia(t))} (${INFORME.eur(t.sueldoMensual || 0)} ÷ ${t.diasMes || 26} días).`,
+      'El día que se llega tarde se paga solo la parte del día que se estuvo, no el día entero.'
+    ];
+  }
+
+  /* Los retrasos de TODA su etapa: cuántos días y cuánto se le descontó en total.
+     Suma los descuentos que ya se usaron para el fijo de cada mes; no recalcula nada. */
+  function retrasosDeLaEtapa(t, deuda) {
+    const filas = [];
+    let descuento = 0, horas = 0;
+    deuda.meses.forEach(m => {
+      if (!m.calc) return;
+      descuento += m.calc.descuentoTardes || 0;
+      horas += m.calc.horasTarde || 0;
+      detalleRetrasos(t, m.calc, m.ventasDet).forEach(r => filas.push(r));
+    });
+    const conHoras = filas.filter(r => r.horas > 0);
+    return {
+      dias: conHoras.length,
+      horas: Math.round(horas * 10) / 10,
+      descuento: Math.round(descuento * 100) / 100,
+      filas: conHoras.sort((a, b) => (a.fecha || '').localeCompare(b.fecha || ''))
+    };
+  }
 
   /* Lo que se le descontó CADA día que llegó tarde, con la misma cuenta que usa
      calcularMes, para poder enseñárselo día por día y que cuadre al céntimo.
@@ -1880,6 +1919,7 @@
       const estuvo = r.horasTrabajadas > 0
         ? `Estuvo ${numH(r.horasTrabajadas)} h de las ${numH(r.jornada)} h de su jornada.`
         : `No llegó a hacer ninguna hora de las ${numH(r.jornada)} h de su jornada.`;
+      const division = `Se le descuenta: ${numH(r.horas)} h ÷ ${numH(r.jornada)} h × ${INFORME.eur(r.precioDia)} = ${INFORME.eur(r.descuento)}`;
       const cobro = r.cobra > 0
         ? `<strong>Ese día cobró ${INFORME.eur(r.cobra)}</strong> en vez de ${INFORME.eur(r.precioDia)}.`
         : `<strong>Ese día no cobró nada</strong>: ${INFORME.eur(0)} en vez de ${INFORME.eur(r.precioDia)}.`;
@@ -1890,6 +1930,7 @@
             <div class="per-pago">
               <span style="min-width:0">⏰ ${fmtFecha(r.fecha)} — llegó ${numH(r.horas)} h tarde<br>
                 <small class="txt-sec">${estuvo}</small><br>
+                <small class="txt-sec">${division}</small><br>
                 ${cobro}${ventaTxt}</span>
               <strong class="txt-bad" style="white-space:nowrap">−${INFORME.eur(r.descuento)}</strong>
             </div>`;
@@ -1915,16 +1956,20 @@
       ? `Dónde se le descontó por llegar tarde`
       : `Días que llegó tarde`;
 
+    const regla = huboDescuento
+      ? `<p class="hint" style="margin:0 0 8px">${reglaRetrasoLineas(t).join(' ')}</p>`
+      : '';
+
     if (plegado) {
       return `
             <details class="ocr-details" style="margin:6px 0 0">
               <summary>⏰ ${titulo}${huboDescuento ? ` (−${INFORME.eur(c.descuentoTardes)})` : ' (sin descuento)'}</summary>
-              ${cuerpo}${cierre}
+              ${regla}${cuerpo}${cierre}
             </details>`;
     }
     return `
             <p class="per-seccion">⏰ ${titulo}</p>
-            ${cuerpo}${cierre}`;
+            ${regla}${cuerpo}${cierre}`;
   }
 
   /* Las líneas del fijo, que suman exactamente. Se escribe "sueldo ÷ días del mes
@@ -2052,10 +2097,7 @@
       const detalle = c ? `fijo ${INFORME.eur(c.fijo)} + comisión ${INFORME.eur(c.comision)} = ` : '';
       lineas.push(`${mesEnLetras(m.mes + '-01')}: ${dias}${detalle}${INFORME.eur(m.devengado)}`);
       if (c && c.descuentoTardes > 0) {
-        detalleRetrasos(t, c, m.ventasDet).filter(r => r.horas > 0).forEach(r => {
-          lineas.push(`   ⏰ ${fmtFecha(r.fecha)}: llegó ${numH(r.horas)} h tarde → cobró ${INFORME.eur(r.cobra)} en vez de ${INFORME.eur(r.precioDia)} (−${INFORME.eur(r.descuento)})`);
-        });
-        lineas.push(`   (fijo: ${INFORME.eur(t.sueldoMensual || 0)} ÷ ${t.diasMes || 26} × ${c.dias.length} = ${INFORME.eur(c.fijoBruto)} − ${INFORME.eur(c.descuentoTardes)} = ${INFORME.eur(c.fijo)})`);
+        lineas.push(`   (fijo: ${INFORME.eur(t.sueldoMensual || 0)} ÷ ${t.diasMes || 26} × ${c.dias.length} = ${INFORME.eur(c.fijoBruto)} − ${INFORME.eur(c.descuentoTardes)} = ${INFORME.eur(c.fijo)}, por los retrasos de abajo)`);
       }
       if (c) {
         objetivoLineas(t, c, (m.ventasDet && m.ventasDet.total) || 0, true)
@@ -2069,6 +2111,24 @@
     if (facturado > 0) {
       lineas.push(`Facturado en sus días, en total: ${INFORME.eur(facturado)}`);
       lineas.push('(los objetivos son de cada mes y no se suman: cada mes empieza de cero)');
+    }
+    const tarde = retrasosDeLaEtapa(t, deuda);
+    if (tarde.dias) {
+      lineas.push('');
+      lineas.push('POR QUÉ SE LE DESCONTÓ DINERO ALGUNOS DÍAS');
+      reglaRetrasoLineas(t).forEach(l => lineas.push(l));
+      tarde.filas.forEach(r => {
+        lineas.push('');
+        lineas.push(`${fmtFecha(r.fecha)} — llegó ${numH(r.horas)} h tarde`);
+        lineas.push(r.horasTrabajadas > 0
+          ? `   Estuvo ${numH(r.horasTrabajadas)} h de las ${numH(r.jornada)} h de su jornada.`
+          : `   No llegó a hacer ninguna hora de las ${numH(r.jornada)} h de su jornada.`);
+        lineas.push(`   Se le descuenta: ${numH(r.horas)} h ÷ ${numH(r.jornada)} h × ${INFORME.eur(r.precioDia)} = ${INFORME.eur(r.descuento)}`);
+        lineas.push(`   Ese día cobró ${INFORME.eur(r.cobra)} en vez de ${INFORME.eur(r.precioDia)}  →  −${INFORME.eur(r.descuento)}`);
+      });
+      lineas.push('');
+      lineas.push(`Llegó tarde ${tarde.dias} día${tarde.dias === 1 ? '' : 's'} en toda su etapa.`);
+      lineas.push(`Total descontado por llegar tarde: ${INFORME.eur(tarde.descuento)}`);
     }
     lineas.push('');
     lineas.push('LO QUE SE LE PAGÓ');
@@ -2119,6 +2179,7 @@
     }
 
     const deuda = await desgloseDeuda(t, pagosT, cierresDeMes, true);
+    const tarde = retrasosDeLaEtapa(t, deuda);
     const correspondio = r2(deuda.meses.reduce((s, m) => s + m.devengado, 0));
     const diferencia = r2(correspondio - totalPagado);
 
@@ -2185,6 +2246,21 @@
             <div class="stat-linea"><span>Le pagaste en total (todas las entregas)</span><strong>${INFORME.eur(totalPagado)}</strong></div>
             <div class="stat-linea"><span>Diferencia</span><strong class="${cuadreClase}">${cuadreTxt}</strong></div>
             ${avisoSinFecha}
+            ${tarde.dias ? `
+            <div class="stat-linea"><span>⏰ Llegó tarde ${tarde.dias} día${tarde.dias === 1 ? '' : 's'} en toda su etapa <small class="txt-sec">(${numH(tarde.horas)} h)</small></span><strong class="txt-bad">se le descontaron ${INFORME.eur(tarde.descuento)}</strong></div>
+            <details class="ocr-details" style="margin:6px 0 0">
+              <summary>⏰ Por qué se le descontó dinero algunos días</summary>
+              <p class="hint" style="margin:0 0 8px">${reglaRetrasoLineas(t).join(' ')}</p>
+              ${tarde.filas.map(r => `
+              <div class="per-pago">
+                <span style="min-width:0">⏰ ${fmtFecha(r.fecha)} — llegó ${numH(r.horas)} h tarde<br>
+                  <small class="txt-sec">${r.horasTrabajadas > 0 ? `Estuvo ${numH(r.horasTrabajadas)} h de las ${numH(r.jornada)} h de su jornada.` : `No llegó a hacer ninguna hora de las ${numH(r.jornada)} h de su jornada.`}</small><br>
+                  <small class="txt-sec">Se le descuenta: ${numH(r.horas)} h ÷ ${numH(r.jornada)} h × ${INFORME.eur(r.precioDia)} = ${INFORME.eur(r.descuento)}</small><br>
+                  ${r.cobra > 0 ? `<strong>Ese día cobró ${INFORME.eur(r.cobra)}</strong> en vez de ${INFORME.eur(r.precioDia)}.` : `<strong>Ese día no cobró nada</strong>: ${INFORME.eur(0)} en vez de ${INFORME.eur(r.precioDia)}.`}</span>
+                <strong class="txt-bad" style="white-space:nowrap">−${INFORME.eur(r.descuento)}</strong>
+              </div>`).join('')}
+              <div class="stat-linea"><span><strong>TOTAL DESCONTADO POR LLEGAR TARDE</strong></span><strong class="txt-bad">−${INFORME.eur(tarde.descuento)}</strong></div>
+            </details>` : ''}
 
             <p class="per-seccion">💶 Todo lo que le pagaste (${pagosT.length} entrega${pagosT.length === 1 ? '' : 's'})</p>
             ${pagosHTML}

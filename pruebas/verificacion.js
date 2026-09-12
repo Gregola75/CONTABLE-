@@ -666,8 +666,8 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
   await page.click('#per-lista .per-compartir');
   await page.waitForTimeout(700);
   const envioMes = await page.textContent('#modal-body pre');
-  chk('retrasos', 'El resumen de WhatsApp dice dónde se le descontó por llegar tarde',
-    /DÓNDE SE LE DESCONTÓ POR LLEGAR TARDE/.test(envioMes) && envioMes.includes('18,46'), envioMes.slice(0, 300));
+  chk('retrasos', 'El resumen de WhatsApp explica por qué se le descontó por llegar tarde',
+    /POR QUÉ SE LE DESCONTÓ DINERO ALGUNOS DÍAS/.test(envioMes) && envioMes.includes('18,46'), envioMes.slice(0, 300));
   chk('retrasos', 'El resumen dice lo que cobró ese día en vez de un día normal',
     /cobró 16,16 € en vez de 34,62 €/.test(envioMes), envioMes.slice(0, 400));
   chk('retrasos', 'El resumen enseña de dónde sale el fijo (726,92 − 18,46 = 708,46)',
@@ -697,6 +697,106 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
     /Dónde se le descontó por llegar tarde/i.test(txtLiqR) && txtLiqR.includes('18,46'), txtLiqR.slice(0, 500));
   chk('retrasos', 'Y ahí el desglose no va metido en otro plegable dentro del mes',
     await page.evaluate(c => !document.querySelector(c + ' details details'), cajaLiq));
+
+  // ══════════════ 6e. POR QUÉ SE LE DESCONTÓ (explicado) ══════════════
+  // No basta con enseñar el resultado: el trabajador tiene que entender la regla.
+  console.log('\n═══ 6e. POR QUÉ SE LE DESCONTÓ (la regla explicada) ═══');
+
+  // Dos meses con un retraso cada uno, y ya liquidado
+  await page.evaluate(async () => {
+    for (const t of await DB.perTodos()) await DB.perBorrar(t.id);
+    for (const g of await DB.pagoTodos()) await DB.pagoBorrar(g.id);
+    for (const r of await DB.todos()) await DB.borrar(r.id);
+    const dias = [];
+    for (let d = 1; d <= 9; d++) dias.push(`2026-08-${String(d).padStart(2, '0')}`);
+    for (let d = 1; d <= 20; d++) {
+      const f = `2026-09-${String(d).padStart(2, '0')}`;
+      await DB.guardar({ tipo: 'cierre', fecha: f, total: 700, proveedor: '', creado: new Date().toISOString() });
+      dias.push(f);
+    }
+    await DB.guardar({ tipo: 'cierre', fecha: '2026-09-21', total: 500, proveedor: '', creado: new Date().toISOString() });
+    await DB.perGuardar({
+      nombre: 'DosMeses', sueldoMensual: 900, diasMes: 26, horasJornada: 7.5,
+      tramos: [{ objetivo: 13500, porcentaje: 1 }], dias,
+      tardes: [{ fecha: '2026-08-10', horas: 2 }, { fecha: '2026-09-21', horas: 4 }],
+      faltas: [], notasDias: [], inicio: '2026-08-01', fin: '2026-09-21', liquidado: '2026-09-22',
+      creado: new Date().toISOString()
+    });
+  });
+  await page.fill('#per-mes', '2026-09');
+  await page.dispatchEvent('#per-mes', 'change');
+  await page.waitForTimeout(1200);
+  const cajaExp = await page.evaluate(() =>
+    document.querySelector('#per-historial .per-toggle') ? '#per-historial' : '#per-lista');
+
+  // La línea de arriba tiene que verse SIN desplegar ningún mes
+  const abiertaExp = await page.evaluate(c => {
+    const b = document.querySelector(c + ' .per-body');
+    return !!b && !b.classList.contains('hidden');
+  }, cajaExp);
+  if (!abiertaExp) { await page.click(cajaExp + ' .per-toggle'); await page.waitForTimeout(900); }
+  const arriba = await page.evaluate(c => {
+    const out = [];
+    document.querySelectorAll(c + ' .per-body > .stat-linea').forEach(el => out.push(el.textContent.replace(/\s+/g, ' ')));
+    return out.join(' | ');
+  }, cajaExp);
+  chk('retrasos', 'La ficha dice ARRIBA cuántos días llegó tarde en toda su etapa',
+    /Llegó tarde 2 días en toda su etapa/.test(arriba), arriba.slice(0, 300));
+  chk('retrasos', 'Y el total descontado de la etapa es la suma de los dos meses (9,23 + 18,46 = 27,69)',
+    arriba.includes('27,69'), arriba.slice(0, 300));
+
+  const txtExp = (await page.textContent(cajaExp + ' .per-body')).replace(/\s+/g, ' ');
+  chk('retrasos', 'La ficha explica la regla con palabras (jornada y parte del día)',
+    /Se cobra por día trabajado/.test(txtExp) && /solo la parte del día que se estuvo/.test(txtExp),
+    txtExp.slice(0, 400));
+  chk('retrasos', 'La ficha enseña la división hecha (4 h ÷ 7,5 h × 34,62 € = 18,46 €)',
+    /4 h ÷ 7,5 h × 34,62 € = 18,46 €/.test(txtExp), txtExp.slice(0, 600));
+
+  // El texto que se le envía de toda su etapa
+  const envioExp = await page.evaluate(async (c) => {
+    Object.defineProperty(navigator, 'share', { value: undefined, configurable: true });
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: () => Promise.reject(new Error('no')) }, configurable: true
+    });
+    document.querySelector(c + ' .per-compartir').click();
+    await new Promise(r => setTimeout(r, 700));
+    const txt = document.querySelector('#modal-body pre').textContent;
+    document.querySelector('#modal-cerrar').click();
+    return txt;
+  }, cajaExp);
+  chk('retrasos', 'El texto de toda su etapa explica POR QUÉ se le descontó',
+    /POR QUÉ SE LE DESCONTÓ DINERO ALGUNOS DÍAS/.test(envioExp) &&
+    /Se cobra por día trabajado/.test(envioExp), envioExp.slice(0, 400));
+  chk('retrasos', 'Lleva la división de cada uno de los dos días',
+    /2 h ÷ 7,5 h × 34,62 € = 9,23 €/.test(envioExp) &&
+    /4 h ÷ 7,5 h × 34,62 € = 18,46 €/.test(envioExp), envioExp.slice(-700));
+  chk('retrasos', 'Dice lo que cobró cada uno de esos días frente a un día normal',
+    /cobró 25,39 € en vez de 34,62 €/.test(envioExp) &&
+    /cobró 16,16 € en vez de 34,62 €/.test(envioExp), envioExp.slice(-700));
+  chk('retrasos', 'Y cierra con los días y el total de toda su etapa (27,69)',
+    /Llegó tarde 2 días en toda su etapa/.test(envioExp) && envioExp.includes('27,69'), envioExp.slice(-400));
+  chk('retrasos', 'El detalle ya no se repite dentro de cada mes',
+    (envioExp.match(/Estuvo 3,5 h/g) || []).length === 1, envioExp.slice(0, 600));
+  chk('retrasos', 'El texto explicado sigue sin nombrar el negocio ni la app',
+    !/wander|contable/i.test(envioExp));
+
+  // Sin retrasos: ni la línea de arriba ni la sección
+  await page.evaluate(async () => {
+    const t = (await DB.perTodos())[0];
+    t.tardes = [];
+    await DB.perGuardar(t);
+    document.querySelector('#per-mes').dispatchEvent(new Event('change'));
+    await new Promise(r => setTimeout(r, 1200));
+  });
+  const abiertaSin = await page.evaluate(c => {
+    const b = document.querySelector(c + ' .per-body');
+    return !!b && !b.classList.contains('hidden');
+  }, cajaExp);
+  if (!abiertaSin) { await page.click(cajaExp + ' .per-toggle'); await page.waitForTimeout(900); }
+  const txtSinTarde = (await page.textContent(cajaExp + ' .per-body')).replace(/\s+/g, ' ');
+  chk('retrasos', 'Sin retrasos no aparece la línea de arriba ni la explicación',
+    !/en toda su etapa/.test(txtSinTarde) && !/Se cobra por día trabajado/.test(txtSinTarde),
+    txtSinTarde.slice(0, 300));
 
   // ══════════════ 6d. EL OBJETIVO EN LOS RESÚMENES ══════════════
   // "Objetivo pactado, facturado tanto, y lo que faltó para llegar": tiene que
