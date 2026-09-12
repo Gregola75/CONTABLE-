@@ -1413,10 +1413,16 @@
   /* Cálculo del mes de un trabajador: fijo por días + comisión por tramo */
   function calcularMes(t, ventas, pagosMes, mes) {
     // Trabajó = días normales + días que llegó tarde (vino igualmente)
+    // Las cuentas llegan hasta el día que trabajó: nada anterior a su alta ni
+    // posterior a su baja se paga, aunque se quedara marcado en el calendario.
+    const dentroDelPeriodo = (d) => (!t.inicio || d >= t.inicio) && (!t.fin || d <= t.fin);
+    const delMes = (d) => d.startsWith(mes);
     const dias = [...new Set([...(t.dias || []), ...fechasTardes(t)])]
-      .filter(d => d.startsWith(mes)).sort();
-    const tardes = tardesDe(t).filter(x => x.fecha.startsWith(mes));
-    const faltas = (t.faltas || []).filter(d => d.startsWith(mes));
+      .filter(d => delMes(d) && dentroDelPeriodo(d)).sort();
+    const tardes = tardesDe(t).filter(x => delMes(x.fecha) && dentroDelPeriodo(x.fecha));
+    const faltas = (t.faltas || []).filter(d => delMes(d) && dentroDelPeriodo(d));
+    const fueraDePeriodo = [...new Set([...(t.dias || []), ...fechasTardes(t), ...(t.faltas || [])])]
+      .filter(d => delMes(d) && !dentroDelPeriodo(d)).length;
     const fijoDia = (t.sueldoMensual || 0) / (t.diasMes || 26);
     const jornada = t.horasJornada || 7.5;
     const horasTarde = Math.round(tardes.reduce((s, x) => s + (x.horas || 0), 0) * 10) / 10;
@@ -1443,7 +1449,7 @@
     const entregado = Math.round(pagosMes.reduce((s, p) => s + (p.importe || 0), 0) * 100) / 100;
     const devengado = Math.round((fijo + comision) * 100) / 100;
     return {
-      dias, tardes, faltas, horasTarde, descuentoTardes, descuentoTopado, fijoBruto,
+      dias, tardes, faltas, fueraDePeriodo, horasTarde, descuentoTardes, descuentoTopado, fijoBruto,
       fijo, comision, tramoActual, siguiente,
       devengado, entregado,
       pendiente: Math.round((devengado - entregado) * 100) / 100
@@ -1528,8 +1534,9 @@
     const [a, m] = mes.split('-').map(Number);
     const diasDelMes = new Date(a, m, 0).getDate();
     const jornada = t.horasJornada || 7.5;
-    const normales = new Set((t.dias || []).filter(d => d.startsWith(mes)));
-    const tardesMes = tardesDe(t).filter(x => x.fecha.startsWith(mes));
+    const enPeriodo = (d) => (!t.inicio || d >= t.inicio) && (!t.fin || d <= t.fin);
+    const normales = new Set((t.dias || []).filter(d => d.startsWith(mes) && enPeriodo(d)));
+    const tardesMes = tardesDe(t).filter(x => x.fecha.startsWith(mes) && enPeriodo(x.fecha));
     const tardePorFecha = new Map(tardesMes.map(x => [x.fecha, x.horas || 0]));
 
     const ventasDia = new Map();
@@ -1587,7 +1594,12 @@
       const calc = calcularMes(t, ventasDet.total, pagosMes, mes);
       const devengado = calc.devengado;
       const entregado = calc.entregado;
-      if (devengado || entregado) {
+      // El bucle sigue llegando hasta el final (si el finiquito se paga el mes
+      // siguiente, ese pago tiene que descontarse igual), pero la lista que se
+      // enseña se cierra en el mes de la baja: las cuentas son hasta el día que
+      // trabajó, no hasta el día que se le pagó.
+      const trasLaBaja = t.fin && mes > t.fin.slice(0, 7);
+      if ((devengado || entregado) && !trasLaBaja) {
         const fila = { mes, devengado, entregado, saldo: Math.round((devengado - entregado) * 100) / 100 };
         if (conDetalle) { fila.calc = calc; fila.ventasDet = ventasDet; fila.pagos = pagosMes; }
         meses.push(fila);
@@ -1783,7 +1795,7 @@
     lineas.push(`Resumen de ${t.nombre} — ${mesEnLetras(mes + '-01')}`);
     lineas.push('');
     lineas.push(`Días trabajados: ${c.dias.length}` +
-      (c.tardes.length ? ` (⏰ ${c.tardes.length} con retraso${c.horasTarde ? `, ${c.horasTarde} h` : ''})` : '') +
+      (c.tardes.length ? ` (⏰ ${c.tardes.length} con retraso${c.horasTarde ? `, ${numH(c.horasTarde)} h` : ''})` : '') +
       (c.faltas.length ? ` · Faltas: ${c.faltas.length}` : ''));
     const retrasos = detalleRetrasos(t, c, ventasDet).filter(r => r.horas > 0);
     if (retrasos.length) {
@@ -1803,6 +1815,12 @@
       lineas.push(`Llegó tarde ${retrasos.length} día${retrasos.length === 1 ? '' : 's'} este mes.`);
       lineas.push(`Total descontado por llegar tarde: −${INFORME.eur(c.descuentoTardes)}`);
     }
+    const faltasTxt = faltasLineas(t, c);
+    if (faltasTxt.length) {
+      lineas.push('');
+      lineas.push('DÍAS QUE NO VINO');
+      faltasTxt.forEach(l => lineas.push(l));
+    }
     lineas.push('');
     lineas.push(c.descuentoTardes > 0
       ? `Fijo: ${INFORME.eur(t.sueldoMensual || 0)} ÷ ${t.diasMes || 26} × ${c.dias.length} días = ${INFORME.eur(c.fijoBruto)} − ${INFORME.eur(c.descuentoTardes)} = ${INFORME.eur(c.fijo)}`
@@ -1814,11 +1832,13 @@
       objetivo.forEach(l => lineas.push(l));
       lineas.push('');
       lineas.push(`Comisión: ${INFORME.eur(c.comision)}`);
+      lineas.push(`Fijo ${INFORME.eur(c.fijo)} + comisión ${INFORME.eur(c.comision)} = ${INFORME.eur(c.devengado)}`);
     }
     lineas.push(`Corresponde este mes: ${INFORME.eur(c.devengado)}`);
     const pagosMes = pagosT.filter(p => (p.fecha || '').startsWith(mes));
     lineas.push(`Recibido este mes: ${INFORME.eur(c.entregado)}`);
     pagosMes.forEach(p => lineas.push(`  · ${fmtFecha(p.fecha)}: ${INFORME.eur(p.importe)}${p.notas ? ` (${p.notas})` : ''}`));
+    lineas.push(`${INFORME.eur(c.devengado)} − ${INFORME.eur(c.entregado)} = ${INFORME.eur(c.pendiente)} de este mes`);
     const arrastre = Math.round((deuda.total - c.pendiente) * 100) / 100;
     if (Math.abs(arrastre) >= 0.01) {
       lineas.push(arrastre > 0
@@ -1972,6 +1992,33 @@
             ${regla}${cuerpo}${cierre}`;
   }
 
+  /* Los días que no vino. No restan dinero: simplemente no entran en los días
+     trabajados, y por eso el mes sale más bajo. Hay que decirlo, porque es la
+     primera pregunta que hace quien ve "21 días" y esperaba 22. */
+  function faltasLineas(t, c) {
+    if (!c.faltas.length) return [];
+    return [
+      `Días que no vino (${c.faltas.length}): ${c.faltas.map(fmtFecha).join(' · ')}`,
+      'Esos días no se le pagan: no entran en los días trabajados. No se le quita nada de más, simplemente ese día no se cobra.'
+    ];
+  }
+
+  function faltasHTML(t, c) {
+    if (!c.faltas.length) return '';
+    return `
+            <p class="per-seccion">🚫 Días que no vino (${c.faltas.length})</p>
+            <div class="per-pago"><span>${c.faltas.map(fmtFecha).join(' · ')}</span></div>
+            <p class="hint" style="margin:6px 0 0">Esos días no se le pagan: no entran en los días trabajados. No se le quita nada de más, simplemente ese día no se cobra.</p>`;
+  }
+
+  /* Los días que no vino en TODA su etapa, para el resumen del liquidado. */
+  function faltasDeLaEtapa(t, deuda) {
+    const fechas = [];
+    deuda.meses.forEach(m => { if (m.calc) m.calc.faltas.forEach(f => fechas.push(f)); });
+    fechas.sort();
+    return { dias: fechas.length, fechas };
+  }
+
   /* Las líneas del fijo, que suman exactamente. Se escribe "sueldo ÷ días del mes
      × días trabajados" y no "precio del día × días", porque lo segundo no cuadra si
      lo multiplica a mano: 900 ÷ 26 son 34,615…, no 34,62 justos. */
@@ -2091,6 +2138,7 @@
     }
     lineas.push('');
     lineas.push('LO QUE LE CORRESPONDIÓ, MES A MES');
+    if (t.fin) lineas.push(`(cuentas hasta el ${fmtFecha(t.fin)}, su último día)`);
     deuda.meses.forEach(m => {
       const c = m.calc;
       const dias = c ? `${c.dias.length} día${c.dias.length === 1 ? '' : 's'} · ` : '';
@@ -2129,6 +2177,13 @@
       lineas.push('');
       lineas.push(`Llegó tarde ${tarde.dias} día${tarde.dias === 1 ? '' : 's'} en toda su etapa.`);
       lineas.push(`Total descontado por llegar tarde: ${INFORME.eur(tarde.descuento)}`);
+    }
+    const faltasEtapa = faltasDeLaEtapa(t, deuda);
+    if (faltasEtapa.dias) {
+      lineas.push('');
+      lineas.push('DÍAS QUE NO VINO');
+      lineas.push(`No vino ${faltasEtapa.dias} día${faltasEtapa.dias === 1 ? '' : 's'}: ${faltasEtapa.fechas.map(fmtFecha).join(' · ')}`);
+      lineas.push('Esos días no se le pagan: no entran en los días trabajados. No se le quita nada de más, simplemente ese día no se cobra.');
     }
     lineas.push('');
     lineas.push('LO QUE SE LE PAGÓ');
@@ -2185,10 +2240,9 @@
 
     // Una entrega sin fecha suma en el total pero no cae en ningún mes: hay que
     // decirlo, en vez de enseñar un cuadre que no cuadra sin explicar por qué.
-    const repartido = r2(deuda.meses.reduce((s, m) => s + m.entregado, 0));
     const sinFecha = pagosT.filter(p => !p.fecha).length;
-    const avisoSinFecha = (sinFecha || Math.abs(repartido - totalPagado) >= 0.01)
-      ? `<p class="hint txt-bad" style="margin:6px 0 0">⚠️ Hay ${sinFecha || 1} entrega(s) sin fecha, por eso el reparto mes a mes no suma lo mismo que el total. Ponles fecha para que la cuenta cuadre.</p>`
+    const avisoSinFecha = sinFecha
+      ? `<p class="hint txt-bad" style="margin:6px 0 0">⚠️ Hay ${sinFecha} entrega(s) sin fecha, por eso el reparto mes a mes no suma lo mismo que el total. Ponles fecha para que la cuenta cuadre.</p>`
       : '';
 
     let cuadreTxt, cuadreClase;
@@ -2221,6 +2275,7 @@
             <div class="stat-linea"><span>Asistencia</span><span>${c.dias.length} día${c.dias.length === 1 ? '' : 's'} trabajado${c.dias.length === 1 ? '' : 's'}${c.tardes.length ? ` · <strong class="txt-oro">⏰ ${c.tardes.length}</strong>` : ''}${c.faltas.length ? ` · <strong class="txt-bad">${c.faltas.length} falta${c.faltas.length === 1 ? '' : 's'}</strong>` : ''}</span></div>
             ${fijoLineasHTML(t, c)}
             ${retrasosHTML(t, c, m.ventasDet, false)}
+            ${faltasHTML(t, c)}
             ${objetivoHTML(t, c, m.ventasDet.total, true)}
             <p class="per-seccion">📖 De dónde sale cada número</p>
             ${explicacionLineas(t, c, m.ventasDet, true).map(l => `<div class="stat-linea"><span style="width:100%">${l}</span></div>`).join('')}
@@ -2267,6 +2322,7 @@
             <div class="stat-linea"><span><strong>TOTAL PAGADO</strong></span><strong>${INFORME.eur(totalPagado)}</strong></div>
 
             <p class="per-seccion">📅 Mes a mes, con la cuenta explicada</p>
+            ${t.fin ? `<p class="hint" style="margin:0 0 8px">Las cuentas llegan hasta el ${fmtFecha(t.fin)}, su último día. Si el finiquito se pagó después, aparece más arriba, en lo que le pagaste.</p>` : ''}
             ${mesesHTML || '<p class="vacio" style="padding:6px">No hay ningún mes con movimiento.</p>'}
 
             <div class="form-actions">
@@ -2395,9 +2451,11 @@
             ${bajaHTML}
             <p class="per-seccion">📅 Días del mes</p>
             ${calendarioHTML(t, mes)}
+            ${c.fueraDePeriodo ? `<p class="hint txt-bad" style="margin:6px 0 0">⚠️ Hay ${c.fueraDePeriodo} día(s) marcados fuera del periodo que trabajó (antes de empezar o después de la baja). No se le pagan. Revísalos en el calendario.</p>` : ''}
             <div class="stat-linea"><span>Asistencia del mes</span><span>${c.dias.length} trabajado${c.dias.length === 1 ? '' : 's'}${c.tardes.length ? ` · <strong class="txt-oro">⏰ ${c.tardes.length} tarde${c.tardes.length === 1 ? '' : 's'}${c.horasTarde ? ` (${numH(c.horasTarde)} h)` : ''}</strong>` : ''}${c.faltas.length ? ` · <strong class="txt-bad">${c.faltas.length} falta${c.faltas.length === 1 ? '' : 's'}</strong>` : ''}</span></div>
             ${fijoLineasHTML(t, c)}
             ${retrasosHTML(t, c, ventasDet, true)}
+            ${faltasHTML(t, c)}
             ${objetivoHTML(t, c, ventasT)}
             <div class="stat-linea per-pendiente ${deuda.total > 0 ? '' : 'ok'}"><span>${deuda.total >= 0 ? 'LE DEBES EN TOTAL' : 'TE DEBE (adelantado de más)'}</span><strong>${INFORME.eur(Math.abs(deuda.total))}</strong></div>
             <div class="stat-linea"><span>Entregado en total (todos los adelantos y pagas)</span><strong>${INFORME.eur(entregadoTotal)}</strong></div>
@@ -2739,7 +2797,11 @@
 
   $('#per-borrar').addEventListener('click', guardarConAviso(async () => {
     if (!perEditando) return;
-    if (!confirm(`¿Eliminar a "${perEditando.nombre}" y todas sus entregas apuntadas? No se puede deshacer.`)) return;
+    if (perEditando.liquidado) {
+      toast('Este trabajador ya está liquidado: sus entregas son la prueba de que le pagaste. Si de verdad quieres borrarlo, reabre antes su ficha.', 7000);
+      return;
+    }
+    if (!confirm(`¿Eliminar a "${perEditando.nombre}" y todas sus entregas apuntadas?\n\nSe pierde la prueba de lo que le pagaste y NO se puede deshacer.`)) return;
     const pagos = (await DB.pagoTodos()).filter(p => p.trabajadorSid === perEditando.sid);
     for (const p of pagos) await DB.pagoBorrar(p.id);
     await DB.perBorrar(perEditando.id);

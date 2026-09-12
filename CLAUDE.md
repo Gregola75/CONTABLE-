@@ -108,6 +108,17 @@ versión antigua.
   con retraso cuentan en proporción a sus horas
   (`venta del día ÷ horas de jornada × horas trabajadas`). Sus días libres o
   de falta no cuentan nada.
+- **Los días que no vino** se enseñan con su fecha, no solo el número, y con la frase
+  de que esos días no se pagan: no entran en los días trabajados y no se le quita nada
+  de más. Van en la ficha (activo y liquidado) y en los dos textos que se le envían.
+- **Las cuentas llegan hasta el día de la baja, no hasta el día del finiquito.** Un día
+  marcado antes del alta o después de la baja **no se paga** (`calcularMes` y
+  `ventasParaTrabajador` filtran por `inicio`/`fin`) y la ficha avisa de cuántos hay
+  fuera de periodo. Los meses posteriores a la baja **no salen** en la lista de "lo que
+  le correspondió, mes a mes": el finiquito aparece donde le toca, en lo que se le pagó.
+  **Ojo**: el bucle de `desgloseDeuda` NO se acorta, porque un pago posterior a la baja
+  tiene que seguir descontando de la deuda (hay dos pruebas que lo exigen); lo único que
+  se filtra es qué meses entran en la lista.
 - **La deuda es general, no mensual**: se arrastra de un mes a otro. La vista
   principal muestra el total pendiente; el detalle por meses va plegado.
 - Al dar de baja, se calcula el finiquito completo; al abonarlo queda 10 días
@@ -121,6 +132,9 @@ versión antigua.
   lectura** (se pinta con `<span>`, no con botones desactivados, porque
   `.dia:disabled` taparía los días trabajados). Para corregir algo hay que
   **reabrir la ficha**, que la devuelve a los activos sin borrar ningún pago.
+- **Nada se borra por antigüedad**: los 10 días solo deciden cuándo baja al historial, y
+  allí se queda indefinidamente. Para que no se pierda la prueba por un toque, a un
+  trabajador **liquidado no se le puede eliminar**: hay que reabrir su ficha primero.
 
 ## Sincronización en la nube
 
@@ -140,7 +154,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 211 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 229 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.
 

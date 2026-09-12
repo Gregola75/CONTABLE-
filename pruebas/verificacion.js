@@ -915,6 +915,106 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
     !/wander|contable/i.test(envioEtapa));
   await page.waitForTimeout(300);
 
+  // ══════════════ 6f. DÍAS QUE NO VINO Y CIERRE EN LA BAJA ══════════════
+  console.log('\n═══ 6f. DÍAS QUE NO VINO Y CUENTAS HASTA LA BAJA ═══');
+
+  // --- Las faltas, con su fecha y su explicación ---
+  const diasFal = []; for (let d = 1; d <= 20; d++) diasFal.push(dd(d));
+  const txtFal = await sembrarTrabajador(
+    { nombre: 'ConFaltas', dias: diasFal, tardes: [], faltas: [dd(22), dd(25)] }, []);
+  chk('faltas', 'La ficha dice QUÉ DÍAS no vino, no solo cuántos',
+    /22\/09\/2026/.test(txtFal) && /25\/09\/2026/.test(txtFal), txtFal.slice(0, 400));
+  chk('faltas', 'Y explica que esos días no se le pagan',
+    /no se le pagan/.test(txtFal) && /no entran en los días trabajados/.test(txtFal), txtFal.slice(0, 500));
+  chk('faltas', 'Una falta no descuenta dinero: el fijo sigue siendo el de 20 días (692,31)',
+    txtFal.includes('692,31'), txtFal.slice(0, 400));
+  const envFal = await leerEnvio();
+  chk('faltas', 'El resumen de WhatsApp lleva las fechas de las faltas',
+    /DÍAS QUE NO VINO/.test(envFal) && /22\/09\/2026/.test(envFal) && /25\/09\/2026/.test(envFal), envFal.slice(0, 400));
+  chk('faltas', 'Y lleva las dos sumas finales escritas',
+    /Fijo 692,31 € \+ comisión/.test(envFal) || /692,31 € − /.test(envFal), envFal.slice(-400));
+
+  const txtSinFal = await sembrarTrabajador(
+    { nombre: 'SinFaltas', dias: diasFal, tardes: [], faltas: [] }, []);
+  chk('faltas', 'Sin faltas no aparece el bloque', !/no vino/i.test(txtSinFal), txtSinFal.slice(0, 300));
+
+  // --- Días marcados fuera del periodo que trabajó ---
+  const txtTrasBaja = await sembrarTrabajador(
+    { nombre: 'TrasBaja', dias: diasFal, tardes: [], faltas: [], inicio: dd(1), fin: dd(10) }, []);
+  chk('baja', 'Un día marcado DESPUÉS de la baja no se le paga (10 días, no 20)',
+    txtTrasBaja.includes('346,15') && !txtTrasBaja.includes('692,31'), txtTrasBaja.slice(0, 400));
+  chk('baja', 'Y la ficha avisa de los días que quedan fuera del periodo',
+    /fuera del periodo que trabajó/.test(txtTrasBaja), txtTrasBaja.slice(0, 400));
+
+  const txtAntes = await sembrarTrabajador(
+    { nombre: 'AntesAlta', dias: diasFal, tardes: [], faltas: [], inicio: dd(5) }, []);
+  chk('baja', 'Un día anterior a su alta tampoco se le paga (16 días = 553,85)',
+    txtAntes.includes('553,85'), txtAntes.slice(0, 400));
+
+  // --- Finiquito pagado el mes SIGUIENTE a la baja ---
+  await page.evaluate(async () => {
+    for (const t of await DB.perTodos()) await DB.perBorrar(t.id);
+    for (const g of await DB.pagoTodos()) await DB.pagoBorrar(g.id);
+    for (const r of await DB.todos()) await DB.borrar(r.id);
+    const dias = [];
+    for (let d = 1; d <= 20; d++) dias.push(`2026-09-${String(d).padStart(2, '0')}`);
+    await DB.perGuardar({
+      nombre: 'BajaTardia', sueldoMensual: 900, diasMes: 26, horasJornada: 7.5, tramos: [],
+      dias, tardes: [], faltas: [], notasDias: [],
+      inicio: '2026-09-01', fin: '2026-09-21', liquidado: '2026-10-05', creado: new Date().toISOString()
+    });
+    const t = (await DB.perTodos())[0];
+    await DB.pagoGuardar({ trabajadorSid: t.sid, fecha: '2026-10-05', importe: 692.31,
+      notas: 'Liquidación final (finiquito)', finiquito: true, creado: new Date().toISOString() });
+  });
+  await page.fill('#per-mes', '2026-10');
+  await page.dispatchEvent('#per-mes', 'change');
+  await page.waitForTimeout(1300);
+  const cajaB = await page.evaluate(() =>
+    document.querySelector('#per-historial .per-toggle') ? '#per-historial' : '#per-lista');
+  const abiertaB = await page.evaluate(c => {
+    const b = document.querySelector(c + ' .per-body');
+    return !!b && !b.classList.contains('hidden');
+  }, cajaB);
+  if (!abiertaB) { await page.click(cajaB + ' .per-toggle'); await page.waitForTimeout(900); }
+  const txtB = (await page.textContent(cajaB + ' .per-body')).replace(/\s+/g, ' ');
+  chk('baja', 'El mes posterior a la baja ya NO sale en la lista mes a mes',
+    !/Octubre 2026 · le correspondió/.test(txtB), txtB.slice(0, 500));
+  chk('baja', 'La ficha dice hasta qué día llegan las cuentas',
+    /cuentas llegan hasta el 21\/09\/2026/.test(txtB), txtB.slice(0, 600));
+  chk('baja', 'El finiquito sigue apareciendo en lo que se le pagó',
+    /05\/10\/2026/.test(txtB) && txtB.includes('692,31'), txtB.slice(0, 400));
+  chk('baja', 'Y el cuadre sigue dando que está todo pagado (la deuda no se mueve)',
+    /Cuadra/.test(txtB), txtB.slice(0, 400));
+
+  const envB = await page.evaluate(async (c) => {
+    Object.defineProperty(navigator, 'share', { value: undefined, configurable: true });
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: () => Promise.reject(new Error('no')) }, configurable: true
+    });
+    document.querySelector(c + ' .per-compartir').click();
+    await new Promise(r => setTimeout(r, 700));
+    const txt = document.querySelector('#modal-body pre').textContent;
+    document.querySelector('#modal-cerrar').click();
+    return txt;
+  }, cajaB);
+  chk('baja', 'El texto de toda su etapa tampoco lleva el mes de después de la baja',
+    !/Octubre 2026:/.test(envB), envB.slice(0, 400));
+  chk('baja', 'Y dice que las cuentas llegan hasta su último día',
+    /cuentas hasta el 21\/09\/2026, su último día/.test(envB), envB.slice(0, 400));
+  chk('baja', 'Pero el finiquito sigue listado en lo que se le pagó',
+    /05\/10\/2026: 692,31/.test(envB) && /CUADRE: está todo pagado/.test(envB), envB.slice(-300));
+
+  // --- La prueba de pago no se puede borrar de un toque ---
+  chk('baja', 'Un liquidado no ofrece editar ni borrar: solo reabrir',
+    await page.evaluate(c => !document.querySelector(c + ' .per-editar') &&
+      !!document.querySelector(c + ' .per-reabrir'), cajaB));
+  await page.click(cajaB + ' .per-reabrir');
+  await page.waitForTimeout(1100);
+  chk('baja', 'Tras reabrirlo vuelve a poder editarse y sus entregas siguen ahí',
+    await page.evaluate(async () => (await DB.pagoTodos()).length === 1 &&
+      !!document.querySelector('#per-lista .per-editar')));
+
   // ══════════════ 7. LECTURA DE FACTURAS (OCR) ══════════════
   console.log('\n═══ 7. DETECCIÓN AUTOMÁTICA DE FACTURAS ═══');
   const ocr = await page.evaluate(() => {
