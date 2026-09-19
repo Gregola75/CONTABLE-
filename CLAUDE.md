@@ -74,9 +74,14 @@ cargar el lector, en vez de romperse.
 - Sueldo mensual pactado con ~1 día libre a la semana → **precio del día =
   sueldo ÷ días de trabajo al mes** (26 por defecto, configurable por persona).
   Se paga por día trabajado; el día que no viene, no se paga.
-- Estados de cada día en el calendario, por toques: 1 = trabajó · 2 = llegó
-  tarde (pregunta cuántas horas) · 3 = faltó · 4 = nada. Los días anteriores a
-  su fecha de inicio (o posteriores a su baja) salen bloqueados.
+- Estados de cada día en el calendario, por toques: 1 = trabajó · 2 = 🛌 descansó ·
+  3 = ⏰ llegó tarde (pregunta cuántas horas) · 4 = faltó · 5 = sin marcar. Los días
+  anteriores a su fecha de inicio (o posteriores a su baja) salen bloqueados.
+  El descanso va el segundo porque es lo segundo más frecuente (un día a la semana).
+- **El descanso se marca, no se adivina** (`t.descansos`). Antes se calculaba restando
+  los trabajados y las faltas a los días del mes, y cualquier día sin marcar se colaba
+  como descanso: a un empleado le salían 3 descansos cuando solo había descansado 2.
+  Un día sin marcar **no cuenta como nada**.
 - **Retrasos**: descuentan del fijo la parte proporcional
   (`horas de retraso ÷ horas de jornada × precio del día`). Jornada por
   defecto 7,5 h (el local abre de 20:00 a 3:30). El descuento se calcula con el
@@ -120,9 +125,10 @@ cargar el lector, en vez de romperse.
   de que esos días no se pagan: no entran en los días trabajados y no se le quita nada
   de más. Van en la ficha (activo y liquidado) y en los dos textos que se le envían.
 - Los dos mensajes empiezan con los tres recuentos: **días trabajados, días de descanso
-  y días que no vino** (estos con su fecha). El descanso son los días del mes que no
-  trabajó ni faltó, contados **solo hasta hoy o hasta su baja**: los días del mes que
-  todavía no han llegado no son descanso.
+  y días que no vino** (estos con su fecha), todos salidos de lo que está marcado.
+- **En los mensajes NO se escribe que los días no trabajados no se pagan.** Lo pidió el
+  dueño: esa frase por escrito se puede usar en su contra. El motivo del importe ya se
+  entiende con la línea del fijo (`sueldo ÷ días del mes × días trabajados`).
 - **Los mensajes que se le envían NO mencionan las horas de jornada.** El dueño lo pidió
   expresamente: no conviene dejar por escrito una jornada que no todos los días es igual.
   El retraso se explica con las horas que llegó tarde y el dinero (`cobró 16,16 € en vez
@@ -171,7 +177,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 235 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 240 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.
 

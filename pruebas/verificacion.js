@@ -926,8 +926,8 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
     { nombre: 'ConFaltas', dias: diasFal, tardes: [], faltas: [dd(22), dd(25)] }, []);
   chk('faltas', 'La ficha dice QUÉ DÍAS no vino, no solo cuántos',
     /22\/09\/2026/.test(txtFal) && /25\/09\/2026/.test(txtFal), txtFal.slice(0, 400));
-  chk('faltas', 'Y explica que esos días no se le pagan',
-    /no se le pagan/.test(txtFal) && /no entran en los días trabajados/.test(txtFal), txtFal.slice(0, 500));
+  chk('faltas', 'La ficha NO dice que esos días no se pagan (se puede usar en contra)',
+    !/no se le pagan/.test(txtFal) && !/no se cobra/.test(txtFal), txtFal.slice(0, 500));
   chk('faltas', 'Una falta no descuenta dinero: el fijo sigue siendo el de 20 días (692,31)',
     txtFal.includes('692,31'), txtFal.slice(0, 400));
   const envFal = await leerEnvio();
@@ -935,8 +935,8 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
     /Días que no vino: 2/.test(envFal) && /22\/09\/2026/.test(envFal) && /25\/09\/2026/.test(envFal), envFal.slice(0, 400));
   chk('faltas', 'Y lleva los días trabajados y los de descanso por separado',
     /Días trabajados: 20/.test(envFal) && /Días de descanso: \d+/.test(envFal), envFal.slice(0, 400));
-  chk('faltas', 'Diciendo que solo se cobran los días trabajados',
-    /Solo se cobran los días trabajados/.test(envFal), envFal.slice(0, 400));
+  chk('faltas', 'Y el mensaje tampoco dice que los días no trabajados no se pagan',
+    !/no se pagan/.test(envFal) && !/Solo se cobran/.test(envFal), envFal.slice(0, 400));
   chk('faltas', 'El mensaje del mes no menciona las horas de jornada',
     !/7,5 h/.test(envFal) && !/jornada/i.test(envFal), envFal.slice(0, 400));
   chk('faltas', 'Y lleva las dos sumas finales escritas',
@@ -1022,6 +1022,47 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
   chk('baja', 'Tras reabrirlo vuelve a poder editarse y sus entregas siguen ahí',
     await page.evaluate(async () => (await DB.pagoTodos()).length === 1 &&
       !!document.querySelector('#per-lista .per-editar')));
+
+  // ══════════════ 6g. EL DESCANSO SE MARCA, NO SE ADIVINA ══════════════
+  console.log('\n═══ 6g. EL DESCANSO SE MARCA (no se adivina) ═══');
+  const diasDesc = []; for (let d = 1; d <= 20; d++) diasDesc.push(dd(d));
+  const txtDesc = await sembrarTrabajador(
+    { nombre: 'Descansos', dias: diasDesc, tardes: [], faltas: [], descansos: [dd(21), dd(22)] }, []);
+  chk('faltas', 'Cuenta como descanso SOLO los días marcados (2, no los que falten por marcar)',
+    /2 de descanso/.test(txtDesc), txtDesc.slice(0, 400));
+  const envDesc = await leerEnvio();
+  chk('faltas', 'Y el mensaje dice esos mismos 2 días de descanso',
+    /Días de descanso: 2/.test(envDesc), envDesc.slice(0, 300));
+
+  const sinMarcar = await sembrarTrabajador(
+    { nombre: 'SinMarcar', dias: [dd(1), dd(2)], tardes: [], faltas: [], descansos: [] }, []);
+  chk('faltas', 'Un mes casi entero sin marcar NO se cuenta como descanso',
+    !/de descanso/.test(sinMarcar), sinMarcar.slice(0, 300));
+  const envSinMarcar = await leerEnvio();
+  chk('faltas', 'El mensaje dice 0 días de descanso si no marcaste ninguno',
+    /Días de descanso: 0/.test(envSinMarcar), envSinMarcar.slice(0, 250));
+
+  // La vuelta completa del calendario, toque a toque
+  await sembrarTrabajador({ nombre: 'Ciclo', dias: [], tardes: [], faltas: [], descansos: [] }, []);
+  const estados = [];
+  for (let i = 0; i < 5; i++) {
+    await page.evaluate(() => {
+      const b = [...document.querySelectorAll('#per-lista .cal .dia')].find(x => x.dataset.fecha === '2026-09-10');
+      if (b) b.click();
+    });
+    await page.waitForTimeout(700);
+    estados.push(await page.evaluate(async () => {
+      const t = (await DB.perTodos())[0];
+      const f = '2026-09-10';
+      if ((t.dias || []).includes(f)) return 'trabajo';
+      if ((t.descansos || []).includes(f)) return 'descanso';
+      if ((t.tardes || []).some(x => (x.fecha || x) === f)) return 'tarde';
+      if ((t.faltas || []).includes(f)) return 'falta';
+      return 'sin marcar';
+    }));
+  }
+  chk('faltas', 'La vuelta del calendario es trabajó → descansó → tarde → faltó → sin marcar',
+    estados.join(' → ') === 'trabajo → descanso → tarde → falta → sin marcar', estados.join(' → '));
 
   // ══════════════ 7. LECTURA DE FACTURAS (OCR) ══════════════
   console.log('\n═══ 7. DETECCIÓN AUTOMÁTICA DE FACTURAS ═══');

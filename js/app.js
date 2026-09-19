@@ -1421,25 +1421,12 @@
       .filter(d => delMes(d) && dentroDelPeriodo(d)).sort();
     const tardes = tardesDe(t).filter(x => delMes(x.fecha) && dentroDelPeriodo(x.fecha));
     const faltas = (t.faltas || []).filter(d => delMes(d) && dentroDelPeriodo(d));
-    const fueraDePeriodo = [...new Set([...(t.dias || []), ...fechasTardes(t), ...(t.faltas || [])])]
+    // Días de descanso: los que se marcan en el calendario. NO se adivinan restando:
+    // un día que se olvide marcar es un día sin marcar, no un descanso.
+    const descansos = (t.descansos || []).filter(d => delMes(d) && dentroDelPeriodo(d));
+    const descanso = descansos.length;
+    const fueraDePeriodo = [...new Set([...(t.dias || []), ...fechasTardes(t), ...(t.faltas || []), ...(t.descansos || [])])]
       .filter(d => delMes(d) && !dentroDelPeriodo(d)).length;
-
-    // Días de descanso: los del mes que no trabajó ni faltó, o sea sus días libres.
-    // Solo se cuentan hasta hoy (o hasta su baja): los días del mes que aún no han
-    // llegado no son descanso, es que todavía no han pasado.
-    const [anioM, numM] = mes.split('-').map(Number);
-    const finDelMes = `${mes}-${String(new Date(anioM, numM, 0).getDate()).padStart(2, '0')}`;
-    let hasta = finDelMes;
-    if (t.fin && t.fin < hasta) hasta = t.fin;
-    const hoy = hoyISO();
-    if (hoy >= mes + '-01' && hoy < hasta) hasta = hoy;
-    const marcados = [...dias, ...faltas].sort();
-    if (marcados.length && marcados[marcados.length - 1] > hasta) hasta = marcados[marcados.length - 1];
-    let desde = mes + '-01';
-    if (t.inicio && t.inicio > desde) desde = t.inicio;
-    const diasDelTramo = hasta < desde ? 0
-      : Math.round((new Date(hasta + 'T00:00:00') - new Date(desde + 'T00:00:00')) / 86400000) + 1;
-    const descanso = Math.max(0, diasDelTramo - dias.length - faltas.length);
     const fijoDia = (t.sueldoMensual || 0) / (t.diasMes || 26);
     const jornada = t.horasJornada || 7.5;
     const horasTarde = Math.round(tardes.reduce((s, x) => s + (x.horas || 0), 0) * 10) / 10;
@@ -1466,7 +1453,7 @@
     const entregado = Math.round(pagosMes.reduce((s, p) => s + (p.importe || 0), 0) * 100) / 100;
     const devengado = Math.round((fijo + comision) * 100) / 100;
     return {
-      dias, tardes, faltas, descanso, fueraDePeriodo, horasTarde, descuentoTardes, descuentoTopado, fijoBruto,
+      dias, tardes, faltas, descansos, descanso, fueraDePeriodo, horasTarde, descuentoTardes, descuentoTopado, fijoBruto,
       fijo, comision, tramoActual, siguiente,
       devengado, entregado,
       pendiente: Math.round((devengado - entregado) * 100) / 100
@@ -1482,6 +1469,7 @@
     const trabajados = new Set((t.dias || []).filter(d => d.startsWith(mes)));
     const tardes = new Set(fechasTardes(t).filter(d => d.startsWith(mes)));
     const faltas = new Set((t.faltas || []).filter(d => d.startsWith(mes)));
+    const descansos = new Set((t.descansos || []).filter(d => d.startsWith(mes)));
     const conNota = new Set((t.notasDias || []).map(n => n.fecha).filter(f => (f || '').startsWith(mes)));
     const cab = ['L', 'M', 'X', 'J', 'V', 'S', 'D'].map(d => `<span class="cal-cab">${d}</span>`).join('');
     let celdas = '';
@@ -1490,7 +1478,7 @@
       const fecha = `${mes}-${String(d).padStart(2, '0')}`;
       // Antes de su inicio (o después de su baja) no trabajaba: en negro, sin poder tocar
       const bloqueado = (t.inicio && fecha < t.inicio) || (t.fin && fecha > t.fin);
-      const clase = trabajados.has(fecha) ? 'on' : (tardes.has(fecha) ? 'tarde' : (faltas.has(fecha) ? 'falta' : ''));
+      const clase = trabajados.has(fecha) ? 'on' : (descansos.has(fecha) ? 'descanso' : (tardes.has(fecha) ? 'tarde' : (faltas.has(fecha) ? 'falta' : '')));
       const nota = conNota.has(fecha) ? 'con-nota' : '';
       if (soloLectura) {
         // Ficha ya liquidada: los días se ven, pero no se pueden tocar.
@@ -1502,8 +1490,8 @@
       }
     }
     const pie = soloLectura
-      ? 'En claro los días que trabajó, ⏰ los que llegó tarde y en rojo los que faltó. Su cuenta ya está liquidada: no se pueden cambiar.'
-      : 'Toques en el día → 1: trabajó · 2: ⏰ llegó tarde · 3: faltó · 4: nada. En negro: aún no trabajaba.';
+      ? 'En claro los días que trabajó, 🛌 los de descanso, ⏰ los que llegó tarde y en rojo los que faltó. Su cuenta ya está liquidada: no se pueden cambiar.'
+      : 'Toques en el día → 1: trabajó · 2: 🛌 descansó · 3: ⏰ llegó tarde · 4: faltó · 5: sin marcar. En negro: aún no trabajaba.';
     return `<div class="cal${soloLectura ? ' cal-lectura' : ''}">${cab}${celdas}</div>
       <p class="hint" style="margin:0 0 8px">${pie}</p>`;
   }
@@ -1817,7 +1805,6 @@
     if (c.faltas.length) {
       lineas.push(`Días que no vino: ${c.faltas.length} (${c.faltas.map(fmtFecha).join(' · ')})`);
     }
-    lineas.push('Solo se cobran los días trabajados: ni los de descanso ni los que no vino entran en la cuenta.');
     const retrasos = detalleRetrasos(t, c, ventasDet).filter(r => r.horas > 0);
     if (retrasos.length) {
       lineas.push('');
@@ -2003,23 +1990,12 @@
             ${regla}${cuerpo}${cierre}`;
   }
 
-  /* Los días que no vino. No restan dinero: simplemente no entran en los días
-     trabajados, y por eso el mes sale más bajo. Hay que decirlo, porque es la
-     primera pregunta que hace quien ve "21 días" y esperaba 22. */
-  function faltasLineas(t, c) {
-    if (!c.faltas.length) return [];
-    return [
-      `Días que no vino (${c.faltas.length}): ${c.faltas.map(fmtFecha).join(' · ')}`,
-      'Esos días no se le pagan: no entran en los días trabajados. No se le quita nada de más, simplemente ese día no se cobra.'
-    ];
-  }
-
+  /* Los días que no vino, con su fecha. */
   function faltasHTML(t, c) {
     if (!c.faltas.length) return '';
     return `
             <p class="per-seccion">🚫 Días que no vino (${c.faltas.length})</p>
-            <div class="per-pago"><span>${c.faltas.map(fmtFecha).join(' · ')}</span></div>
-            <p class="hint" style="margin:6px 0 0">Esos días no se le pagan: no entran en los días trabajados. No se le quita nada de más, simplemente ese día no se cobra.</p>`;
+            <div class="per-pago"><span>${c.faltas.map(fmtFecha).join(' · ')}</span></div>`;
   }
 
   /* Los días que no vino en TODA su etapa, para el resumen del liquidado. */
@@ -2196,7 +2172,6 @@
       if (faltasEtapa.dias) {
         lineas.push(`Días que no vino: ${faltasEtapa.dias} (${faltasEtapa.fechas.map(fmtFecha).join(' · ')})`);
       }
-      lineas.push('Solo se cobran los días trabajados: ni los de descanso ni los que no vino entran en la cuenta.');
     }
     lineas.push('');
     lineas.push('LO QUE SE LE PAGÓ');
@@ -2582,24 +2557,30 @@
         const dias = new Set(t.dias || []);
         const tardes = tardesDe(t);
         const faltas = new Set(t.faltas || []);
+        const descansos = new Set(t.descansos || []);
         const iTarde = tardes.findIndex(x => x.fecha === f);
+        // Vuelta completa: sin marcar → trabajó → descansó → llegó tarde → faltó → sin marcar.
+        // El descanso va el segundo porque es lo segundo más frecuente.
         if (dias.has(f)) {
-          // trabajó → llegó tarde: preguntar cuántas horas para descontar la parte del día
-          dias.delete(f);
+          dias.delete(f); descansos.add(f);                          // trabajó → descansó
+        } else if (descansos.has(f)) {
+          // descansó → llegó tarde: preguntar las horas para descontar la parte del día
           const resp = prompt('⏰ ¿Cuántas horas llegó tarde ese día?\n(0 = se le paga el día entero igualmente)', '1');
           if (resp === null) return;   // canceló: el día se queda como estaba
           const horas = Math.max(0, parseFloat(String(resp || '0').replace(',', '.')) || 0);
+          descansos.delete(f);
           tardes.push({ fecha: f, horas });
         } else if (iTarde >= 0) {
           tardes.splice(iTarde, 1); faltas.add(f);                  // tarde → faltó
         } else if (faltas.has(f)) {
-          faltas.delete(f);                                          // faltó → nada
+          faltas.delete(f);                                          // faltó → sin marcar
         } else {
-          dias.add(f);                                               // nada → trabajó
+          dias.add(f);                                               // sin marcar → trabajó
         }
         t.dias = [...dias].sort();
         t.tardes = tardes.sort((a, b) => a.fecha.localeCompare(b.fecha));
         t.faltas = [...faltas].sort();
+        t.descansos = [...descansos].sort();
         await DB.perGuardar(t);
         pintarPersonal();
       }));
@@ -2789,10 +2770,10 @@
       ...(perEditando
         ? {
             id: perEditando.id, sid: perEditando.sid,
-            dias: perEditando.dias || [], tardes: perEditando.tardes || [], faltas: perEditando.faltas || [], notasDias: perEditando.notasDias || [],
+            dias: perEditando.dias || [], tardes: perEditando.tardes || [], faltas: perEditando.faltas || [], descansos: perEditando.descansos || [], notasDias: perEditando.notasDias || [],
             liquidado: perEditando.liquidado || '', creado: perEditando.creado
           }
-        : { dias: [], tardes: [], faltas: [], notasDias: [], liquidado: '', creado: new Date().toISOString() }),
+        : { dias: [], tardes: [], faltas: [], descansos: [], notasDias: [], liquidado: '', creado: new Date().toISOString() }),
       nombre,
       sueldoMensual: Math.round(sueldo * 100) / 100,
       diasMes,

@@ -740,6 +740,12 @@ select { appearance: none; -webkit-appearance: none; }
   font-weight: 800;
   border-color: transparent;
 }
+.cal .dia.descanso {
+  background: #10222b;
+  color: #6fc3dd;
+  border-color: #1d4757;
+  font-weight: 700;
+}
 .cal .dia.tarde {
   background: #241d08;
   color: var(--oro);
