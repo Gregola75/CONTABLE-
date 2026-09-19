@@ -767,16 +767,18 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
   chk('retrasos', 'El texto de toda su etapa explica POR QUÉ se le descontó',
     /POR QUÉ SE LE DESCONTÓ DINERO ALGUNOS DÍAS/.test(envioExp) &&
     /Se cobra por día trabajado/.test(envioExp), envioExp.slice(0, 400));
-  chk('retrasos', 'Lleva la división de cada uno de los dos días',
-    /2 h ÷ 7,5 h × 34,62 € = 9,23 €/.test(envioExp) &&
-    /4 h ÷ 7,5 h × 34,62 € = 18,46 €/.test(envioExp), envioExp.slice(-700));
+  chk('retrasos', 'El mensaje NO lleva las horas de jornada (ni la división)',
+    !/7,5 h/.test(envioExp) && !/jornada/i.test(envioExp), envioExp.slice(0, 500));
+  chk('retrasos', 'Pero la división sigue en la ficha, para poder comprobarla',
+    /2 h ÷ 7,5 h × 34,62 € = 9,23 €/.test(txtExp) &&
+    /4 h ÷ 7,5 h × 34,62 € = 18,46 €/.test(txtExp), txtExp.slice(0, 600));
   chk('retrasos', 'Dice lo que cobró cada uno de esos días frente a un día normal',
     /cobró 25,39 € en vez de 34,62 €/.test(envioExp) &&
     /cobró 16,16 € en vez de 34,62 €/.test(envioExp), envioExp.slice(-700));
   chk('retrasos', 'Y cierra con los días y el total de toda su etapa (27,69)',
     /Llegó tarde 2 días en toda su etapa/.test(envioExp) && envioExp.includes('27,69'), envioExp.slice(-400));
-  chk('retrasos', 'El detalle ya no se repite dentro de cada mes',
-    (envioExp.match(/Estuvo 3,5 h/g) || []).length === 1, envioExp.slice(0, 600));
+  chk('retrasos', 'El detalle de cada día no se repite dentro de cada mes',
+    (envioExp.match(/21\/09\/2026 — llegó/g) || []).length === 1, envioExp.slice(0, 600));
   chk('retrasos', 'El texto explicado sigue sin nombrar el negocio ni la app',
     !/wander|contable/i.test(envioExp));
 
@@ -930,7 +932,13 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
     txtFal.includes('692,31'), txtFal.slice(0, 400));
   const envFal = await leerEnvio();
   chk('faltas', 'El resumen de WhatsApp lleva las fechas de las faltas',
-    /DÍAS QUE NO VINO/.test(envFal) && /22\/09\/2026/.test(envFal) && /25\/09\/2026/.test(envFal), envFal.slice(0, 400));
+    /Días que no vino: 2/.test(envFal) && /22\/09\/2026/.test(envFal) && /25\/09\/2026/.test(envFal), envFal.slice(0, 400));
+  chk('faltas', 'Y lleva los días trabajados y los de descanso por separado',
+    /Días trabajados: 20/.test(envFal) && /Días de descanso: \d+/.test(envFal), envFal.slice(0, 400));
+  chk('faltas', 'Diciendo que solo se cobran los días trabajados',
+    /Solo se cobran los días trabajados/.test(envFal), envFal.slice(0, 400));
+  chk('faltas', 'El mensaje del mes no menciona las horas de jornada',
+    !/7,5 h/.test(envFal) && !/jornada/i.test(envFal), envFal.slice(0, 400));
   chk('faltas', 'Y lleva las dos sumas finales escritas',
     /Fijo 692,31 € \+ comisión/.test(envFal) || /692,31 € − /.test(envFal), envFal.slice(-400));
 

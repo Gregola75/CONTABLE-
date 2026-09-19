@@ -1423,6 +1423,23 @@
     const faltas = (t.faltas || []).filter(d => delMes(d) && dentroDelPeriodo(d));
     const fueraDePeriodo = [...new Set([...(t.dias || []), ...fechasTardes(t), ...(t.faltas || [])])]
       .filter(d => delMes(d) && !dentroDelPeriodo(d)).length;
+
+    // Días de descanso: los del mes que no trabajó ni faltó, o sea sus días libres.
+    // Solo se cuentan hasta hoy (o hasta su baja): los días del mes que aún no han
+    // llegado no son descanso, es que todavía no han pasado.
+    const [anioM, numM] = mes.split('-').map(Number);
+    const finDelMes = `${mes}-${String(new Date(anioM, numM, 0).getDate()).padStart(2, '0')}`;
+    let hasta = finDelMes;
+    if (t.fin && t.fin < hasta) hasta = t.fin;
+    const hoy = hoyISO();
+    if (hoy >= mes + '-01' && hoy < hasta) hasta = hoy;
+    const marcados = [...dias, ...faltas].sort();
+    if (marcados.length && marcados[marcados.length - 1] > hasta) hasta = marcados[marcados.length - 1];
+    let desde = mes + '-01';
+    if (t.inicio && t.inicio > desde) desde = t.inicio;
+    const diasDelTramo = hasta < desde ? 0
+      : Math.round((new Date(hasta + 'T00:00:00') - new Date(desde + 'T00:00:00')) / 86400000) + 1;
+    const descanso = Math.max(0, diasDelTramo - dias.length - faltas.length);
     const fijoDia = (t.sueldoMensual || 0) / (t.diasMes || 26);
     const jornada = t.horasJornada || 7.5;
     const horasTarde = Math.round(tardes.reduce((s, x) => s + (x.horas || 0), 0) * 10) / 10;
@@ -1449,7 +1466,7 @@
     const entregado = Math.round(pagosMes.reduce((s, p) => s + (p.importe || 0), 0) * 100) / 100;
     const devengado = Math.round((fijo + comision) * 100) / 100;
     return {
-      dias, tardes, faltas, fueraDePeriodo, horasTarde, descuentoTardes, descuentoTopado, fijoBruto,
+      dias, tardes, faltas, descanso, fueraDePeriodo, horasTarde, descuentoTardes, descuentoTopado, fijoBruto,
       fijo, comision, tramoActual, siguiente,
       devengado, entregado,
       pendiente: Math.round((devengado - entregado) * 100) / 100
@@ -1795,31 +1812,25 @@
     lineas.push(`Resumen de ${t.nombre} — ${mesEnLetras(mes + '-01')}`);
     lineas.push('');
     lineas.push(`Días trabajados: ${c.dias.length}` +
-      (c.tardes.length ? ` (⏰ ${c.tardes.length} con retraso${c.horasTarde ? `, ${numH(c.horasTarde)} h` : ''})` : '') +
-      (c.faltas.length ? ` · Faltas: ${c.faltas.length}` : ''));
+      (c.tardes.length ? ` (⏰ ${c.tardes.length} con retraso${c.horasTarde ? `, ${numH(c.horasTarde)} h` : ''})` : ''));
+    lineas.push(`Días de descanso: ${c.descanso}`);
+    if (c.faltas.length) {
+      lineas.push(`Días que no vino: ${c.faltas.length} (${c.faltas.map(fmtFecha).join(' · ')})`);
+    }
+    lineas.push('Solo se cobran los días trabajados: ni los de descanso ni los que no vino entran en la cuenta.');
     const retrasos = detalleRetrasos(t, c, ventasDet).filter(r => r.horas > 0);
     if (retrasos.length) {
       lineas.push('');
       lineas.push('POR QUÉ SE LE DESCONTÓ DINERO ALGUNOS DÍAS');
-      reglaRetrasoLineas(t).forEach(l => lineas.push(l));
+      reglaRetrasoLineas(t, false).forEach(l => lineas.push(l));
       retrasos.forEach(r => {
         lineas.push('');
         lineas.push(`${fmtFecha(r.fecha)} — llegó ${numH(r.horas)} h tarde`);
-        lineas.push(r.horasTrabajadas > 0
-          ? `   Estuvo ${numH(r.horasTrabajadas)} h de las ${numH(r.jornada)} h de su jornada.`
-          : `   No llegó a hacer ninguna hora de las ${numH(r.jornada)} h de su jornada.`);
-        lineas.push(`   Se le descuenta: ${numH(r.horas)} h ÷ ${numH(r.jornada)} h × ${INFORME.eur(r.precioDia)} = ${INFORME.eur(r.descuento)}`);
         lineas.push(`   Ese día cobró ${INFORME.eur(r.cobra)} en vez de ${INFORME.eur(r.precioDia)}  →  −${INFORME.eur(r.descuento)}`);
       });
       lineas.push('');
       lineas.push(`Llegó tarde ${retrasos.length} día${retrasos.length === 1 ? '' : 's'} este mes.`);
       lineas.push(`Total descontado por llegar tarde: −${INFORME.eur(c.descuentoTardes)}`);
-    }
-    const faltasTxt = faltasLineas(t, c);
-    if (faltasTxt.length) {
-      lineas.push('');
-      lineas.push('DÍAS QUE NO VINO');
-      faltasTxt.forEach(l => lineas.push(l));
     }
     lineas.push('');
     lineas.push(c.descuentoTardes > 0
@@ -1858,10 +1869,10 @@
   /* La regla del retraso explicada con palabras, para que la entienda el propio
      trabajador. Hasta ahora solo estaba escrita en el formulario donde se le da de
      alta, o sea donde él no la ve nunca. */
-  function reglaRetrasoLineas(t) {
-    const jornada = numH(t.horasJornada || 7.5);
+  function reglaRetrasoLineas(t, conJornada = true) {
+    const precio = `Se cobra por día trabajado${conJornada ? `. La jornada es de ${numH(t.horasJornada || 7.5)} h y` : ' y'} el día sale a ${INFORME.eur(precioDeUnDia(t))} (${INFORME.eur(t.sueldoMensual || 0)} ÷ ${t.diasMes || 26} días).`;
     return [
-      `Se cobra por día trabajado. La jornada es de ${jornada} h y el día sale a ${INFORME.eur(precioDeUnDia(t))} (${INFORME.eur(t.sueldoMensual || 0)} ÷ ${t.diasMes || 26} días).`,
+      precio,
       'El día que se llega tarde se paga solo la parte del día que se estuvo, no el día entero.'
     ];
   }
@@ -2164,14 +2175,10 @@
     if (tarde.dias) {
       lineas.push('');
       lineas.push('POR QUÉ SE LE DESCONTÓ DINERO ALGUNOS DÍAS');
-      reglaRetrasoLineas(t).forEach(l => lineas.push(l));
+      reglaRetrasoLineas(t, false).forEach(l => lineas.push(l));
       tarde.filas.forEach(r => {
         lineas.push('');
         lineas.push(`${fmtFecha(r.fecha)} — llegó ${numH(r.horas)} h tarde`);
-        lineas.push(r.horasTrabajadas > 0
-          ? `   Estuvo ${numH(r.horasTrabajadas)} h de las ${numH(r.jornada)} h de su jornada.`
-          : `   No llegó a hacer ninguna hora de las ${numH(r.jornada)} h de su jornada.`);
-        lineas.push(`   Se le descuenta: ${numH(r.horas)} h ÷ ${numH(r.jornada)} h × ${INFORME.eur(r.precioDia)} = ${INFORME.eur(r.descuento)}`);
         lineas.push(`   Ese día cobró ${INFORME.eur(r.cobra)} en vez de ${INFORME.eur(r.precioDia)}  →  −${INFORME.eur(r.descuento)}`);
       });
       lineas.push('');
@@ -2179,11 +2186,17 @@
       lineas.push(`Total descontado por llegar tarde: ${INFORME.eur(tarde.descuento)}`);
     }
     const faltasEtapa = faltasDeLaEtapa(t, deuda);
-    if (faltasEtapa.dias) {
+    const trabajadosEtapa = deuda.meses.reduce((n, m) => n + (m.calc ? m.calc.dias.length : 0), 0);
+    const descansoEtapa = deuda.meses.reduce((n, m) => n + (m.calc ? m.calc.descanso : 0), 0);
+    if (trabajadosEtapa || descansoEtapa || faltasEtapa.dias) {
       lineas.push('');
-      lineas.push('DÍAS QUE NO VINO');
-      lineas.push(`No vino ${faltasEtapa.dias} día${faltasEtapa.dias === 1 ? '' : 's'}: ${faltasEtapa.fechas.map(fmtFecha).join(' · ')}`);
-      lineas.push('Esos días no se le pagan: no entran en los días trabajados. No se le quita nada de más, simplemente ese día no se cobra.');
+      lineas.push('SUS DÍAS');
+      lineas.push(`Días trabajados: ${trabajadosEtapa}`);
+      lineas.push(`Días de descanso: ${descansoEtapa}`);
+      if (faltasEtapa.dias) {
+        lineas.push(`Días que no vino: ${faltasEtapa.dias} (${faltasEtapa.fechas.map(fmtFecha).join(' · ')})`);
+      }
+      lineas.push('Solo se cobran los días trabajados: ni los de descanso ni los que no vino entran en la cuenta.');
     }
     lineas.push('');
     lineas.push('LO QUE SE LE PAGÓ');
@@ -2272,7 +2285,7 @@
           <details class="ocr-details">
             <summary>${mesEnLetras(m.mes + '-01')} · le correspondió ${INFORME.eur(m.devengado)} · le diste ${INFORME.eur(m.entregado)} · ${saldoTxt}</summary>
             ${calendarioHTML(t, m.mes, true)}
-            <div class="stat-linea"><span>Asistencia</span><span>${c.dias.length} día${c.dias.length === 1 ? '' : 's'} trabajado${c.dias.length === 1 ? '' : 's'}${c.tardes.length ? ` · <strong class="txt-oro">⏰ ${c.tardes.length}</strong>` : ''}${c.faltas.length ? ` · <strong class="txt-bad">${c.faltas.length} falta${c.faltas.length === 1 ? '' : 's'}</strong>` : ''}</span></div>
+            <div class="stat-linea"><span>Asistencia</span><span>${c.dias.length} día${c.dias.length === 1 ? '' : 's'} trabajado${c.dias.length === 1 ? '' : 's'}${c.tardes.length ? ` · <strong class="txt-oro">⏰ ${c.tardes.length}</strong>` : ''}${c.faltas.length ? ` · <strong class="txt-bad">${c.faltas.length} falta${c.faltas.length === 1 ? '' : 's'}</strong>` : ''}${c.descanso ? ` · <span class="txt-sec">${c.descanso} de descanso</span>` : ''}</span></div>
             ${fijoLineasHTML(t, c)}
             ${retrasosHTML(t, c, m.ventasDet, false)}
             ${faltasHTML(t, c)}
@@ -2452,7 +2465,7 @@
             <p class="per-seccion">📅 Días del mes</p>
             ${calendarioHTML(t, mes)}
             ${c.fueraDePeriodo ? `<p class="hint txt-bad" style="margin:6px 0 0">⚠️ Hay ${c.fueraDePeriodo} día(s) marcados fuera del periodo que trabajó (antes de empezar o después de la baja). No se le pagan. Revísalos en el calendario.</p>` : ''}
-            <div class="stat-linea"><span>Asistencia del mes</span><span>${c.dias.length} trabajado${c.dias.length === 1 ? '' : 's'}${c.tardes.length ? ` · <strong class="txt-oro">⏰ ${c.tardes.length} tarde${c.tardes.length === 1 ? '' : 's'}${c.horasTarde ? ` (${numH(c.horasTarde)} h)` : ''}</strong>` : ''}${c.faltas.length ? ` · <strong class="txt-bad">${c.faltas.length} falta${c.faltas.length === 1 ? '' : 's'}</strong>` : ''}</span></div>
+            <div class="stat-linea"><span>Asistencia del mes</span><span>${c.dias.length} trabajado${c.dias.length === 1 ? '' : 's'}${c.tardes.length ? ` · <strong class="txt-oro">⏰ ${c.tardes.length} tarde${c.tardes.length === 1 ? '' : 's'}${c.horasTarde ? ` (${numH(c.horasTarde)} h)` : ''}</strong>` : ''}${c.faltas.length ? ` · <strong class="txt-bad">${c.faltas.length} falta${c.faltas.length === 1 ? '' : 's'}</strong>` : ''}${c.descanso ? ` · <span class="txt-sec">${c.descanso} de descanso</span>` : ''}</span></div>
             ${fijoLineasHTML(t, c)}
             ${retrasosHTML(t, c, ventasDet, true)}
             ${faltasHTML(t, c)}

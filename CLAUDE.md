@@ -111,6 +111,15 @@ versión antigua.
 - **Los días que no vino** se enseñan con su fecha, no solo el número, y con la frase
   de que esos días no se pagan: no entran en los días trabajados y no se le quita nada
   de más. Van en la ficha (activo y liquidado) y en los dos textos que se le envían.
+- Los dos mensajes empiezan con los tres recuentos: **días trabajados, días de descanso
+  y días que no vino** (estos con su fecha). El descanso son los días del mes que no
+  trabajó ni faltó, contados **solo hasta hoy o hasta su baja**: los días del mes que
+  todavía no han llegado no son descanso.
+- **Los mensajes que se le envían NO mencionan las horas de jornada.** El dueño lo pidió
+  expresamente: no conviene dejar por escrito una jornada que no todos los días es igual.
+  El retraso se explica con las horas que llegó tarde y el dinero (`cobró 16,16 € en vez
+  de 34,62 €`), sin la división. **En la ficha sí se mantiene** la división completa
+  (`4 h ÷ 7,5 h × 34,62 € = 18,46 €`), porque es donde el dueño comprueba la cuenta.
 - **Las cuentas llegan hasta el día de la baja, no hasta el día del finiquito.** Un día
   marcado antes del alta o después de la baja **no se paga** (`calcularMes` y
   `ventasParaTrabajador` filtran por `inicio`/`fin`) y la ficha avisa de cuántos hay
@@ -154,7 +163,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 229 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 233 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.
 
