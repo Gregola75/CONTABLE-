@@ -6,18 +6,41 @@ const OCR = (() => {
 
   let onProgresoActual = null; // el progreso llega al que esté leyendo ahora
 
+  const URL_TESSERACT = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+  let cargandoTesseract = null;
+
+  /* El lector se carga SOLO cuando hace falta (o en un rato libre), no al abrir
+     la app: si no, el móvil tiene que procesarlo entero antes de desbloquear. */
+  function cargarTesseract() {
+    if (typeof Tesseract !== 'undefined') return Promise.resolve(true);
+    if (!cargandoTesseract) {
+      cargandoTesseract = new Promise((ok) => {
+        const et = document.createElement('script');
+        et.src = URL_TESSERACT;
+        et.async = true;
+        et.onload = () => ok(typeof Tesseract !== 'undefined');
+        et.onerror = () => { cargandoTesseract = null; ok(false); };
+        document.head.appendChild(et);
+      });
+    }
+    return cargandoTesseract;
+  }
+
   function obtenerWorker() {
     if (!workerPromise) {
-      workerPromise = Tesseract.createWorker('spa', 1, {
-        logger: (m) => {
-          if (!onProgresoActual) return;
-          if (m.status === 'recognizing text') {
-            onProgresoActual(Math.round(m.progress * 100), 'leyendo');
-          } else {
-            // Descargando o preparando el lector (solo la primera vez o tras actualizar)
-            onProgresoActual(Math.round((m.progress || 0) * 100), 'preparando');
+      workerPromise = cargarTesseract().then((listo) => {
+        if (!listo) throw new Error('No se pudo cargar el lector de fotos. Comprueba la conexión e inténtalo otra vez.');
+        return Tesseract.createWorker('spa', 1, {
+          logger: (m) => {
+            if (!onProgresoActual) return;
+            if (m.status === 'recognizing text') {
+              onProgresoActual(Math.round(m.progress * 100), 'leyendo');
+            } else {
+              // Descargando o preparando el lector (solo la primera vez o tras actualizar)
+              onProgresoActual(Math.round((m.progress || 0) * 100), 'preparando');
+            }
           }
-        }
+        });
       });
       // Si falla la descarga del lector (mala cobertura), permitir reintentar
       // en la siguiente foto en vez de quedarse roto para siempre

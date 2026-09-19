@@ -676,10 +676,9 @@
 
 <div id="toast" class="toast hidden"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<!-- El lector de fotos (Tesseract) y Firebase NO se cargan aquí: se cargan solos
+     cuando hacen falta. Si fueran aquí, el móvil tendría que procesarlos enteros
+     antes de que la huella pudiera responder. Ver js/ocr.js y js/nube.js. -->
 <script src="js/seguridad.js"></script>
 <script src="js/db.js"></script>
 <script src="js/nube.js"></script>

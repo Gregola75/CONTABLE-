@@ -1245,6 +1245,22 @@ TARJETA 450,00`)]);
   chk('cuadro', '"Ya lo hice" quita el aviso del trimestre', !al.includes('trimestre'));
   await page.evaluate(() => localStorage.removeItem('contable-trimestre-guardado'));
 
+  // ══════════════ 9e. ARRANQUE: QUE LA HUELLA NO ESPERE ══════════════
+  console.log('\n═══ 9e. ARRANQUE (que el desbloqueo no espere a nadie) ═══');
+  const arranque = await page.evaluate(async () => {
+    const html = await (await fetch('index.html')).text();
+    return {
+      externos: (html.match(/<script src="https?:\/\/[^"]+"><\/script>/g) || []),
+      seguridad: typeof SEGURIDAD !== 'undefined',
+      db: typeof DB !== 'undefined',
+      app: typeof OCR !== 'undefined' && typeof INFORME !== 'undefined'
+    };
+  });
+  chk('estabilidad', 'La app no carga librer\u00edas externas antes de poder desbloquear',
+    arranque.externos.length === 0, arranque.externos.join(' | '));
+  chk('estabilidad', 'El desbloqueo (huella o PIN) est\u00e1 listo sin esperar a nada de fuera',
+    arranque.seguridad && arranque.db && arranque.app);
+
   // ══════════════ 10. ERRORES DE JAVASCRIPT ══════════════
   console.log('\n═══ 10. ESTABILIDAD ═══');
   chk('estabilidad', 'Ningún error de JavaScript durante toda la verificación',

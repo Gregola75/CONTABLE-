@@ -27,6 +27,14 @@ desde la rama por defecto del repositorio.
 en `sw.js` (`const CACHE = 'contable-vNN'`), o los móviles seguirán con la
 versión antigua.
 
+**El arranque no depende de nada externo.** `index.html` **no** carga Tesseract ni
+Firebase con `<script src>`: los cargan `js/ocr.js` y `js/nube.js` por su cuenta, y solo
+cuando hacen falta. Si volvieran al HTML, el móvil tendría que procesarlos enteros
+**antes** de que `js/seguridad.js` existiera, o sea antes de que la huella pudiera
+responder (medido: unos 600 ms de espera de más). Hay dos comprobaciones que lo vigilan.
+Sin conexión todo sigue: la nube queda "apagada" y una foto avisa de que no se pudo
+cargar el lector, en vez de romperse.
+
 ## Reglas de negocio (acordadas con el dueño, no cambiar sin preguntar)
 
 **Facturas e impuestos**
@@ -163,7 +171,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 233 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 235 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.
 

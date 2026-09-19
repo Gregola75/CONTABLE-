@@ -23,7 +23,35 @@ const NUBE = (() => {
     appId: '1:984496596222:web:20bcbf351cc9684c3031af'
   };
 
-  const disponible = typeof firebase !== 'undefined';
+  const URLS_FIREBASE = [
+    'https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js',
+    'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js',
+    'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js'
+  ];
+
+  // Optimista: la app tiene nube. Solo se pone a false si no se puede cargar.
+  let disponible = true;
+  let cargandoFirebase = null;
+
+  /* Firebase se carga SOLO cuando hace falta, no al abrir la app: son varios
+     cientos de KB que el móvil tendría que procesar antes de poder desbloquear.
+     Si ya está cargado (o hay un doble para las pruebas), se usa tal cual. */
+  function cargarFirebase() {
+    if (typeof firebase !== 'undefined') return Promise.resolve(true);
+    if (!cargandoFirebase) {
+      cargandoFirebase = URLS_FIREBASE.reduce((antes, url) => antes.then(() => new Promise((ok, mal) => {
+        const et = document.createElement('script');
+        et.src = url;
+        et.async = false;            // el orden importa: app, luego auth, luego firestore
+        et.onload = () => ok();
+        et.onerror = () => mal(new Error('no se pudo cargar ' + url));
+        document.head.appendChild(et);
+      })), Promise.resolve())
+        .then(() => typeof firebase !== 'undefined')
+        .catch(() => { cargandoFirebase = null; return false; });
+    }
+    return cargandoFirebase;
+  }
   let auth = null;
   let db = null;
   let usuario = null;
@@ -159,14 +187,16 @@ const NUBE = (() => {
     });
   }
 
-  function iniciar(callback) {
+  async function iniciar(callback) {
     if (callback) avisarUI = callback;
+    disponible = await cargarFirebase();
     if (!disponible) { estado = 'apagado'; avisarUI(); return; }
     arrancarFirebase();
     avisarUI();
   }
 
   async function entrar() {
+    disponible = await cargarFirebase();
     if (!disponible) throw new Error('No se pudo cargar Firebase (¿sin conexión?). Inténtalo con internet.');
     arrancarFirebase();
     cambiarEstado('conectando');
