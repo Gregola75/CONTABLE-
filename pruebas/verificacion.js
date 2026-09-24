@@ -1064,6 +1064,57 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
   chk('faltas', 'La vuelta del calendario es trabajó → descansó → tarde → faltó → sin marcar',
     estados.join(' → ') === 'trabajo → descanso → tarde → falta → sin marcar', estados.join(' → '));
 
+  // ══════════════ 6h. EL MOTIVO DE UNA AUSENCIA ══════════════
+  console.log('\n═══ 6h. EL MOTIVO DE UNA AUSENCIA ═══');
+  const tocarDia10 = async (respuesta) => {
+    await page.evaluate((r) => {
+      window.__promptOriginal = window.__promptOriginal || window.prompt;
+      window.prompt = () => r;
+      const b = [...document.querySelectorAll('#per-lista .cal .dia')].find(x => x.dataset.fecha === '2026-09-10');
+      if (b) b.click();
+    }, respuesta);
+    await page.waitForTimeout(800);
+    return page.evaluate(async () => {
+      const t = (await DB.perTodos())[0];
+      const f = '2026-09-10';
+      return {
+        falta: (t.faltas || []).includes(f),
+        tarde: (t.tardes || []).some(x => (x.fecha || x) === f),
+        motivos: (t.notasDias || []).filter(n => n.fecha === f && n.motivoFalta).map(n => n.texto),
+        texto: document.querySelector('#per-lista .per-body').textContent.replace(/\s+/g, ' ')
+      };
+    });
+  };
+
+  // Llegó tarde el 10 → al tocar pasa a "faltó" y pregunta el motivo
+  await sembrarTrabajador({ nombre: 'Motivo', dias: [dd(1), dd(2)], tardes: [{ fecha: dd(10), horas: 0 }], faltas: [], descansos: [] }, []);
+  const conMotivo = await tocarDia10('médico');
+  chk('faltas', 'Al marcar una ausencia se guarda el motivo que escribes',
+    conMotivo.falta && conMotivo.motivos.join() === 'médico', JSON.stringify(conMotivo.motivos));
+  chk('faltas', 'Y la ficha enseña el motivo junto a la fecha',
+    /10\/09\/2026\s*médico/.test(conMotivo.texto), conMotivo.texto.slice(0, 500));
+
+  const envMotivo = await leerEnvio();
+  chk('faltas', 'El motivo es para ti: NO sale en el mensaje que se le envía',
+    !/médico/.test(envMotivo) && /Días que no vino: 1 \(10\/09\/2026\)/.test(envMotivo), envMotivo.slice(0, 300));
+
+  const quitado = await tocarDia10('');
+  chk('faltas', 'Si el día deja de ser ausencia, su motivo se quita',
+    !quitado.falta && quitado.motivos.length === 0, JSON.stringify(quitado));
+
+  // Sin escribir nada: la ausencia queda, pero "sin motivo apuntado"
+  await sembrarTrabajador({ nombre: 'SinMotivo', dias: [dd(1)], tardes: [{ fecha: dd(10), horas: 0 }], faltas: [], descansos: [] }, []);
+  const sinMotivo = await tocarDia10('');
+  chk('faltas', 'Una ausencia sin motivo se guarda igual y lo dice',
+    sinMotivo.falta && /sin motivo apuntado/.test(sinMotivo.texto), sinMotivo.texto.slice(0, 400));
+
+  // Cancelar la pregunta deja el día como estaba
+  await sembrarTrabajador({ nombre: 'Cancela', dias: [dd(1)], tardes: [{ fecha: dd(10), horas: 0 }], faltas: [], descansos: [] }, []);
+  const cancelado = await tocarDia10(null);
+  chk('faltas', 'Si cancelas la pregunta del motivo, el día no cambia',
+    cancelado.tarde && !cancelado.falta, JSON.stringify(cancelado));
+  await page.evaluate(() => { if (window.__promptOriginal) window.prompt = window.__promptOriginal; });
+
   // ══════════════ 7. LECTURA DE FACTURAS (OCR) ══════════════
   console.log('\n═══ 7. DETECCIÓN AUTOMÁTICA DE FACTURAS ═══');
   const ocr = await page.evaluate(() => {

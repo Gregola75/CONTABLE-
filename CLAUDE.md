@@ -124,6 +124,11 @@ cargar el lector, en vez de romperse.
 - **Los días que no vino** se enseñan con su fecha, no solo el número, y con la frase
   de que esos días no se pagan: no entran en los días trabajados y no se le quita nada
   de más. Van en la ficha (activo y liquidado) y en los dos textos que se le envían.
+- **Motivo de cada ausencia**: al pasar un día a "faltó" se pregunta por qué (opcional).
+  Se guarda como nota de ese día con `motivoFalta: true` y sale junto a la fecha en la
+  ficha ("sin motivo apuntado" si se dejó en blanco). Si el día deja de ser ausencia, el
+  motivo se quita; las notas normales del día se quedan. **Es solo para el dueño: no va
+  en los mensajes que se le envían.** Cancelar la pregunta deja el día como estaba.
 - Los dos mensajes empiezan con los tres recuentos: **días trabajados, días de descanso
   y días que no vino** (estos con su fecha), todos salidos de lo que está marcado.
 - **En los mensajes NO se escribe que los días no trabajados no se pagan.** Lo pidió el
@@ -177,7 +182,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 240 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 246 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.
 

@@ -1991,11 +1991,22 @@
   }
 
   /* Los días que no vino, con su fecha. */
+  /* El motivo apuntado para una ausencia: el que se pidió al marcarla o, si no, cualquier
+     nota de ese día. Es para el dueño: no sale en los mensajes que se le envían. */
+  function motivoDeFalta(t, fecha) {
+    const notas = (t.notasDias || []).filter(n => n.fecha === fecha && (n.texto || '').trim());
+    const motivo = notas.find(n => n.motivoFalta) || notas[0];
+    return motivo ? motivo.texto : '';
+  }
+
   function faltasHTML(t, c) {
     if (!c.faltas.length) return '';
     return `
             <p class="per-seccion">🚫 Días que no vino (${c.faltas.length})</p>
-            <div class="per-pago"><span>${c.faltas.map(fmtFecha).join(' · ')}</span></div>`;
+            ${c.faltas.map(f => {
+              const motivo = motivoDeFalta(t, f);
+              return `<div class="per-pago"><span>${fmtFecha(f)}</span><span class="${motivo ? '' : 'txt-sec'}" style="text-align:right">${motivo ? escapar(motivo) : 'sin motivo apuntado'}</span></div>`;
+            }).join('')}`;
   }
 
   /* Los días que no vino en TODA su etapa, para el resumen del liquidado. */
@@ -2269,7 +2280,7 @@
             ${explicacionLineas(t, c, m.ventasDet, true).map(l => `<div class="stat-linea"><span style="width:100%">${l}</span></div>`).join('')}
             <p class="per-seccion">💶 Lo que le diste ese mes</p>
             ${m.pagos.length ? m.pagos.map(filaPago).join('') : '<p class="vacio" style="padding:6px">Ese mes no le diste nada.</p>'}
-            ${notasMes.length ? `<p class="per-seccion">📝 Notas de ese mes</p>${notasMes.map(n => `<div class="per-pago"><span>📝 ${fmtFecha(n.fecha)} · ${escapar(n.texto)}</span></div>`).join('')}` : ''}
+            ${notasMes.length ? `<p class="per-seccion">📝 Notas de ese mes</p>${notasMes.map(n => `<div class="per-pago"><span>${n.motivoFalta ? '🚫 Faltó' : '📝'} ${fmtFecha(n.fecha)} · ${escapar(n.texto)}</span></div>`).join('')}` : ''}
           </details>`;
     }).join('');
 
@@ -2411,7 +2422,7 @@
         .sort((a, b) => a.fecha.localeCompare(b.fecha));
       const notasHTML = notasMes.map(n => `
         <div class="per-pago">
-          <span>📝 ${fmtFecha(n.fecha)} · ${escapar(n.texto)}</span>
+          <span>${n.motivoFalta ? '🚫 Faltó' : '📝'} ${fmtFecha(n.fecha)} · ${escapar(n.texto)}</span>
           <button class="btn btn-small nota-borrar" data-sid="${t.sid}" data-idx="${n.idx}" title="Eliminar">🗑️</button>
         </div>`).join('');
 
@@ -2571,9 +2582,16 @@
           descansos.delete(f);
           tardes.push({ fecha: f, horas });
         } else if (iTarde >= 0) {
-          tardes.splice(iTarde, 1); faltas.add(f);                  // tarde → faltó
+          // tarde → faltó: preguntar el motivo, para saber luego por qué faltó
+          const motivo = prompt('🚫 ¿Por qué faltó ese día?\n(Opcional: médico, avisó, no avisó… Puedes dejarlo en blanco.)', '');
+          if (motivo === null) return;   // canceló: el día se queda como estaba
+          tardes.splice(iTarde, 1); faltas.add(f);
+          t.notasDias = (t.notasDias || []).filter(n => !(n.fecha === f && n.motivoFalta));
+          if (motivo.trim()) t.notasDias.push({ fecha: f, texto: motivo.trim(), motivoFalta: true });
         } else if (faltas.has(f)) {
           faltas.delete(f);                                          // faltó → sin marcar
+          // Si ya no es una ausencia, su motivo sobra (las notas normales del día se quedan)
+          t.notasDias = (t.notasDias || []).filter(n => !(n.fecha === f && n.motivoFalta));
         } else {
           dias.add(f);                                               // sin marcar → trabajó
         }
