@@ -121,16 +121,21 @@ cargar el lector, en vez de romperse.
   con retraso cuentan en proporción a sus horas
   (`venta del día ÷ horas de jornada × horas trabajadas`). Sus días libres o
   de falta no cuentan nada.
-- **Los días que no vino** se enseñan con su fecha, no solo el número, y con la frase
-  de que esos días no se pagan: no entran en los días trabajados y no se le quita nada
-  de más. Van en la ficha (activo y liquidado) y en los dos textos que se le envían.
+- **Los días que no vino** se enseñan con su fecha, no solo el número, en la ficha
+  (activo y liquidado) y en los dos textos que se le envían. Una falta no descuenta
+  dinero: simplemente ese día no está entre los trabajados.
 - **Motivo de cada ausencia**: al pasar un día a "faltó" se pregunta por qué (opcional).
   Se guarda como nota de ese día con `motivoFalta: true` y sale junto a la fecha en la
   ficha ("sin motivo apuntado" si se dejó en blanco). Si el día deja de ser ausencia, el
   motivo se quita; las notas normales del día se quedan. **Es solo para el dueño: no va
   en los mensajes que se le envían.** Cancelar la pregunta deja el día como estaba.
-- Los dos mensajes empiezan con los tres recuentos: **días trabajados, días de descanso
-  y días que no vino** (estos con su fecha), todos salidos de lo que está marcado.
+- Los dos mensajes empiezan con los recuentos: **días trabajados, días de descanso y
+  días que no vino** (estos con su fecha), todos salidos de lo que está marcado. La línea
+  de descanso **solo sale si hay alguno marcado**: los meses de antes de poder marcarlos
+  dirían "0" y eso, en una prueba de pago, sería falso.
+- En los mensajes, un retraso solo se explica si **descontó dinero** (sin sueldo fijo no
+  hay "cobró 0,00 € en vez de 0,00 €"), y si actuó el tope se dice, para que las filas y
+  el total cuadren también ahí.
 - **En los mensajes NO se escribe que los días no trabajados no se pagan.** Lo pidió el
   dueño: esa frase por escrito se puede usar en su contra. El motivo del importe ya se
   entiende con la línea del fijo (`sueldo ÷ días del mes × días trabajados`).
@@ -182,7 +187,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 246 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 248 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.
 

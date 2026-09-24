@@ -1399,12 +1399,6 @@
     return $('#per-mes').value || hoyISO().slice(0, 7);
   }
 
-  /* Ventas del negocio en un mes (suma de los cierres anotados) */
-  async function ventasDelMes(mes) {
-    const cierres = await DB.buscar({ tipo: 'cierre', desde: mes + '-01', hasta: mes + '-31' });
-    return Math.round(cierres.reduce((s, r) => s + (r.total || 0), 0) * 100) / 100;
-  }
-
   function tramosDe(t) {
     return (t.tramos || []).filter(x => x && x.objetivo > 0 && x.porcentaje > 0)
       .sort((a, b) => a.objetivo - b.objetivo);
@@ -1801,11 +1795,11 @@
     lineas.push('');
     lineas.push(`Días trabajados: ${c.dias.length}` +
       (c.tardes.length ? ` (⏰ ${c.tardes.length} con retraso${c.horasTarde ? `, ${numH(c.horasTarde)} h` : ''})` : ''));
-    lineas.push(`Días de descanso: ${c.descanso}`);
+    if (c.descanso) lineas.push(`Días de descanso: ${c.descanso}`);
     if (c.faltas.length) {
       lineas.push(`Días que no vino: ${c.faltas.length} (${c.faltas.map(fmtFecha).join(' · ')})`);
     }
-    const retrasos = detalleRetrasos(t, c, ventasDet).filter(r => r.horas > 0);
+    const retrasos = detalleRetrasos(t, c, ventasDet).filter(r => r.descuento > 0);
     if (retrasos.length) {
       lineas.push('');
       lineas.push('POR QUÉ SE LE DESCONTÓ DINERO ALGUNOS DÍAS');
@@ -1817,6 +1811,7 @@
       });
       lineas.push('');
       lineas.push(`Llegó tarde ${retrasos.length} día${retrasos.length === 1 ? '' : 's'} este mes.`);
+      if (c.descuentoTopado) lineas.push(`El descuento no puede pasar del fijo del mes: se queda en ${INFORME.eur(c.fijoBruto)}.`);
       lineas.push(`Total descontado por llegar tarde: −${INFORME.eur(c.descuentoTardes)}`);
     }
     lineas.push('');
@@ -1956,7 +1951,7 @@
 
     const sinHoras = filas.some(r => !r.horas);
     const avisoSinHoras = sinHoras
-      ? '<p class="hint" style="margin:6px 0 0">Si alguno de esos días llevaba horas, toca ese día en el calendario y apúntalas.</p>'
+      ? '<p class="hint" style="margin:6px 0 0">Si alguno de esos días llevaba horas, da la vuelta a ese día en el calendario hasta volver a «⏰ llegó tarde» y apúntalas.</p>'
       : '';
     const avisoTope = c.descuentoTopado
       ? `<p class="hint txt-bad" style="margin:6px 0 0">El descuento no puede pasar del fijo del mes: se queda en ${INFORME.eur(c.fijoBruto)}.</p>`
@@ -1990,7 +1985,6 @@
             ${regla}${cuerpo}${cierre}`;
   }
 
-  /* Los días que no vino, con su fecha. */
   /* El motivo apuntado para una ausencia: el que se pidió al marcarla o, si no, cualquier
      nota de ese día. Es para el dueño: no sale en los mensajes que se le envían. */
   function motivoDeFalta(t, fecha) {
@@ -2097,7 +2091,7 @@
     const ex = [];
     ex.push(`Precio del día: ${INFORME.eur(t.sueldoMensual || 0)} ÷ ${t.diasMes || 26} días = <strong>${INFORME.eur(fijoDia)}</strong>`);
     ex.push(`La cuenta del mes se hace con la cifra exacta: ${INFORME.eur(t.sueldoMensual || 0)} ÷ ${t.diasMes || 26} × ${c.dias.length} día${c.dias.length === 1 ? '' : 's'} = <strong>${INFORME.eur(c.fijoBruto)}</strong>`);
-    ex.push(`<small>Si multiplicas ${INFORME.eur(precioDeUnDia(t))} × ${c.dias.length} te salen unos céntimos de más, porque ${INFORME.eur(precioDeUnDia(t))} es el precio del día ya redondeado.</small>`);
+    ex.push(`<small>Si multiplicas ${INFORME.eur(precioDeUnDia(t))} × ${c.dias.length} te pueden salir unos céntimos de diferencia, porque ${INFORME.eur(precioDeUnDia(t))} es el precio del día ya redondeado.</small>`);
     detalleRetrasos(t, c, ventasDet).filter(r => r.horas > 0).forEach(r => {
       ex.push(`⏰ ${fmtFecha(r.fecha)}: llegó ${numH(r.horas)} h tarde → ese día cobró ${INFORME.eur(r.cobra)} en vez de ${INFORME.eur(r.precioDia)}, se le descuentan <strong>${INFORME.eur(r.descuento)}</strong> del fijo`);
     });
@@ -2159,6 +2153,8 @@
       lineas.push('(los objetivos son de cada mes y no se suman: cada mes empieza de cero)');
     }
     const tarde = retrasosDeLaEtapa(t, deuda);
+    tarde.filas = tarde.filas.filter(r => r.descuento > 0);
+    tarde.dias = tarde.filas.length;
     if (tarde.dias) {
       lineas.push('');
       lineas.push('POR QUÉ SE LE DESCONTÓ DINERO ALGUNOS DÍAS');
@@ -2170,6 +2166,9 @@
       });
       lineas.push('');
       lineas.push(`Llegó tarde ${tarde.dias} día${tarde.dias === 1 ? '' : 's'} en toda su etapa.`);
+      if (deuda.meses.some(m => m.calc && m.calc.descuentoTopado)) {
+        lineas.push('Algún mes el descuento llegó al fijo entero y se quedó ahí: nunca puede pasar de lo que le tocaba.');
+      }
       lineas.push(`Total descontado por llegar tarde: ${INFORME.eur(tarde.descuento)}`);
     }
     const faltasEtapa = faltasDeLaEtapa(t, deuda);
@@ -2179,7 +2178,7 @@
       lineas.push('');
       lineas.push('SUS DÍAS');
       lineas.push(`Días trabajados: ${trabajadosEtapa}`);
-      lineas.push(`Días de descanso: ${descansoEtapa}`);
+      if (descansoEtapa) lineas.push(`Días de descanso: ${descansoEtapa}`);
       if (faltasEtapa.dias) {
         lineas.push(`Días que no vino: ${faltasEtapa.dias} (${faltasEtapa.fechas.map(fmtFecha).join(' · ')})`);
       }
@@ -2555,7 +2554,7 @@
       });
     });
 
-    // Día del calendario: 1 toque = trabajó, 2 = faltó, 3 = nada
+    // Día del calendario: la vuelta de toques está explicada dentro (trabajó → descansó → tarde → faltó → sin marcar)
     enCajas('.cal:not(.cal-lectura) .dia', btn => {
       btn.addEventListener('click', guardarConAviso(async () => {
         const t = (await DB.perTodos()).find(x => x.sid === btn.dataset.sid);

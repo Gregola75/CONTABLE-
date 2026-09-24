@@ -933,8 +933,8 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
   const envFal = await leerEnvio();
   chk('faltas', 'El resumen de WhatsApp lleva las fechas de las faltas',
     /Días que no vino: 2/.test(envFal) && /22\/09\/2026/.test(envFal) && /25\/09\/2026/.test(envFal), envFal.slice(0, 400));
-  chk('faltas', 'Y lleva los días trabajados y los de descanso por separado',
-    /Días trabajados: 20/.test(envFal) && /Días de descanso: \d+/.test(envFal), envFal.slice(0, 400));
+  chk('faltas', 'Y lleva los días trabajados',
+    /Días trabajados: 20/.test(envFal), envFal.slice(0, 400));
   chk('faltas', 'Y el mensaje tampoco dice que los días no trabajados no se pagan',
     !/no se pagan/.test(envFal) && !/Solo se cobran/.test(envFal), envFal.slice(0, 400));
   chk('faltas', 'El mensaje del mes no menciona las horas de jornada',
@@ -1039,8 +1039,8 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
   chk('faltas', 'Un mes casi entero sin marcar NO se cuenta como descanso',
     !/de descanso/.test(sinMarcar), sinMarcar.slice(0, 300));
   const envSinMarcar = await leerEnvio();
-  chk('faltas', 'El mensaje dice 0 días de descanso si no marcaste ninguno',
-    /Días de descanso: 0/.test(envSinMarcar), envSinMarcar.slice(0, 250));
+  chk('faltas', 'Si no marcaste ningún descanso, el mensaje no afirma "0 días de descanso"',
+    !/Días de descanso/.test(envSinMarcar), envSinMarcar.slice(0, 250));
 
   // La vuelta completa del calendario, toque a toque
   await sembrarTrabajador({ nombre: 'Ciclo', dias: [], tardes: [], faltas: [], descansos: [] }, []);
@@ -1114,6 +1114,19 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
   chk('faltas', 'Si cancelas la pregunta del motivo, el día no cambia',
     cancelado.tarde && !cancelado.falta, JSON.stringify(cancelado));
   await page.evaluate(() => { if (window.__promptOriginal) window.prompt = window.__promptOriginal; });
+
+  // Trabajador sin sueldo fijo con un retraso: el mensaje no debe decir "0,00 € en vez de 0,00 €"
+  await sembrarTrabajador({ nombre: 'SinSueldo', sueldoMensual: 0, dias: [dd(1)], tardes: [{ fecha: dd(2), horas: 3 }], faltas: [], descansos: [] }, []);
+  const envSinSueldo = await leerEnvio();
+  chk('retrasos', 'Sin sueldo fijo, el mensaje no habla de descuentos de 0,00 €',
+    !/0,00 € en vez de 0,00 €/.test(envSinSueldo) && !/POR QUÉ SE LE DESCONTÓ/.test(envSinSueldo), envSinSueldo.slice(0, 300));
+
+  // Tope: todos los días con retraso de jornada entera -> el mensaje explica por qué no suma
+  const tardesTope = []; for (let d = 1; d <= 21; d++) tardesTope.push({ fecha: dd(d), horas: 8 });
+  await sembrarTrabajador({ nombre: 'Tope', dias: [], tardes: tardesTope, faltas: [], descansos: [] }, []);
+  const envTope = await leerEnvio();
+  chk('retrasos', 'Si se aplica el tope, el mensaje lo dice para que las cuentas cuadren',
+    /no puede pasar del fijo del mes/.test(envTope), envTope.slice(0, 400));
 
   // ══════════════ 7. LECTURA DE FACTURAS (OCR) ══════════════
   console.log('\n═══ 7. DETECCIÓN AUTOMÁTICA DE FACTURAS ═══');
