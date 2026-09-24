@@ -525,8 +525,12 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
   chk('liquidado', 'Reabrir NO borra ninguna de las entregas que le hiciste', reabierto.pagos === 2, 'quedan ' + reabierto.pagos);
   chk('liquidado', 'El historial vuelve a quedar vacío', /Sin trabajadores antiguos/.test(reabierto.historial));
   const trasReabrir = await page.evaluate(async () => {
+    // Tras la baja solo quedan sin bloquear los días que trabajó: se cambia uno a descanso
     const btn = document.querySelector('#per-lista .cal .dia:not([disabled])');
     if (btn) btn.click();
+    await new Promise(r => setTimeout(r, 500));
+    const op = document.querySelector('#modal-body .dia-opcion[data-estado="descanso"]');
+    if (op) op.click();
     await new Promise(r => setTimeout(r, 700));
     return (await DB.perTodos())[0].dias.length;
   });
@@ -1042,38 +1046,78 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
   chk('faltas', 'Si no marcaste ningún descanso, el mensaje no afirma "0 días de descanso"',
     !/Días de descanso/.test(envSinMarcar), envSinMarcar.slice(0, 250));
 
-  // La vuelta completa del calendario, toque a toque
-  await sembrarTrabajador({ nombre: 'Ciclo', dias: [], tardes: [], faltas: [], descansos: [] }, []);
-  const estados = [];
-  for (let i = 0; i < 5; i++) {
-    await page.evaluate(() => {
+  // El menú del día: cada estado se elige directo, sin dar vueltas
+  const elegirDia10 = async (estado, respuesta) => {
+    await page.evaluate(({ estado, respuesta }) => {
+      window.__promptOriginal = window.__promptOriginal || window.prompt;
+      window.prompt = () => respuesta;
       const b = [...document.querySelectorAll('#per-lista .cal .dia')].find(x => x.dataset.fecha === '2026-09-10');
       if (b) b.click();
-    });
-    await page.waitForTimeout(700);
-    estados.push(await page.evaluate(async () => {
+      setTimeout(() => {
+        const op = document.querySelector(`#modal-body .dia-opcion[data-estado="${estado}"]`);
+        if (op) op.click();
+      }, 300);
+    }, { estado, respuesta });
+    await page.waitForTimeout(1000);
+    return page.evaluate(async () => {
       const t = (await DB.perTodos())[0];
       const f = '2026-09-10';
-      if ((t.dias || []).includes(f)) return 'trabajo';
-      if ((t.descansos || []).includes(f)) return 'descanso';
-      if ((t.tardes || []).some(x => (x.fecha || x) === f)) return 'tarde';
-      if ((t.faltas || []).includes(f)) return 'falta';
-      return 'sin marcar';
-    }));
-  }
-  chk('faltas', 'La vuelta del calendario es trabajó → descansó → tarde → faltó → sin marcar',
-    estados.join(' → ') === 'trabajo → descanso → tarde → falta → sin marcar', estados.join(' → '));
+      const tarde = (t.tardes || []).find(x => (x.fecha || x) === f);
+      return {
+        estado: (t.dias || []).includes(f) ? 'trabajo' : ((t.descansos || []).includes(f) ? 'descanso' : (tarde ? 'tarde' : ((t.faltas || []).includes(f) ? 'falta' : 'sin marcar'))),
+        horas: tarde ? tarde.horas : null,
+        motivos: (t.notasDias || []).filter(n => n.fecha === f && n.motivoFalta).map(n => n.texto),
+        modalAbierto: !document.querySelector('#modal').classList.contains('hidden')
+      };
+    });
+  };
+  await sembrarTrabajador({ nombre: 'Menu', dias: [], tardes: [], faltas: [], descansos: [] }, []);
+  const menuAbre = await page.evaluate(async () => {
+    const b = [...document.querySelectorAll('#per-lista .cal .dia')].find(x => x.dataset.fecha === '2026-09-10');
+    if (b) b.click();
+    await new Promise(r => setTimeout(r, 400));
+    return {
+      abierto: !document.querySelector('#modal').classList.contains('hidden'),
+      opciones: [...document.querySelectorAll('#modal-body .dia-opcion')].map(o => o.dataset.estado)
+    };
+  });
+  chk('faltas', 'Tocar un día abre un menú con los cinco estados',
+    menuAbre.abierto && menuAbre.opciones.join() === 'trabajo,descanso,tarde,falta,nada', JSON.stringify(menuAbre));
+  await page.evaluate(() => document.querySelector('#modal-cerrar').click());
+  const directo = await elegirDia10('falta', 'médico');
+  chk('faltas', 'Una falta se marca con un solo toque, sin pasar por el retraso',
+    directo.estado === 'falta' && directo.motivos.join() === 'médico' && !directo.modalAbierto, JSON.stringify(directo));
+  const aTarde = await elegirDia10('tarde', '2,5');
+  chk('faltas', 'Pasar de falta a llegar tarde quita el motivo y guarda las horas (2,5)',
+    aTarde.estado === 'tarde' && aTarde.horas === 2.5 && aTarde.motivos.length === 0, JSON.stringify(aTarde));
+  const corrige = await elegirDia10('tarde', '4');
+  chk('faltas', 'Con un retraso ya puesto, el menú deja corregir las horas (4)',
+    corrige.estado === 'tarde' && corrige.horas === 4, JSON.stringify(corrige));
+  const cancela = await elegirDia10('descanso', null);
+  chk('faltas', 'Elegir descanso no pregunta nada y no deja el día atascado',
+    cancela.estado === 'descanso', JSON.stringify(cancela));
+  const cancelaHoras = await elegirDia10('tarde', null);
+  chk('faltas', 'Cancelar la pregunta de las horas deja el día como estaba (descanso)',
+    cancelaHoras.estado === 'descanso', JSON.stringify(cancelaHoras));
+  const limpio = await elegirDia10('nada', null);
+  chk('faltas', 'Sin marcar deja el día limpio de un toque',
+    limpio.estado === 'sin marcar', JSON.stringify(limpio));
+  await page.evaluate(() => { if (window.__promptOriginal) window.prompt = window.__promptOriginal; });
 
   // ══════════════ 6h. EL MOTIVO DE UNA AUSENCIA ══════════════
   console.log('\n═══ 6h. EL MOTIVO DE UNA AUSENCIA ═══');
-  const tocarDia10 = async (respuesta) => {
-    await page.evaluate((r) => {
+  const tocarDia10 = async (respuesta, estado = 'falta') => {
+    await page.evaluate(({ r, estado }) => {
       window.__promptOriginal = window.__promptOriginal || window.prompt;
       window.prompt = () => r;
       const b = [...document.querySelectorAll('#per-lista .cal .dia')].find(x => x.dataset.fecha === '2026-09-10');
       if (b) b.click();
-    }, respuesta);
-    await page.waitForTimeout(800);
+      setTimeout(() => {
+        const op = document.querySelector(`#modal-body .dia-opcion[data-estado="${estado}"]`);
+        if (op) op.click();
+      }, 300);
+    }, { r: respuesta, estado });
+    await page.waitForTimeout(1000);
     return page.evaluate(async () => {
       const t = (await DB.perTodos())[0];
       const f = '2026-09-10';
@@ -1098,7 +1142,7 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
   chk('faltas', 'El motivo es para ti: NO sale en el mensaje que se le envía',
     !/médico/.test(envMotivo) && /Días que no vino: 1 \(10\/09\/2026\)/.test(envMotivo), envMotivo.slice(0, 300));
 
-  const quitado = await tocarDia10('');
+  const quitado = await tocarDia10('', 'nada');
   chk('faltas', 'Si el día deja de ser ausencia, su motivo se quita',
     !quitado.falta && quitado.motivos.length === 0, JSON.stringify(quitado));
 
@@ -1189,8 +1233,9 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
   await page.evaluate(() => {
     const b = [...document.querySelectorAll('#per-lista .cal .dia')].find(x => x.dataset.fecha === '2026-09-02');
     if (b) b.click();
+    setTimeout(() => { const op = document.querySelector('#modal-body .dia-opcion[data-estado="trabajo"]'); if (op) op.click(); }, 300);
   });
-  await page.waitForTimeout(800);
+  await page.waitForTimeout(1000);
   await page.click('#per-guardar');
   await page.waitForTimeout(900);
   const diasTrasEditar = await page.evaluate(async () => (await DB.perTodos())[0].dias);

@@ -1493,9 +1493,83 @@
     }
     const pie = soloLectura
       ? 'En claro los días que trabajó, 🛌 los de descanso, ⏰ los que llegó tarde y en rojo los que faltó. Su cuenta ya está liquidada: no se pueden cambiar.'
-      : 'Toques en el día → 1: trabajó · 2: 🛌 descansó · 3: ⏰ llegó tarde · 4: faltó · 5: sin marcar. En negro: aún no trabajaba.';
+      : 'Toca un día y elige: trabajó · 🛌 descansó · ⏰ llegó tarde · 🚫 faltó · sin marcar. En negro: aún no trabajaba.';
     return `<div class="cal${soloLectura ? ' cal-lectura' : ''}">${cab}${celdas}</div>
       <p class="hint" style="margin:0 0 8px">${pie}</p>`;
+  }
+
+  /* Estado actual de un día en el calendario de un trabajador */
+  function estadoDelDia(t, f) {
+    if ((t.dias || []).includes(f)) return 'trabajo';
+    if ((t.descansos || []).includes(f)) return 'descanso';
+    const tarde = tardesDe(t).find(x => x.fecha === f);
+    if (tarde) return 'tarde';
+    if ((t.faltas || []).includes(f)) return 'falta';
+    return 'nada';
+  }
+
+  /* Menú de un día: se elige el estado directamente, sin dar vueltas por los
+     demás ni pasar por preguntas que no tocan. Si ya llegó tarde, se pueden
+     corregir las horas; si ya faltó, el motivo. Cancelar no cambia nada. */
+  function abrirMenuDia(t, f) {
+    const actual = estadoDelDia(t, f);
+    const horasActuales = actual === 'tarde' ? (tardesDe(t).find(x => x.fecha === f) || {}).horas || 0 : null;
+    const motivoActual = actual === 'falta' ? motivoDeFalta(t, f) : '';
+    const opciones = [
+      ['trabajo', '✅ Trabajó'],
+      ['descanso', '🛌 Descansó'],
+      ['tarde', actual === 'tarde' ? `⏰ Llegó tarde · cambiar las horas (ahora ${numH(horasActuales)} h)` : '⏰ Llegó tarde'],
+      ['falta', actual === 'falta' ? `🚫 Faltó · cambiar el motivo${motivoActual ? ` (${escapar(motivoActual)})` : ''}` : '🚫 Faltó'],
+      ['nada', '⬜ Sin marcar']
+    ];
+    $('#modal-body').innerHTML = `
+      <h2>${fmtFecha(f)}</h2>
+      <p class="hint">${escapar(t.nombre)} · ¿qué pasó ese día?</p>
+      <div class="dia-menu">
+        ${opciones.map(([estado, texto]) => `<button class="btn btn-small dia-opcion ${estado === actual ? 'active' : ''}" data-estado="${estado}">${texto}</button>`).join('')}
+      </div>`;
+    $('#modal').classList.remove('hidden');
+    $('#modal-body').querySelectorAll('.dia-opcion').forEach(b => {
+      b.addEventListener('click', guardarConAviso(() => aplicarEstadoDia(t.sid, f, b.dataset.estado)));
+    });
+  }
+
+  async function aplicarEstadoDia(sid, f, estado) {
+    const t = (await DB.perTodos()).find(x => x.sid === sid);
+    if (!t) { cerrarModal(); return; }
+    const dias = new Set(t.dias || []);
+    const tardes = tardesDe(t).filter(x => x.fecha !== f);
+    const faltas = new Set(t.faltas || []);
+    const descansos = new Set(t.descansos || []);
+    const eraTarde = tardesDe(t).find(x => x.fecha === f);
+    let notas = t.notasDias || [];
+
+    if (estado === 'tarde') {
+      const resp = prompt('⏰ ¿Cuántas horas llegó tarde ese día?\n(0 = se le paga el día entero igualmente)', eraTarde ? String(eraTarde.horas).replace('.', ',') : '1');
+      if (resp === null) { cerrarModal(); return; }   // canceló: nada cambia
+      const horas = Math.max(0, parseFloat(String(resp || '0').replace(',', '.')) || 0);
+      tardes.push({ fecha: f, horas });
+    } else if (estado === 'falta') {
+      const motivo = prompt('🚫 ¿Por qué faltó ese día?\n(Opcional: médico, avisó, no avisó… Puedes dejarlo en blanco.)', motivoDeFalta(t, f) || '');
+      if (motivo === null) { cerrarModal(); return; }   // canceló: nada cambia
+      faltas.add(f);
+      notas = notas.filter(n => !(n.fecha === f && n.motivoFalta));
+      if (motivo.trim()) notas.push({ fecha: f, texto: motivo.trim(), motivoFalta: true });
+    }
+    // El día solo puede estar en un estado
+    dias.delete(f); descansos.delete(f);
+    if (estado !== 'falta') { faltas.delete(f); notas = notas.filter(n => !(n.fecha === f && n.motivoFalta)); }
+    if (estado === 'trabajo') dias.add(f);
+    if (estado === 'descanso') descansos.add(f);
+
+    t.dias = [...dias].sort();
+    t.tardes = tardes.sort((a, b) => a.fecha.localeCompare(b.fecha));
+    t.faltas = [...faltas].sort();
+    t.descansos = [...descansos].sort();
+    t.notasDias = notas;
+    await DB.perGuardar(t);
+    cerrarModal();
+    pintarPersonal();
   }
 
   /* Colores de los trabajadores (paleta validada para el tema oscuro).
@@ -1959,7 +2033,7 @@
 
     const sinHoras = filas.some(r => !r.horas);
     const avisoSinHoras = sinHoras
-      ? '<p class="hint" style="margin:6px 0 0">Si alguno de esos días llevaba horas, da la vuelta a ese día en el calendario hasta volver a «⏰ llegó tarde» y apúntalas.</p>'
+      ? '<p class="hint" style="margin:6px 0 0">Si alguno de esos días llevaba horas, toca ese día en el calendario y elige «⏰ cambiar las horas».</p>'
       : '';
     const avisoTope = c.descuentoTopado
       ? `<p class="hint txt-bad" style="margin:6px 0 0">El descuento no puede pasar del fijo del mes: se queda en ${INFORME.eur(c.fijoBruto)}.</p>`
@@ -2569,7 +2643,7 @@
       });
     });
 
-    // Día del calendario: la vuelta de toques está explicada dentro (trabajó → descansó → tarde → faltó → sin marcar)
+    // Día del calendario: un toque abre el menú con los cinco estados
     enCajas('.cal:not(.cal-lectura) .dia', btn => {
       btn.addEventListener('click', guardarConAviso(async () => {
         const t = (await DB.perTodos()).find(x => x.sid === btn.dataset.sid);
@@ -2578,43 +2652,7 @@
           toast('Su cuenta ya está liquidada. Para cambiar algo, pulsa antes «Reabrir su ficha».', 4500);
           return;
         }
-        const f = btn.dataset.fecha;
-        const dias = new Set(t.dias || []);
-        const tardes = tardesDe(t);
-        const faltas = new Set(t.faltas || []);
-        const descansos = new Set(t.descansos || []);
-        const iTarde = tardes.findIndex(x => x.fecha === f);
-        // Vuelta completa: sin marcar → trabajó → descansó → llegó tarde → faltó → sin marcar.
-        // El descanso va el segundo porque es lo segundo más frecuente.
-        if (dias.has(f)) {
-          dias.delete(f); descansos.add(f);                          // trabajó → descansó
-        } else if (descansos.has(f)) {
-          // descansó → llegó tarde: preguntar las horas para descontar la parte del día
-          const resp = prompt('⏰ ¿Cuántas horas llegó tarde ese día?\n(0 = se le paga el día entero igualmente)', '1');
-          if (resp === null) return;   // canceló: el día se queda como estaba
-          const horas = Math.max(0, parseFloat(String(resp || '0').replace(',', '.')) || 0);
-          descansos.delete(f);
-          tardes.push({ fecha: f, horas });
-        } else if (iTarde >= 0) {
-          // tarde → faltó: preguntar el motivo, para saber luego por qué faltó
-          const motivo = prompt('🚫 ¿Por qué faltó ese día?\n(Opcional: médico, avisó, no avisó… Puedes dejarlo en blanco.)', '');
-          if (motivo === null) return;   // canceló: el día se queda como estaba
-          tardes.splice(iTarde, 1); faltas.add(f);
-          t.notasDias = (t.notasDias || []).filter(n => !(n.fecha === f && n.motivoFalta));
-          if (motivo.trim()) t.notasDias.push({ fecha: f, texto: motivo.trim(), motivoFalta: true });
-        } else if (faltas.has(f)) {
-          faltas.delete(f);                                          // faltó → sin marcar
-          // Si ya no es una ausencia, su motivo sobra (las notas normales del día se quedan)
-          t.notasDias = (t.notasDias || []).filter(n => !(n.fecha === f && n.motivoFalta));
-        } else {
-          dias.add(f);                                               // sin marcar → trabajó
-        }
-        t.dias = [...dias].sort();
-        t.tardes = tardes.sort((a, b) => a.fecha.localeCompare(b.fecha));
-        t.faltas = [...faltas].sort();
-        t.descansos = [...descansos].sort();
-        await DB.perGuardar(t);
-        pintarPersonal();
+        abrirMenuDia(t, btn.dataset.fecha);
       }));
     });
 

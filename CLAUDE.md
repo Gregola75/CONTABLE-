@@ -78,10 +78,14 @@ cargar el lector, en vez de romperse.
 - Sueldo mensual pactado con ~1 día libre a la semana → **precio del día =
   sueldo ÷ días de trabajo al mes** (26 por defecto, configurable por persona).
   Se paga por día trabajado; el día que no viene, no se paga.
-- Estados de cada día en el calendario, por toques: 1 = trabajó · 2 = 🛌 descansó ·
-  3 = ⏰ llegó tarde (pregunta cuántas horas) · 4 = faltó · 5 = sin marcar. Los días
-  anteriores a su fecha de inicio (o posteriores a su baja) salen bloqueados.
-  El descanso va el segundo porque es lo segundo más frecuente (un día a la semana).
+- Estados de cada día en el calendario: trabajó · 🛌 descansó · ⏰ llegó tarde (pregunta
+  cuántas horas) · 🚫 faltó (pregunta el motivo) · sin marcar. **Un toque abre un menú**
+  (`abrirMenuDia`, en el modal de la app) y se elige el estado directamente: nada de dar
+  vueltas por los demás ni pasar por preguntas que no tocan. Si el día ya es un retraso, el
+  menú ofrece cambiar las horas; si ya es una falta, cambiar el motivo. **Cancelar una
+  pregunta cierra el menú y no cambia nada.** Antes era un ciclo de toques: marcar una
+  falta costaba 4 toques y 2 preguntas, y cancelar la de las horas dejaba el día atascado.
+  Los días anteriores a su fecha de inicio (o posteriores a su baja) salen bloqueados.
 - **El descanso se marca, no se adivina** (`t.descansos`). Antes se calculaba restando
   los trabajados y las faltas a los días del mes, y cualquier día sin marcar se colaba
   como descanso: a un empleado le salían 3 descansos cuando solo había descansado 2.
@@ -205,7 +209,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 256 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 262 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.
 

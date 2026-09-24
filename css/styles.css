@@ -740,6 +740,10 @@ select { appearance: none; -webkit-appearance: none; }
   font-weight: 800;
   border-color: transparent;
 }
+/* Menú de un día del calendario: los cinco estados, uno debajo de otro */
+.dia-menu { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.dia-menu .btn { justify-content: flex-start; text-align: left; padding: 12px 14px; font-size: .92rem; }
+
 .cal .dia.descanso {
   background: #10222b;
   color: #6fc3dd;
