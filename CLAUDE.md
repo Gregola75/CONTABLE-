@@ -49,6 +49,10 @@ cargar el lector, en vez de romperse.
   fecha y total (contarla dos veces deduce IVA de más) y si el desglose no
   cuadra (`base + IVA − retención ≠ total`). Son avisos con confirmación, no
   bloqueos.
+- Con los cierres, el aviso de "se contaría DOS VECES" salta **en los dos sentidos**:
+  al guardar el total del mes si ya hay cierres diarios, y al guardar un cierre diario
+  si ya hay total del mes. Antes solo saltaba en el primero y los ingresos podían ir
+  duplicados al informe de la gestoría.
 - Retención de IRPF típica del alquiler (19 %) y de profesionales (15 / 7 %).
   En una factura con retención, el total pagado ya lleva la retención
   descontada: `base = total − IVA + retención`.
@@ -165,6 +169,13 @@ cargar el lector, en vez de romperse.
   lectura** (se pinta con `<span>`, no con botones desactivados, porque
   `.dia:disabled` taparía los días trabajados). Para corregir algo hay que
   **reabrir la ficha**, que la devuelve a los activos sin borrar ningún pago.
+- Al dar de baja a alguien al que se le adelantó **más** de lo que le correspondía, la
+  ficha dice "TE DEBE ÉL A TI" con el importe, la cabecera "Te debe X" y el aviso de
+  liquidar lo repite. Antes ponía "No le debes nada 0,00 €" y lo escondía.
+- Al **guardar la ficha** (sueldo, objetivos, fechas) se relee el trabajador de la base de
+  datos en ese momento y del formulario solo salen los campos del formulario. El
+  calendario sigue a la vista con el formulario abierto, y los días que se marquen
+  mientras tanto no se pierden.
 - **Nada se borra por antigüedad**: los 10 días solo deciden cuándo baja al historial, y
   allí se queda indefinidamente. Para que no se pierda la prueba por un toque, a un
   trabajador **liquidado no se le puede eliminar**: hay que reabrir su ficha primero.
@@ -180,6 +191,13 @@ a JPEG para caber en un documento de Firestore.
 La app **debe seguir funcionando igual sin nube y sin conexión**: Firebase se
 carga aparte y si falta, todo sigue en local.
 
+**Restaurar una copia de seguridad conserva la fecha de modificación (`mod`) de cada
+registro** (`importarTodo` guarda con `conservarMod`). Si se le pusiera la de hoy, al
+conectar la nube lo restaurado pisaría datos más nuevos que hubiera allí (al estrenar
+móvil, la copia de hace un mes machacaría ese mes en la nube). Una copia antigua sin
+`mod` se trata como muy vieja: gana la nube. Pendiente conocido: si un registro restaurado
+fue borrado en la nube, su lápida lo vuelve a borrar en la siguiente sincronización.
+
 ## Verificar antes de publicar
 
 ```bash
@@ -187,7 +205,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 248 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 256 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.
 

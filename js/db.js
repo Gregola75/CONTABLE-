@@ -89,7 +89,7 @@ const DB = (() => {
 
   async function guardar(registro, opts = {}) {
     if (!registro.sid) registro.sid = nuevoSid();
-    if (!opts.remoto) registro.mod = new Date().toISOString();
+    if (!opts.remoto && !opts.conservarMod) registro.mod = new Date().toISOString();
     const id = await pedir('registros', 'readwrite', s => s.put(registro));
     if (!opts.remoto) avisar('registro', { ...registro, id });
     return id;
@@ -122,7 +122,7 @@ const DB = (() => {
 
   async function provGuardar(p, opts = {}) {
     if (!p.sid) p.sid = nuevoSid();
-    if (!opts.remoto) p.mod = new Date().toISOString();
+    if (!opts.remoto && !opts.conservarMod) p.mod = new Date().toISOString();
     const id = await pedir('proveedores', 'readwrite', s => s.put(p));
     if (!opts.remoto) avisar('proveedor', { ...p, id });
     return id;
@@ -151,7 +151,7 @@ const DB = (() => {
 
   async function perGuardar(t, opts = {}) {
     if (!t.sid) t.sid = nuevoSid();
-    if (!opts.remoto) t.mod = new Date().toISOString();
+    if (!opts.remoto && !opts.conservarMod) t.mod = new Date().toISOString();
     const id = await pedir('personal', 'readwrite', s => s.put(t));
     if (!opts.remoto) avisar('personal', { ...t, id });
     return id;
@@ -166,7 +166,7 @@ const DB = (() => {
 
   async function pagoGuardar(p, opts = {}) {
     if (!p.sid) p.sid = nuevoSid();
-    if (!opts.remoto) p.mod = new Date().toISOString();
+    if (!opts.remoto && !opts.conservarMod) p.mod = new Date().toISOString();
     const id = await pedir('pagos', 'readwrite', s => s.put(p));
     if (!opts.remoto) avisar('pago', { ...p, id });
     return id;
@@ -221,6 +221,13 @@ const DB = (() => {
       throw new Error('El archivo no es una copia de seguridad válida de CONTABLE.');
     }
     let n = 0;
+    // Lo restaurado conserva su fecha de modificación ORIGINAL. Si se le pusiera la
+    // de hoy, al conectar la nube pisaría datos más nuevos que hubiera allí (por
+    // ejemplo, al estrenar móvil: restaurar la copia de hace un mes machacaría el mes
+    // entero en la nube). Una copia antigua sin fecha se trata como muy vieja: que gane
+    // la nube.
+    const conMod = (obj) => ({ ...obj, mod: obj.mod || obj.creado || '1970-01-01T00:00:00.000Z' });
+    const opciones = { conservarMod: true };
     // No duplicar lo que ya está (mismo sid): restaurar una copia es seguro
     // aunque parte de los datos ya existan o ya estén sincronizados
     const sidsExistentes = new Set((await todos()).map(r => r.sid).filter(Boolean));
@@ -231,7 +238,7 @@ const DB = (() => {
       if (typeof copia.imagen === 'string' && copia.imagen.startsWith('data:')) {
         copia.imagen = dataURLABlob(copia.imagen);
       }
-      await guardar(copia);
+      await guardar(conMod(copia), opciones);
       n++;
     }
     if (Array.isArray(datos.proveedores)) {
@@ -241,7 +248,7 @@ const DB = (() => {
         const copia = { ...p };
         delete copia.id;
         if (copia.nombre && !nombres.has(copia.nombre.trim().toLowerCase())) {
-          await provGuardar(copia);
+          await provGuardar(conMod(copia), opciones);
           nombres.add(copia.nombre.trim().toLowerCase());
           n++;
         }
@@ -253,7 +260,7 @@ const DB = (() => {
         const copia = { ...t };
         delete copia.id;
         if (copia.sid && sids.has(copia.sid)) continue;
-        await perGuardar(copia);
+        await perGuardar(conMod(copia), opciones);
         n++;
       }
     }
@@ -263,7 +270,7 @@ const DB = (() => {
         const copia = { ...p };
         delete copia.id;
         if (copia.sid && sids.has(copia.sid)) continue;
-        await pagoGuardar(copia);
+        await pagoGuardar(conMod(copia), opciones);
         n++;
       }
     }

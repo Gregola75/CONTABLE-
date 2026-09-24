@@ -1128,6 +1128,100 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
   chk('retrasos', 'Si se aplica el tope, el mensaje lo dice para que las cuentas cuadren',
     /no puede pasar del fijo del mes/.test(envTope), envTope.slice(0, 400));
 
+  // ══════════════ 6i. CUATRO FALLOS DE LA REVISIÓN ══════════════
+  console.log('\n═══ 6i. CUATRO FALLOS DE LA REVISIÓN (que no vuelvan) ═══');
+
+  // 1) Un cierre diario en un mes que ya tiene el total mensual tiene que avisar
+  await limpiar();
+  await page.evaluate(async () => {
+    await DB.guardar({ tipo: 'cierre', fecha: '2026-07-01', total: 31000, mensual: true, proveedor: '', creado: new Date().toISOString() });
+  });
+  await page.click('.tab[data-tab="cierres"]');
+  await page.click('#cierre-manual');
+  await page.waitForTimeout(300);
+  await page.selectOption('#c-alcance', 'dia');
+  await page.fill('#c-fecha', '2026-07-05');
+  await page.fill('#c-total', '1000');
+  aceptarDialogos = false; ultimoDialogo = '';
+  await page.click('#cierre-guardar');
+  await page.waitForTimeout(700);
+  chk('fiscal', 'Un cierre diario en un mes con TOTAL MENSUAL avisa de que se contaría dos veces',
+    /DOS VECES/.test(ultimoDialogo) && /TOTAL DEL MES/.test(ultimoDialogo), ultimoDialogo.slice(0, 120));
+  chk('fiscal', 'Y si dices que no, no se guarda',
+    await page.evaluate(async () => (await DB.todos()).filter(r => r.tipo === 'cierre').length === 1));
+  aceptarDialogos = true;
+  await page.click('#cierre-cancelar');
+
+  // 2) Restaurar una copia conserva la fecha de modificación (si no, pisaría la nube)
+  const modImport = await page.evaluate(async () => {
+    for (const t of await DB.perTodos()) await DB.perBorrar(t.id);
+    await DB.importarTodo({
+      app: 'CONTABLE', registros: [],
+      personal: [
+        { sid: 'copia-vieja', nombre: 'DeLaCopia', sueldoMensual: 900, diasMes: 26, dias: [], tardes: [], faltas: [], notasDias: [], mod: '2026-01-15T10:00:00.000Z', creado: '2026-01-01T00:00:00.000Z' },
+        { sid: 'copia-sin-mod', nombre: 'SinFecha', sueldoMensual: 900, diasMes: 26, dias: [], tardes: [], faltas: [], notasDias: [], creado: '2026-02-01T00:00:00.000Z' }
+      ]
+    });
+    const lista = await DB.perTodos();
+    return {
+      vieja: (lista.find(t => t.sid === 'copia-vieja') || {}).mod,
+      sinMod: (lista.find(t => t.sid === 'copia-sin-mod') || {}).mod
+    };
+  });
+  chk('copia', 'Lo restaurado conserva su fecha de modificación original (no la de hoy)',
+    modImport.vieja === '2026-01-15T10:00:00.000Z', String(modImport.vieja));
+  chk('copia', 'Una copia antigua sin fecha se trata como vieja: que gane la nube',
+    !!modImport.sinMod && modImport.sinMod < '2026-03', String(modImport.sinMod));
+
+  // 3) Marcar un día con el formulario de edición abierto no se pierde al guardar
+  await page.evaluate(async () => {
+    for (const t of await DB.perTodos()) await DB.perBorrar(t.id);
+    await DB.perGuardar({ nombre: 'Editando', sueldoMensual: 900, diasMes: 26, horasJornada: 7.5, tramos: [], dias: ['2026-09-01'], tardes: [], faltas: [], descansos: [], notasDias: [], creado: new Date().toISOString() });
+  });
+  await page.click('.tab[data-tab="personal"]');
+  await page.fill('#per-mes', '2026-09');
+  await page.dispatchEvent('#per-mes', 'change');
+  await page.waitForTimeout(900);
+  await page.click('#per-lista .per-toggle');
+  await page.waitForTimeout(600);
+  await page.click('#per-lista .per-editar');
+  await page.waitForTimeout(400);
+  await page.evaluate(() => {
+    const b = [...document.querySelectorAll('#per-lista .cal .dia')].find(x => x.dataset.fecha === '2026-09-02');
+    if (b) b.click();
+  });
+  await page.waitForTimeout(800);
+  await page.click('#per-guardar');
+  await page.waitForTimeout(900);
+  const diasTrasEditar = await page.evaluate(async () => (await DB.perTodos())[0].dias);
+  chk('personal', 'Un día marcado con la ficha en edición sigue ahí después de guardar',
+    diasTrasEditar.includes('2026-09-01') && diasTrasEditar.includes('2026-09-02'), JSON.stringify(diasTrasEditar));
+
+  // 5) Dar de baja a alguien a quien adelantaste de más: se dice, no se esconde
+  await page.evaluate(async () => {
+    for (const t of await DB.perTodos()) await DB.perBorrar(t.id);
+    for (const g of await DB.pagoTodos()) await DB.pagoBorrar(g.id);
+    // 2 días a 27,50 = 55,00 y un adelanto de 200 → te debe 145,00
+    await DB.perGuardar({ nombre: 'Adelantado', sueldoMensual: 715, diasMes: 26, horasJornada: 7.5, tramos: [], dias: ['2026-09-01', '2026-09-02'], tardes: [], faltas: [], descansos: [], notasDias: [], fin: '2026-09-02', creado: new Date().toISOString() });
+    const t = (await DB.perTodos())[0];
+    await DB.pagoGuardar({ trabajadorSid: t.sid, fecha: '2026-09-01', importe: 200, notas: 'adelanto', creado: new Date().toISOString() });
+    document.querySelector('#per-mes').dispatchEvent(new Event('change'));
+    await new Promise(r => setTimeout(r, 900));
+  });
+  await page.click('#per-lista .per-toggle');
+  await page.waitForTimeout(600);
+  const txtAdel = (await page.textContent('#per-lista')).replace(/\s+/g, ' ');
+  chk('deuda', 'Al dar de baja con adelanto de más, dice que te debe él a ti (145,00)',
+    /TE DEBE ÉL A TI/.test(txtAdel) && txtAdel.includes('145,00') && !/No le debes nada/.test(txtAdel), txtAdel.slice(0, 400));
+  chk('deuda', 'Y la cabecera de la ficha también lo dice',
+    /Te debe 145,00/.test(txtAdel), txtAdel.slice(0, 300));
+  aceptarDialogos = false; ultimoDialogo = '';
+  await page.click('#per-lista .per-abonar');
+  await page.waitForTimeout(600);
+  chk('deuda', 'Al ir a liquidarlo avisa de que te debe, en vez de "no le debes nada"',
+    /te debe 145,00/.test(ultimoDialogo) && !/no le debes nada/.test(ultimoDialogo), ultimoDialogo.slice(0, 160));
+  aceptarDialogos = true;
+
   // ══════════════ 7. LECTURA DE FACTURAS (OCR) ══════════════
   console.log('\n═══ 7. DETECCIÓN AUTOMÁTICA DE FACTURAS ═══');
   const ocr = await page.evaluate(() => {

@@ -648,6 +648,14 @@
       if (existentes.length && !confirm(`Ya hay un cierre guardado para el ${fmtFecha(fecha)}. ¿Guardar otro de todas formas?`)) {
         return;
       }
+      // Y si ese mes ya tiene un TOTAL MENSUAL, un cierre diario se sumaría encima:
+      // los ingresos del mes irían dos veces al informe de la gestoría
+      const mesDelCierre = fecha.slice(0, 7);
+      const totalMensual = (await DB.buscar({ tipo: 'cierre', desde: mesDelCierre + '-01', hasta: mesDelCierre + '-31' }))
+        .find(r => r.mensual && r.id !== idActual);
+      if (totalMensual && !confirm(`⚠️ ${mesEnLetras(fecha)} ya tiene guardado el TOTAL DEL MES (${INFORME.eur(totalMensual.total)}). Si añades además cierres diarios, los ingresos se contarían DOS VECES en el informe. ¿Seguro que quieres guardarlo?`)) {
+        return;
+      }
     }
 
     const efectivo = parseFloat($('#c-efectivo').value);
@@ -2392,8 +2400,13 @@
         bajaHTML = `
           <div class="per-baja">
             <div>🚪 Dejó de trabajar el <strong>${fmtFecha(t.fin)}</strong></div>
-            <div class="stat-linea"><span>${deuda.total > 0 ? 'DEBES PAGARLE (todo lo pendiente)' : 'No le debes nada'}</span><strong class="${deuda.total > 0 ? 'txt-bad' : 'txt-ok'}">${INFORME.eur(Math.max(0, deuda.total))}</strong></div>
-            <button class="btn btn-primary per-abonar" data-sid="${t.sid}">✔️ ${deuda.total > 0 ? 'Abonar ' + INFORME.eur(deuda.total) + ' y liquidar' : 'Marcar como liquidado'}</button>
+            ${deuda.total > 0
+              ? `<div class="stat-linea"><span>DEBES PAGARLE (todo lo pendiente)</span><strong class="txt-bad">${INFORME.eur(deuda.total)}</strong></div>`
+              : (deuda.total < 0
+                ? `<div class="stat-linea"><span>TE DEBE ÉL A TI (le adelantaste de más)</span><strong class="txt-oro">${INFORME.eur(-deuda.total)}</strong></div>
+                   <p class="hint" style="margin:4px 0 0">Recupéralo o dáselo por bueno antes de liquidar: al liquidar queda apuntado como pagado de más.</p>`
+                : `<div class="stat-linea"><span>No le debes nada</span><strong class="txt-ok">${INFORME.eur(0)}</strong></div>`)}
+            <button class="btn btn-primary per-abonar" data-sid="${t.sid}">✔️ ${deuda.total > 0 ? 'Abonar ' + INFORME.eur(deuda.total) + ' y liquidar' : (deuda.total < 0 ? 'Liquidar (te debe ' + INFORME.eur(-deuda.total) + ')' : 'Marcar como liquidado')}</button>
           </div>`;
       }
 
@@ -2402,7 +2415,9 @@
       if (t.fin) {
         resumenCab = deuda.total > 0
           ? `<strong class="txt-bad">Finiquito: ${INFORME.eur(deuda.total)}</strong>`
-          : '<strong class="txt-ok">✓ Sin deuda</strong>';
+          : (deuda.total < 0
+            ? `<strong class="txt-oro">Te debe ${INFORME.eur(-deuda.total)}</strong>`
+            : '<strong class="txt-ok">✓ Sin deuda</strong>');
       } else if (deuda.total > 0) {
         resumenCab = `<strong class="txt-bad">Le debes ${INFORME.eur(deuda.total)}</strong>`;
       } else if (deuda.total < 0) {
@@ -2641,7 +2656,9 @@
         const finiquito = await pendienteTotal(t, pagosT);
         const mensaje = finiquito > 0
           ? `Se apuntará una entrega de ${INFORME.eur(finiquito)} como liquidación final y "${t.nombre}" quedará como ABONADO. ¿Continuar?`
-          : `¿Marcar a "${t.nombre}" como liquidado? (no le debes nada)`;
+          : (finiquito < 0
+            ? `OJO: "${t.nombre}" te debe ${INFORME.eur(-finiquito)} (le adelantaste más de lo que le correspondía).\n\nSi lo liquidas ahora, quedará apuntado como pagado de más. ¿Liquidar igualmente?`
+            : `¿Marcar a "${t.nombre}" como liquidado? (no le debes nada)`);
         if (!confirm(mensaje)) return;
         if (finiquito > 0) {
           await DB.pagoGuardar({
@@ -2783,12 +2800,18 @@
       porcentaje: parseFloat($(`#pe-pct${i}`).value) || 0
     })).filter(x => x.objetivo > 0 && x.porcentaje > 0);
 
+    // Se relee el trabajador de la base de datos AHORA: el calendario sigue a la vista
+    // con el formulario abierto, y los días que se marquen mientras tanto no pueden
+    // perderse al guardar. Del formulario solo salen los campos del formulario.
+    const actual = perEditando
+      ? ((await DB.perTodos()).find(x => x.sid === perEditando.sid) || perEditando)
+      : null;
     await DB.perGuardar({
-      ...(perEditando
+      ...(actual
         ? {
-            id: perEditando.id, sid: perEditando.sid,
-            dias: perEditando.dias || [], tardes: perEditando.tardes || [], faltas: perEditando.faltas || [], descansos: perEditando.descansos || [], notasDias: perEditando.notasDias || [],
-            liquidado: perEditando.liquidado || '', creado: perEditando.creado
+            id: actual.id, sid: actual.sid,
+            dias: actual.dias || [], tardes: actual.tardes || [], faltas: actual.faltas || [], descansos: actual.descansos || [], notasDias: actual.notasDias || [],
+            liquidado: actual.liquidado || '', creado: actual.creado
           }
         : { dias: [], tardes: [], faltas: [], descansos: [], notasDias: [], liquidado: '', creado: new Date().toISOString() }),
       nombre,
