@@ -1414,6 +1414,7 @@
 
   /* Cálculo del mes de un trabajador: fijo por días + comisión por tramo */
   function calcularMes(t, ventas, pagosMes, mes) {
+    t = trabajadorEn(t, mes);   // con el sueldo y los objetivos que tenía ESE mes
     // Trabajó = días normales + días que llegó tarde (vino igualmente)
     // Las cuentas llegan hasta el día que trabajó: nada anterior a su alta ni
     // posterior a su baja se paga, aunque se quedara marcado en el calendario.
@@ -1455,6 +1456,7 @@
     const entregado = Math.round(pagosMes.reduce((s, p) => s + (p.importe || 0), 0) * 100) / 100;
     const devengado = Math.round((fijo + comision) * 100) / 100;
     return {
+      cond: { sueldoMensual: t.sueldoMensual || 0, diasMes: t.diasMes || 26, horasJornada: t.horasJornada || 7.5, tramos: t.tramos || [] },
       dias, tardes, faltas, descansos, descanso, fueraDePeriodo, horasTarde, descuentoTardes, descuentoTopado, fijoBruto,
       fijo, comision, tramoActual, siguiente,
       devengado, entregado,
@@ -1597,7 +1599,7 @@
     let notas = t.notasDias || [];
 
     if (estado === 'tarde') {
-      const horas = pedirHorasRetraso(t, eraTarde ? String(eraTarde.horas).replace('.', ',') : '1');
+      const horas = pedirHorasRetraso(trabajadorEn(t, f.slice(0, 7)), eraTarde ? String(eraTarde.horas).replace('.', ',') : '1');
       if (horas === null) { cerrarModal(); return; }   // canceló o no se entendió: nada cambia
       tardes.push({ fecha: f, horas: Math.max(0, horas) });
     } else if (estado === 'falta') {
@@ -1634,6 +1636,25 @@
     : { ...x, horas: Math.max(0, Number(x.horas) || 0) }));
   const fechasTardes = (t) => tardesDe(t).map(x => x.fecha);
 
+  /* Un cambio de sueldo, días, jornada u objetivos se aplica DESDE un mes: los meses
+     anteriores, ya pagados o no, se quedan como estaban. El historial vive en
+     t.condiciones = [{ desde: 'AAAA-MM' | '' (desde siempre), sueldoMensual, diasMes,
+     horasJornada, tramos }]. Los campos sueltos de t son siempre los vigentes hoy. */
+  function condicionesEn(t, mes) {
+    const lista = (t.condiciones || []).filter(c => c && (c.desde || '') <= mes)
+      .sort((a, b) => (a.desde || '').localeCompare(b.desde || ''));
+    return lista.length ? lista[lista.length - 1] : null;
+  }
+  /* El trabajador con las condiciones que tenía ese mes */
+  function trabajadorEn(t, mes) {
+    const c = condicionesEn(t, mes);
+    if (!c) return t;
+    return { ...t, sueldoMensual: c.sueldoMensual, diasMes: c.diasMes, horasJornada: c.horasJornada, tramos: c.tramos || [] };
+  }
+  /* Para pintar: el trabajador con las condiciones con las que se calculó ese mes (c.cond),
+     y así lo que se enseña cuadra con lo que se calculó aunque el sueldo haya cambiado. */
+  const condDe = (t, c) => (c && c.cond) ? { ...t, ...c.cond } : t;
+
   /* Precio de un día tal y como se le enseña al trabajador, en céntimos redondos. */
   const precioDeUnDia = (t) => Math.round((t.sueldoMensual || 0) / (t.diasMes || 26) * 100) / 100;
 
@@ -1663,6 +1684,7 @@
      Un total mensual sin detalle por días se reparte por proporción.
      Con conDetalle=true devuelve también el desglose de los días con retraso. */
   function ventasParaTrabajador(t, cierresMes, mes, conDetalle = false) {
+    t = trabajadorEn(t, mes);
     const [a, m] = mes.split('-').map(Number);
     const diasDelMes = new Date(a, m, 0).getDate();
     const jornada = t.horasJornada || 7.5;
@@ -1749,6 +1771,24 @@
       return cache.get(m);
     };
     return (await desgloseDeuda(t, pagosT, cierresDeMes)).total;
+  }
+
+  /* Foto de la cuenta en el momento de liquidar: es la prueba de pago. Si después
+     cambia un cierre, un día o una entrega, la ficha avisa de que la cuenta de hoy
+     ya no es la que se cerró, y vale la que se cerró. */
+  async function fotoDelCuadre(t, pagosT) {
+    const cache = new Map();
+    const cierresDeMes = async (m) => {
+      if (!cache.has(m)) cache.set(m, await DB.buscar({ tipo: 'cierre', desde: m + '-01', hasta: m + '-31' }));
+      return cache.get(m);
+    };
+    const deuda = await desgloseDeuda(t, pagosT, cierresDeMes, true);
+    return {
+      fecha: hoyISO(),
+      correspondio: r2(deuda.meses.reduce((s, m) => s + m.devengado, 0)),
+      pagado: r2(pagosT.reduce((s, p) => s + (p.importe || 0), 0)),
+      meses: deuda.meses.map(m => ({ mes: m.mes, devengado: m.devengado, entregado: m.entregado }))
+    };
   }
 
   const DIAS_EN_MEMORIA = 10; // tras abonar, el trabajador pasa al historial
@@ -1923,6 +1963,7 @@
   /* Texto neutro con lo del trabajador, para enviarle por WhatsApp.
      Sin nombre del negocio, del dueño ni de la app. */
   function resumenTexto(t, c, deuda, pagosT, mes, ventasDet) {
+    t = condDe(t, c);
     const lineas = [];
     lineas.push(`Resumen de ${t.nombre} — ${mesEnLetras(mes + '-01')}`);
     lineas.push('');
@@ -2017,6 +2058,7 @@
      Si ese día hay un cierre anotado, se trae también lo que contó para su
      objetivo (viene de ventasParaTrabajador). */
   function detalleRetrasos(t, c, ventasDet) {
+    t = condDe(t, c);
     const precioDia = precioDeUnDia(t);
     const jornada = t.horasJornada || 7.5;
     const porFecha = new Map(((ventasDet && ventasDet.detalleTardes) || []).map(l => [l.fecha, l]));
@@ -2046,6 +2088,7 @@
      plegado = true en la ficha del activo (que ya es muy larga); en la del
      liquidado va abierto, porque ya está dentro del plegado de su mes. */
   function retrasosHTML(t, c, ventasDet, plegado = false) {
+    t = condDe(t, c);
     const filas = detalleRetrasos(t, c, ventasDet);
     if (!filas.length) return '';
     if (!(t.sueldoMensual > 0)) {
@@ -2148,6 +2191,7 @@
      × días trabajados" y no "precio del día × días", porque lo segundo no cuadra si
      lo multiplica a mano: 900 ÷ 26 son 34,615…, no 34,62 justos. */
   function fijoLineasHTML(t, c) {
+    t = condDe(t, c);
     const sueldo = t.sueldoMensual || 0;
     const diasMes = t.diasMes || 26;
     const n = c.dias.length;
@@ -2168,6 +2212,7 @@
      Sale del mismo cálculo que la comisión, así que la pantalla y el mensaje que
      se le manda no pueden decir cosas distintas. */
   function objetivoLineas(t, c, ventasT, pasado = false) {
+    t = condDe(t, c);
     const tramos = tramosDe(t);
     if (!tramos.length) return [];
     const falta = (obj) => Math.round(Math.max(0, obj - ventasT) * 100) / 100;
@@ -2190,6 +2235,7 @@
 
   /* Lo mismo para la ficha. Devuelve '' si no tiene objetivos pactados. */
   function objetivoHTML(t, c, ventasT, pasado = false) {
+    t = condDe(t, c);
     const lineas = objetivoLineas(t, c, ventasT, pasado);
     if (!lineas.length) {
       return `
@@ -2218,6 +2264,7 @@
      número, paso a paso. Se usan igual en la ficha de un trabajador en activo
      y en la de uno ya liquidado, para que digan exactamente lo mismo. */
   function explicacionLineas(t, c, ventasDet, pasado = false) {
+    t = condDe(t, c);
     const fijoDia = (t.sueldoMensual || 0) / (t.diasMes || 26);
     const jornada = t.horasJornada || 7.5;
     const ventasT = ventasDet.total;
@@ -2261,23 +2308,32 @@
     if (t.inicio || t.fin) {
       lineas.push(`${t.inicio ? 'Del ' + fmtFecha(t.inicio) : ''}${t.fin ? ' al ' + fmtFecha(t.fin) : ''}`.trim());
     }
+    const foto = t.cuadreLiquidacion || null;
+    if (foto) lineas.push(`Cuenta cerrada el ${fmtFecha(foto.fecha)}`);
     lineas.push('');
     lineas.push('LO QUE LE CORRESPONDIÓ, MES A MES');
     if (t.fin) lineas.push(`(cuentas hasta el ${fmtFecha(t.fin)}, su último día)`);
+    if (new Set(deuda.meses.filter(m => m.calc).map(m => JSON.stringify(m.calc.cond))).size > 1) {
+      lineas.push('(el sueldo o los objetivos cambiaron durante su etapa: cada mes va con los suyos)');
+    }
     deuda.meses.forEach(m => {
       const c = m.calc;
       const dias = c ? `${c.dias.length} día${c.dias.length === 1 ? '' : 's'} · ` : '';
       const detalle = c ? `fijo ${INFORME.eur(c.fijo)} + comisión ${INFORME.eur(c.comision)} = ` : '';
       lineas.push(`${mesEnLetras(m.mes + '-01')}: ${dias}${detalle}${INFORME.eur(m.devengado)}`);
       if (c && c.descuentoTardes > 0) {
-        lineas.push(`   (fijo: ${INFORME.eur(t.sueldoMensual || 0)} ÷ ${t.diasMes || 26} × ${c.dias.length} = ${INFORME.eur(c.fijoBruto)} − ${INFORME.eur(c.descuentoTardes)} = ${INFORME.eur(c.fijo)}, por los retrasos de abajo)`);
+        lineas.push(`   (fijo: ${INFORME.eur(c.cond.sueldoMensual)} ÷ ${c.cond.diasMes} × ${c.dias.length} = ${INFORME.eur(c.fijoBruto)} − ${INFORME.eur(c.descuentoTardes)} = ${INFORME.eur(c.fijo)}, por los retrasos de abajo)`);
       }
       if (c) {
         objetivoLineas(t, c, (m.ventasDet && m.ventasDet.total) || 0, true)
           .forEach(l => lineas.push(`   ${l}`));
       }
     });
-    const correspondio = Math.round(deuda.meses.reduce((s, m) => s + m.devengado, 0) * 100) / 100;
+    const correspondioHoy = Math.round(deuda.meses.reduce((s, m) => s + m.devengado, 0) * 100) / 100;
+    const correspondio = foto ? foto.correspondio : correspondioHoy;
+    if (foto && Math.abs(foto.correspondio - correspondioHoy) >= 0.01) {
+      lineas.push(`Nota: desde que se cerró la cuenta ha cambiado algún dato. Los totales son los de la cuenta cerrada.`);
+    }
     lineas.push(`Total que le correspondió: ${INFORME.eur(correspondio)}`);
     const facturado = Math.round(deuda.meses.reduce(
       (s, m) => s + ((m.ventasDet && m.ventasDet.total) || 0), 0) * 100) / 100;
@@ -2322,7 +2378,7 @@
     pagosT.forEach(p => {
       lineas.push(`${p.fecha ? fmtFecha(p.fecha) : 'sin fecha'}: ${INFORME.eur(p.importe)}${p.notas ? ` (${p.notas})` : ''}`);
     });
-    const pagado = Math.round(pagosT.reduce((s, p) => s + (p.importe || 0), 0) * 100) / 100;
+    const pagado = foto ? foto.pagado : Math.round(pagosT.reduce((s, p) => s + (p.importe || 0), 0) * 100) / 100;
     lineas.push(`Total pagado: ${INFORME.eur(pagado)}`);
     lineas.push('');
     const dif = Math.round((correspondio - pagado) * 100) / 100;
@@ -2375,6 +2431,13 @@
     const avisoSinFecha = sinFecha
       ? `<p class="hint txt-bad" style="margin:6px 0 0">⚠️ Hay ${sinFecha} entrega(s) sin fecha, por eso el reparto mes a mes no suma lo mismo que el total. Ponles fecha para que la cuenta cuadre.</p>`
       : '';
+
+    // La cuenta que se cerró al liquidar, frente a la de hoy
+    const foto = t.cuadreLiquidacion || null;
+    const fotoDifiere = !!foto && (Math.abs(foto.correspondio - correspondio) >= 0.01 || Math.abs(foto.pagado - totalPagado) >= 0.01);
+    const fotoHTML = !foto ? '' : (fotoDifiere
+      ? `<p class="hint txt-bad" style="margin:6px 0 0">⚠️ Al liquidar, el ${fmtFecha(foto.fecha)}, le correspondían <strong>${INFORME.eur(foto.correspondio)}</strong> y se le habían pagado <strong>${INFORME.eur(foto.pagado)}</strong>. Hoy la cuenta sale distinta porque algo cambió después (un cierre, un día o una entrega). <strong>Vale la cuenta que se cerró</strong>; revisa qué cambió.</p>`
+      : `<p class="hint txt-ok" style="margin:6px 0 0">🔒 Coincide con la cuenta que se cerró al liquidar, el ${fmtFecha(foto.fecha)}.</p>`);
 
     let cuadreTxt, cuadreClase;
     if (Math.abs(diferencia) < 0.01) { cuadreTxt = '✓ Cuadra: no quedó nada pendiente'; cuadreClase = 'txt-ok'; }
@@ -2432,6 +2495,7 @@
             <div class="stat-linea"><span>Le pagaste en total (todas las entregas)</span><strong>${INFORME.eur(totalPagado)}</strong></div>
             <div class="stat-linea"><span>Diferencia</span><strong class="${cuadreClase}">${cuadreTxt}</strong></div>
             ${avisoSinFecha}
+            ${fotoHTML}
             ${tarde.dias ? `
             <div class="stat-linea"><span>⏰ Llegó tarde ${tarde.dias} día${tarde.dias === 1 ? '' : 's'} en toda su etapa <small class="txt-sec">(${numH(tarde.horas)} h)</small></span><strong class="txt-bad">se le descontaron ${INFORME.eur(tarde.descuento)}</strong></div>
             <details class="ocr-details" style="margin:6px 0 0">
@@ -2756,6 +2820,8 @@
             creado: new Date().toISOString()
           });
         }
+        const pagosAhora = (await DB.pagoTodos()).filter(p => p.trabajadorSid === t.sid);
+        t.cuadreLiquidacion = await fotoDelCuadre(t, pagosAhora);   // la cuenta que se cierra hoy
         t.liquidado = hoyISO();
         await DB.perGuardar(t);
         toast('✔️ Abonado. Quedará en el historial como prueba de pago.');
@@ -2770,6 +2836,7 @@
         if (!t) return;
         if (!confirm(`Se volverá a abrir la ficha de "${t.nombre}" para poder corregir días, sueldo u objetivos.\n\nLo que ya le pagaste NO se borra. Si alguna entrega está mal, bórrala después desde su lista.\n\n¿Continuar?`)) return;
         t.liquidado = '';
+        delete t.cuadreLiquidacion;   // la cuenta vuelve a estar abierta
         await DB.perGuardar(t);
         perAbiertos.add(t.sid);
         toast('↩️ Ficha reabierta. Vuelve a aparecer arriba con el resto.');
@@ -2865,6 +2932,8 @@
       $(`#pe-pct${i}`).value = tramos[i - 1] ? tramos[i - 1].porcentaje : '';
     });
     $('#pe-notas').value = t ? (t.notas || '') : '';
+    $('#pe-desde').value = t ? hoyISO().slice(0, 7) : '';
+    $('#pe-desde-wrap').classList.toggle('hidden', !t);
     $('#per-borrar').classList.toggle('hidden', !t);
     $('#per-form').classList.remove('hidden');
     $('#pe-nombre').focus();
@@ -2895,7 +2964,35 @@
     const actual = perEditando
       ? ((await DB.perTodos()).find(x => x.sid === perEditando.sid) || perEditando)
       : null;
+
+    // Un cambio de sueldo, días, jornada u objetivos NO reescribe los meses pasados:
+    // se aplica desde el mes elegido y los anteriores se quedan como estaban.
+    const nuevas = {
+      sueldoMensual: Math.round(sueldo * 100) / 100,
+      diasMes,
+      horasJornada: Math.max(1, Math.min(16, parseFloat($('#pe-jornada').value) || 7.5)),
+      tramos
+    };
+    const firmaCond = (c) => JSON.stringify([+c.sueldoMensual || 0, +c.diasMes || 26, +c.horasJornada || 7.5, (c.tramos || []).map(x => [+x.objetivo, +x.porcentaje])]);
+    let condiciones = actual ? (actual.condiciones || []).slice() : [];
+    let avisoDesde = '';
+    if (actual) {
+      const viejas = { sueldoMensual: actual.sueldoMensual, diasMes: actual.diasMes, horasJornada: actual.horasJornada, tramos: actual.tramos || [] };
+      if (firmaCond(viejas) !== firmaCond(nuevas)) {
+        const desde = $('#pe-desde').value || '';
+        if (!desde) {
+          condiciones = [];                                   // corrección de todo su historial
+          avisoDesde = ' Se ha corregido TODO su historial con las condiciones nuevas.';
+        } else {
+          if (!condiciones.length) condiciones.push({ desde: '', ...viejas });   // lo de antes, desde siempre
+          condiciones = condiciones.filter(c => (c.desde || '') < desde);
+          condiciones.push({ desde, ...nuevas });
+          avisoDesde = ` Las condiciones nuevas valen desde ${mesEnLetras(desde + '-01')}; los meses anteriores se quedan como estaban.`;
+        }
+      }
+    }
     await DB.perGuardar({
+      condiciones,
       ...(actual
         ? {
             id: actual.id, sid: actual.sid,
@@ -2904,17 +3001,14 @@
           }
         : { dias: [], tardes: [], faltas: [], descansos: [], notasDias: [], liquidado: '', creado: new Date().toISOString() }),
       nombre,
-      sueldoMensual: Math.round(sueldo * 100) / 100,
-      diasMes,
-      horasJornada: Math.max(1, Math.min(16, parseFloat($('#pe-jornada').value) || 7.5)),
+      ...nuevas,
       inicio: $('#pe-inicio').value || '',
       fin: $('#pe-fin').value || '',
-      tramos,
       notas: $('#pe-notas').value.trim()
     });
     perEditando = null;
     $('#per-form').classList.add('hidden');
-    toast('💾 Trabajador guardado.');
+    toast('💾 Trabajador guardado.' + avisoDesde, avisoDesde ? 6000 : undefined);
     pintarPersonal();
   }));
 

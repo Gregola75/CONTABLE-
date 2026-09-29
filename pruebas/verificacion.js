@@ -1297,6 +1297,90 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
   chk('retrasos', 'Si nunca se entiende ni se contesta, el día no cambia', await horasCon(['hola']) === 'sigue trabajado');
   await page.evaluate(() => { if (window.__promptOriginal) window.prompt = window.__promptOriginal; });
 
+  // ══════════════ 6k. CAMBIAR EL SUELDO NO REESCRIBE LO YA PAGADO ══════════════
+  console.log('\n═══ 6k. CAMBIAR EL SUELDO (desde cuándo) ═══');
+  await page.evaluate(async () => {
+    for (const t of await DB.perTodos()) await DB.perBorrar(t.id);
+    for (const g of await DB.pagoTodos()) await DB.pagoBorrar(g.id);
+    for (const r of await DB.todos()) await DB.borrar(r.id);
+    const dias = []; for (let d = 1; d <= 26; d++) dias.push(`2026-07-${String(d).padStart(2, '0')}`);
+    await DB.perGuardar({ nombre: 'Subida', sueldoMensual: 900, diasMes: 26, horasJornada: 7.5, tramos: [], dias, tardes: [], faltas: [], descansos: [], notasDias: [], inicio: '2026-07-01', creado: new Date().toISOString() });
+    const t = (await DB.perTodos())[0];
+    await DB.pagoGuardar({ trabajadorSid: t.sid, fecha: '2026-07-31', importe: 900, notas: 'julio', creado: new Date().toISOString() });
+  });
+  const verMes = async (mes) => {
+    await page.fill('#per-mes', mes);
+    await page.dispatchEvent('#per-mes', 'change');
+    await page.waitForTimeout(900);
+    const abierta = await page.evaluate(() => { const b = document.querySelector('#per-lista .per-body'); return !!b && !b.classList.contains('hidden'); });
+    if (!abierta) { await page.click('#per-lista .per-toggle'); await page.waitForTimeout(700); }
+    return (await page.textContent('#per-lista')).replace(/\s+/g, ' ');
+  };
+  const cambiarSueldo = async (sueldo, desde) => {
+    await page.click('#per-lista .per-editar');
+    await page.waitForTimeout(400);
+    await page.fill('#pe-sueldo', String(sueldo));
+    await page.fill('#pe-desde', desde);
+    await page.click('#per-guardar');
+    await page.waitForTimeout(900);
+  };
+  let julio = await verMes('2026-07');
+  chk('personal', 'Julio a 900 € pagado entero: al día', /Al día/.test(julio) && julio.includes('900,00 € ÷ 26 × 26'), julio.slice(0, 300));
+  await cambiarSueldo(1000, '2026-09');
+  julio = await verMes('2026-07');
+  chk('personal', 'Subir el sueldo desde septiembre NO toca julio: sigue al día y con 900 €',
+    /Al día/.test(julio) && julio.includes('900,00 € ÷ 26 × 26') && !/Le debes/.test(julio), julio.slice(0, 400));
+  await page.evaluate(async () => { const t = (await DB.perTodos())[0]; t.dias = [...t.dias, '2026-09-01']; await DB.perGuardar(t); });
+  const sept = await verMes('2026-09');
+  chk('personal', 'Y septiembre ya va con el sueldo nuevo: 1000 ÷ 26 = le debes 38,46',
+    sept.includes('1000,00 € ÷ 26 × 1') && /Le debes 38,46/.test(sept), sept.slice(0, 400));
+  const hist = await page.evaluate(async () => ((await DB.perTodos())[0].condiciones || []).map(c => [c.desde, c.sueldoMensual]));
+  chk('personal', 'Queda el historial: 900 desde siempre y 1000 desde 2026-09', JSON.stringify(hist) === '[["",900],["2026-09",1000]]', JSON.stringify(hist));
+  const envJul = await (async () => { await verMes('2026-07'); return leerEnvio(); })();
+  chk('personal', 'El mensaje de julio sigue diciendo 900 €, el sueldo que tenía entonces', /900,00 € ÷ 26 × 26/.test(envJul) && !/1000,00/.test(envJul), envJul.slice(0, 300));
+  await page.evaluate(async () => { const t = (await DB.perTodos())[0]; t.dias = t.dias.filter(d => d !== '2026-09-01'); await DB.perGuardar(t); });
+  await verMes('2026-07');
+  await cambiarSueldo(950, '');
+  julio = await verMes('2026-07');
+  chk('personal', 'Con "desde" en blanco es una corrección de todo: julio pasa a 950 y le debes 50',
+    julio.includes('950,00 € ÷ 26 × 26') && /Le debes 50,00/.test(julio), julio.slice(0, 400));
+  chk('personal', 'Y el historial se limpia', await page.evaluate(async () => ((await DB.perTodos())[0].condiciones || []).length === 0));
+
+  // ══════════════ 6l. LA CUENTA SE CONGELA AL LIQUIDAR ══════════════
+  console.log('\n═══ 6l. LA CUENTA SE CONGELA AL LIQUIDAR ═══');
+  await page.evaluate(async () => {
+    for (const t of await DB.perTodos()) await DB.perBorrar(t.id);
+    for (const g of await DB.pagoTodos()) await DB.pagoBorrar(g.id);
+    const dias = []; for (let d = 1; d <= 10; d++) dias.push(`2026-08-${String(d).padStart(2, '0')}`);
+    dias.push('2026-09-01', '2026-09-02');
+    await DB.perGuardar({ nombre: 'Congelado', sueldoMensual: 715, diasMes: 26, horasJornada: 7.5, tramos: [], dias, tardes: [], faltas: [], descansos: [], notasDias: [], inicio: '2026-08-01', fin: '2026-09-02', creado: new Date().toISOString() });
+    const t = (await DB.perTodos())[0];
+    await DB.pagoGuardar({ trabajadorSid: t.sid, fecha: '2026-09-01', importe: 200, notas: 'a cuenta', creado: new Date().toISOString() });
+  });
+  await verMes('2026-09');
+  await page.click('#per-lista .per-abonar');
+  await page.waitForTimeout(1100);
+  const foto = await page.evaluate(async () => (await DB.perTodos())[0].cuadreLiquidacion);
+  chk('liquidado', 'Al liquidar se guarda la foto de la cuenta: correspondió 330 y pagado 330',
+    !!foto && cerca(foto.correspondio, 330) && cerca(foto.pagado, 330) && foto.meses.length === 2, JSON.stringify(foto));
+  // Alguien cambia un dato después: un día más en agosto
+  await page.evaluate(async () => {
+    const t = (await DB.perTodos())[0];
+    t.dias = [...t.dias, '2026-08-11'].sort();
+    await DB.perGuardar(t);
+  });
+  const txtCong = await verMes('2026-09');
+  chk('liquidado', 'La ficha avisa de que la cuenta de hoy (357,50) ya no es la que se cerró (330,00)',
+    /Vale la cuenta que se cerró/.test(txtCong) && txtCong.includes('357,50') && txtCong.includes('330,00'), txtCong.slice(0, 600));
+  const envCong = await leerEnvio();
+  chk('liquidado', 'El mensaje dice que la cuenta está cerrada y usa los totales cerrados (330, todo pagado)',
+    /Cuenta cerrada el/.test(envCong) && /Total que le correspondió: 330,00/.test(envCong) && /CUADRE: está todo pagado/.test(envCong), envCong.slice(0, 400));
+  chk('liquidado', 'Y avisa de que algún dato cambió después', /ha cambiado algún dato/.test(envCong), envCong.slice(0, 500));
+  await page.click('#per-lista .per-reabrir');
+  await page.waitForTimeout(1100);
+  chk('liquidado', 'Al reabrir la ficha, la foto desaparece: la cuenta vuelve a estar abierta',
+    await page.evaluate(async () => (await DB.perTodos())[0].cuadreLiquidacion === undefined));
+
   // ══════════════ 7. LECTURA DE FACTURAS (OCR) ══════════════
   console.log('\n═══ 7. DETECCIÓN AUTOMÁTICA DE FACTURAS ═══');
   const ocr = await page.evaluate(() => {
