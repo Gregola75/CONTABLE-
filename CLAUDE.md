@@ -191,6 +191,17 @@ cargar el lector, en vez de romperse.
   18,62 €. El mensaje que se le envía reparte igual el pendiente de otros meses.
 - En la línea del fijo se dice qué es cada número (`sueldo ÷ los 26 días pactados al mes
   × los 26 días que vino`), porque cuando coinciden "÷ 26 × 26" no se entiende.
+- **Bonos** (`t.bonos = [{ fecha, importe, motivo }]`): un extra que el dueño decide darle
+  a alguien un mes, si quiere. Se apunta en la ficha del activo (fecha, importe y motivo
+  opcional) y **se suma a lo que le corresponde ese mes** (`calcularMes` devuelve `bonos` y
+  `bono`; `devengado = fijo + comisión + bono`), así que arrastra como deuda igual que el
+  resto y entra en el coste de personal del cuadro de mando. **No es una entrega**: el
+  dinero se apunta luego como pago, como siempre. Sale en la ficha (activo y liquidado, en
+  su mes), en la cuenta explicada y en los dos textos, con el motivo
+  (`Bono (cubrió a un compañero): 50,00 €` y `fijo + comisión + bono = total`). Sin bono, los
+  textos no cambian ni una coma. Un bono con fecha fuera de su etapa no se guarda, para que
+  no se pierda en un mes que no se enseña. Al guardar la ficha se conservan (`bonos:
+  actual.bonos`), como los días.
 - Al dar de baja, se calcula el finiquito completo; al abonarlo queda 10 días
   visible y luego pasa al historial como prueba de pago.
 - **Un trabajador liquidado conserva su ficha entera y comprobable**, tanto esos
@@ -238,7 +249,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 292 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 305 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.
 

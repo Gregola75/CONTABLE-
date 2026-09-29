@@ -12,7 +12,7 @@ bash pruebas/ejecutar.sh
 
 Al final dice `✅ TODO CORRECTO` o lista los fallos encontrados.
 
-## Qué se comprueba (292 comprobaciones)
+## Qué se comprueba (305 comprobaciones)
 
 **Informe trimestral** — que los ingresos y gastos del trimestre son los
 correctos, que no se cuelan registros de otros meses, que se agrupan las
@@ -49,6 +49,11 @@ nada (agosto: 34,62 − 16,00 = +18,62; septiembre: +900,00), que el "÷ 26 × 2
 es cada número, que el mensaje reparte igual el pendiente, y que al corregir la fecha de
 alta al 1 de septiembre el 31 de agosto deja de pagarse (884,00) y agosto avisa del día
 fuera del periodo.
+
+**Bonos** — que un bono de 50 € con motivo se suma a lo que le corresponde (692,31 → 742,31),
+sale en la ficha y en el mensaje con su motivo y la suma (`fijo + comisión + bono`), que sin
+importe o con fecha fuera de su etapa no se guarda, que guardar la ficha no lo pierde, que se
+puede quitar, y que en la ficha de un liquidado queda en su mes y en el texto de toda su etapa.
 
 **Días que no vino y cierre en la baja** — que las faltas se ven con su fecha y con su
 motivo (solo en la ficha, nunca en el mensaje), y que no descuentan dinero; que un día marcado antes del alta

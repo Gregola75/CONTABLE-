@@ -1440,6 +1440,73 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
       return true;
     }) && !/Agosto 2026: le correspondió/.test(await (async () => { await verMes('2026-09'); return aLaVista(); })()));
 
+  // ══════════════ 6n. BONOS: UN EXTRA QUE SE LE DA SI SE QUIERE ══════════════
+  console.log('\n═══ 6n. BONOS ═══');
+  await page.evaluate(async () => {
+    for (const t of await DB.perTodos()) await DB.perBorrar(t.id);
+    for (const g of await DB.pagoTodos()) await DB.pagoBorrar(g.id);
+    for (const r of await DB.todos()) await DB.borrar(r.id);
+    const dias = []; for (let d = 1; d <= 20; d++) dias.push(`2026-09-${String(d).padStart(2, '0')}`);
+    await DB.perGuardar({ nombre: 'Bonificado', sueldoMensual: 900, diasMes: 26, horasJornada: 7.5, tramos: [], dias, tardes: [], faltas: [], descansos: [], notasDias: [], inicio: '2026-09-01', creado: new Date().toISOString() });
+  });
+  let txtBono = await verMes('2026-09');
+  chk('bonos', 'Sin bono: 20 días = 692,31 y ningún apartado de bono',
+    /Le debes 692,31/.test(txtBono) && !/BONO DEL MES/.test(txtBono), txtBono.slice(0, 300));
+  chk('bonos', 'La ficha ofrece apuntar un bono con fecha, importe y motivo',
+    await page.evaluate(() => !!document.querySelector('#per-lista .bono-apuntar') && !!document.querySelector('#per-lista .bono-motivo')));
+  // Sin importe no se apunta
+  await page.click('#per-lista .bono-apuntar');
+  await page.waitForTimeout(500);
+  chk('bonos', 'Sin importe no se apunta nada', await page.evaluate(async () => ((await DB.perTodos())[0].bonos || []).length === 0));
+  // Un bono de 50 € por cubrir a un compañero
+  await page.fill('#per-lista .bono-fecha', '2026-09-15');
+  await page.fill('#per-lista .bono-importe', '50');
+  await page.fill('#per-lista .bono-motivo', 'cubrió a un compañero');
+  await page.click('#per-lista .bono-apuntar');
+  await page.waitForTimeout(900);
+  txtBono = await verMes('2026-09');
+  chk('bonos', 'Con un bono de 50: le debes 742,31 (692,31 + 50)', /Le debes 742,31/.test(txtBono), txtBono.slice(0, 300));
+  chk('bonos', 'El bono sale en la ficha con su fecha y su motivo',
+    /15\/09\/2026 · cubrió a un compañero\s*50,00 €/.test(txtBono) && /BONO DEL MES.*\+50,00 €/.test(txtBono), txtBono.slice(0, 900));
+  chk('bonos', 'La cuenta explicada lo suma: fijo 692,31 + comisión 0,00 + bono 50,00 = 742,31',
+    /fijo 692,31 € \+ comisión 0,00 € \+ bono 50,00 € = 742,31 €/.test(txtBono), txtBono.slice(0, 1500));
+  const envBono = await leerEnvio();
+  chk('bonos', 'En el mensaje va el bono con su motivo y la suma',
+    /Bono \(cubrió a un compañero\): 50,00 €/.test(envBono) && /Fijo 692,31 € \+ comisión 0,00 € \+ bono 50,00 € = 742,31 €/.test(envBono) && /Corresponde este mes: 742,31 €/.test(envBono), envBono.slice(0, 600));
+  chk('bonos', 'El mensaje sigue sin nombre del negocio ni jornada', !/WanderContable|jornada/i.test(envBono));
+  // Un bono con fecha fuera de su etapa no entra (se avisa y no se guarda)
+  await page.fill('#per-lista .bono-fecha', '2026-08-20');
+  await page.fill('#per-lista .bono-importe', '30');
+  await page.click('#per-lista .bono-apuntar');
+  await page.waitForTimeout(600);
+  chk('bonos', 'Un bono con fecha anterior a su alta no se guarda (avisaría de que cae fuera de su etapa)',
+    await page.evaluate(async () => ((await DB.perTodos())[0].bonos || []).length === 1));
+  // El bono se arrastra como deuda y no se pierde al editar la ficha
+  await cambiarSueldo(900, '');
+  txtBono = await verMes('2026-09');
+  chk('bonos', 'Guardar la ficha (sueldo, fechas…) no pierde el bono', /Le debes 742,31/.test(txtBono), txtBono.slice(0, 300));
+  // Se puede quitar
+  await page.click('#per-lista .bono-borrar');
+  await page.waitForTimeout(900);
+  txtBono = await verMes('2026-09');
+  chk('bonos', 'Al quitarlo, vuelve a 692,31', /Le debes 692,31/.test(txtBono) && !/BONO DEL MES/.test(txtBono), txtBono.slice(0, 300));
+  // En la ficha de un liquidado, el bono queda en su mes como prueba
+  await page.evaluate(async () => {
+    const t = (await DB.perTodos())[0];
+    t.bonos = [{ fecha: '2026-09-20', importe: 25, motivo: 'buen mes' }];
+    t.fin = '2026-09-20';
+    await DB.perGuardar(t);
+  });
+  await verMes('2026-09');
+  await page.click('#per-lista .per-abonar');
+  await page.waitForTimeout(1100);
+  const txtBonoL = await verMes('2026-09');
+  chk('bonos', 'Liquidado: le correspondió 717,31 (692,31 + 25) y cuadra',
+    /Le correspondió en todo su tiempo\s*717,31 €/.test(txtBonoL) && /Cuadra: no quedó nada pendiente/.test(txtBonoL), txtBonoL.slice(0, 600));
+  const envBonoL = await leerEnvio();
+  chk('bonos', 'El texto de toda su etapa lleva el bono en su mes',
+    /Septiembre 2026: 20 días · fijo 692,31 € \+ comisión 0,00 € \+ bono 25,00 € = 717,31 €/.test(envBonoL) && /Bono \(buen mes\): 25,00 €/.test(envBonoL), envBonoL.slice(0, 600));
+
   // ══════════════ 7. LECTURA DE FACTURAS (OCR) ══════════════
   console.log('\n═══ 7. DETECCIÓN AUTOMÁTICA DE FACTURAS ═══');
   const ocr = await page.evaluate(() => {

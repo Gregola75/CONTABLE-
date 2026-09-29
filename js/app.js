@@ -1453,12 +1453,17 @@
     }
     const comision = tramoActual ? Math.round(ventas * tramoActual.porcentaje) / 100 : 0;
 
+    // Bonos: un extra que el dueño decide darle ese mes (con su motivo). Se suma a
+    // lo que le corresponde, como el fijo y la comisión, y arrastra igual.
+    const bonos = bonosDe(t).filter(b => delMes(b.fecha) && dentroDelPeriodo(b.fecha));
+    const bono = Math.round(bonos.reduce((s, b) => s + b.importe, 0) * 100) / 100;
+
     const entregado = Math.round(pagosMes.reduce((s, p) => s + (p.importe || 0), 0) * 100) / 100;
-    const devengado = Math.round((fijo + comision) * 100) / 100;
+    const devengado = Math.round((fijo + comision + bono) * 100) / 100;
     return {
       cond: { sueldoMensual: t.sueldoMensual || 0, diasMes: t.diasMes || 26, horasJornada: t.horasJornada || 7.5, tramos: t.tramos || [] },
       dias, tardes, faltas, descansos, descanso, fueraDePeriodo, horasTarde, descuentoTardes, descuentoTopado, fijoBruto,
-      fijo, comision, tramoActual, siguiente,
+      fijo, comision, tramoActual, siguiente, bonos, bono,
       devengado, entregado,
       pendiente: Math.round((devengado - entregado) * 100) / 100
     };
@@ -1654,6 +1659,58 @@
   /* Para pintar: el trabajador con las condiciones con las que se calculó ese mes (c.cond),
      y así lo que se enseña cuadra con lo que se calculó aunque el sueldo haya cambiado. */
   const condDe = (t, c) => (c && c.cond) ? { ...t, ...c.cond } : t;
+
+  /* Los bonos de un trabajador, saneados: { fecha, importe (en céntimos redondos), motivo }.
+     Uno sin fecha o sin importe no cuenta nada. */
+  function bonosDe(t) {
+    return (t.bonos || [])
+      .filter(b => b && b.fecha && Number(b.importe) > 0)
+      .map(b => ({ fecha: b.fecha, importe: Math.round(Number(b.importe) * 100) / 100, motivo: (b.motivo || '').trim() }));
+  }
+
+  /* Fecha que se propone para un bono: hoy si se está viendo este mes; si no, el
+     último día del mes que se ve. Siempre dentro de los días que trabajó, para que
+     entre en su cuenta y no se pierda en un mes que no se enseña. */
+  function fechaParaBono(t, mes) {
+    const hoy = hoyISO();
+    const [a, m] = mes.split('-').map(Number);
+    let f = hoy.startsWith(mes) ? hoy : `${mes}-${String(new Date(a, m, 0).getDate()).padStart(2, '0')}`;
+    if (t.fin && f > t.fin) f = t.fin;
+    if (t.inicio && f < t.inicio) f = t.inicio;
+    return f;
+  }
+
+  /* Las líneas de los bonos de un mes, para los dos textos que se le envían. */
+  function bonoLineas(c) {
+    if (!(c.bono > 0)) return [];
+    const lineas = c.bonos.map(b => `Bono${b.motivo ? ` (${b.motivo})` : ''}: ${INFORME.eur(b.importe)}`);
+    if (c.bonos.length > 1) lineas.push(`Total de bonos: ${INFORME.eur(c.bono)}`);
+    return lineas;
+  }
+
+  /* "fijo X + comisión Y = Z", y con "+ bono" solo cuando lo hay, para que el texto
+     de quien no tiene bono no cambie ni una coma. */
+  function sumaDelMes(c) {
+    return `fijo ${INFORME.eur(c.fijo)} + comisión ${INFORME.eur(c.comision)}${c.bono > 0 ? ` + bono ${INFORME.eur(c.bono)}` : ''} = ${INFORME.eur(c.devengado)}`;
+  }
+
+  /* Los bonos del mes en la ficha. Con botón de borrar en la ficha del activo;
+     en la de un liquidado, solo lectura. */
+  function bonoHTML(t, c, editable) {
+    if (!(c.bono > 0)) return '';
+    const filas = c.bonos.map(b => {
+      const idx = (t.bonos || []).findIndex(x => x && x.fecha === b.fecha && Math.round(Number(x.importe) * 100) / 100 === b.importe && (x.motivo || '').trim() === b.motivo);
+      return `
+            <div class="per-pago">
+              <span>🎁 ${fmtFecha(b.fecha)}${b.motivo ? ' · ' + escapar(b.motivo) : ''}</span>
+              <span>${INFORME.eur(b.importe)}${editable && idx >= 0 ? ` <button class="btn btn-small bono-borrar" data-sid="${t.sid}" data-idx="${idx}" title="Eliminar">🗑️</button>` : ''}</span>
+            </div>`;
+    }).join('');
+    return `
+            <p class="per-seccion">🎁 Bono${c.bonos.length === 1 ? '' : 's'} ${editable ? 'de este mes' : 'de ese mes'}</p>
+            ${filas}
+            <div class="stat-linea"><span><strong>BONO DEL MES</strong> <small class="txt-sec">(se suma a lo que le corresponde)</small></span><strong class="txt-ok">+${INFORME.eur(c.bono)}</strong></div>`;
+  }
 
   /* Precio de un día tal y como se le enseña al trabajador, en céntimos redondos. */
   const precioDeUnDia = (t) => Math.round((t.sueldoMensual || 0) / (t.diasMes || 26) * 100) / 100;
@@ -1999,7 +2056,14 @@
       objetivo.forEach(l => lineas.push(l));
       lineas.push('');
       lineas.push(`Comisión: ${INFORME.eur(c.comision)}`);
-      lineas.push(`Fijo ${INFORME.eur(c.fijo)} + comisión ${INFORME.eur(c.comision)} = ${INFORME.eur(c.devengado)}`);
+    }
+    if (c.bono > 0) {
+      if (!objetivo.length) lineas.push('');
+      bonoLineas(c).forEach(l => lineas.push(l));
+    }
+    if (objetivo.length || c.bono > 0) {
+      const suma = sumaDelMes(c);
+      lineas.push(suma.charAt(0).toUpperCase() + suma.slice(1));
     }
     lineas.push(`Corresponde este mes: ${INFORME.eur(c.devengado)}`);
     const pagosMes = pagosT.filter(p => (p.fecha || '').startsWith(mes));
@@ -2315,7 +2379,10 @@
     if (c.descuentoTardes > 0) {
       ex.push(`Fijo del mes: ${INFORME.eur(c.fijoBruto)} − ${INFORME.eur(c.descuentoTardes)} de retrasos = <strong>${INFORME.eur(c.fijo)}</strong>`);
     }
-    ex.push(`${pasado ? 'Le correspondió ese mes' : 'Le corresponde el mes'}: fijo ${INFORME.eur(c.fijo)} + comisión ${INFORME.eur(c.comision)} = <strong>${INFORME.eur(c.devengado)}</strong>`);
+    if (c.bono > 0) {
+      c.bonos.forEach(b => ex.push(`🎁 Bono del ${fmtFecha(b.fecha)}${b.motivo ? ` (${escapar(b.motivo)})` : ''}: <strong>${INFORME.eur(b.importe)}</strong>`));
+    }
+    ex.push(`${pasado ? 'Le correspondió ese mes' : 'Le corresponde el mes'}: fijo ${INFORME.eur(c.fijo)} + comisión ${INFORME.eur(c.comision)}${c.bono > 0 ? ` + bono ${INFORME.eur(c.bono)}` : ''} = <strong>${INFORME.eur(c.devengado)}</strong>`);
     return ex;
   }
 
@@ -2347,11 +2414,12 @@
     deuda.meses.forEach(m => {
       const c = m.calc;
       const dias = c ? `${c.dias.length} día${c.dias.length === 1 ? '' : 's'} · ` : '';
-      const detalle = c ? `fijo ${INFORME.eur(c.fijo)} + comisión ${INFORME.eur(c.comision)} = ` : '';
+      const detalle = c ? `${sumaDelMes(c).replace(/ = [^=]*$/, '')} = ` : '';
       lineas.push(`${mesEnLetras(m.mes + '-01')}: ${dias}${detalle}${INFORME.eur(m.devengado)}`);
       if (c && c.descuentoTardes > 0) {
         lineas.push(`   (fijo: ${INFORME.eur(c.cond.sueldoMensual)} ÷ ${c.cond.diasMes} × ${c.dias.length} = ${INFORME.eur(c.fijoBruto)} − ${INFORME.eur(c.descuentoTardes)} = ${INFORME.eur(c.fijo)}, por los retrasos de abajo)`);
       }
+      if (c) bonoLineas(c).forEach(l => lineas.push(`   ${l}`));
       if (c) {
         objetivoLineas(t, c, (m.ventasDet && m.ventasDet.total) || 0, true)
           .forEach(l => lineas.push(`   ${l}`));
@@ -2499,6 +2567,7 @@
             ${retrasosHTML(t, c, m.ventasDet, false)}
             ${faltasHTML(t, c)}
             ${objetivoHTML(t, c, m.ventasDet.total, true)}
+            ${bonoHTML(t, c, false)}
             <p class="per-seccion">📖 De dónde sale cada número</p>
             ${explicacionLineas(t, c, m.ventasDet, true).map(l => `<div class="stat-linea"><span style="width:100%">${l}</span></div>`).join('')}
             <p class="per-seccion">💶 Lo que le diste ese mes</p>
@@ -2687,6 +2756,7 @@
             ${retrasosHTML(t, c, ventasDet, true)}
             ${faltasHTML(t, c)}
             ${objetivoHTML(t, c, ventasT)}
+            ${bonoHTML(t, c, true)}
             <div class="stat-linea per-pendiente ${deuda.total > 0 ? '' : 'ok'}"><span>${deuda.total >= 0 ? 'LE DEBES EN TOTAL' : 'TE DEBE (adelantado de más)'}</span><strong>${INFORME.eur(Math.abs(deuda.total))}</strong></div>
             ${origenDelTotalHTML(c, deuda, mes)}
             <div class="stat-linea"><span>Entregado en total (todos los adelantos y pagas)</span><strong>${INFORME.eur(entregadoTotal)}</strong></div>
@@ -2710,6 +2780,17 @@
             </div>
             <button class="btn btn-secondary pago-apuntar" data-sid="${t.sid}">➕ Apuntar entrega</button>
             <div style="margin-top:8px">${pagosHTML}</div>
+
+            <p class="per-seccion">🎁 Bono o extra (si quieres darle algo más)</p>
+            <p class="hint" style="margin:0 0 6px">Se suma a lo que le corresponde ese mes y sale en su resumen con el motivo. No es una entrega: el dinero se apunta luego como pago, igual que el resto.</p>
+            <div class="form-row">
+              <div class="form-group"><input type="date" class="bono-fecha" value="${fechaParaBono(t, mes)}"></div>
+              <div class="form-group"><input type="number" class="bono-importe" step="0.01" min="0" placeholder="€ de bono"></div>
+            </div>
+            <div class="form-row">
+              <div class="form-group"><input type="text" class="bono-motivo" placeholder="Motivo (opcional): Navidad, buen mes, cubrió a un compañero…"></div>
+            </div>
+            <button class="btn btn-small bono-apuntar" data-sid="${t.sid}">🎁 Apuntar bono</button>
 
             <p class="per-seccion">📝 Nota de un día (si pasó algo)</p>
             <div class="form-row">
@@ -2813,6 +2894,40 @@
         t.notasDias = [...(t.notasDias || []), { fecha, texto }];
         await DB.perGuardar(t);
         toast('📝 Nota apuntada.');
+        pintarPersonal();
+      }));
+    });
+
+    // Apuntar un bono (un extra de ese mes, con su motivo)
+    enCajas('.bono-apuntar', btn => {
+      btn.addEventListener('click', guardarConAviso(async () => {
+        const card = btn.closest('.per-card');
+        const fecha = card.querySelector('.bono-fecha').value;
+        const importe = parseFloat(card.querySelector('.bono-importe').value);
+        const motivo = card.querySelector('.bono-motivo').value.trim();
+        if (isNaN(importe) || importe <= 0) { toast('⚠️ Pon el importe del bono.'); return; }
+        if (!fecha) { toast('⚠️ Falta la fecha del bono (decide en qué mes se le suma).'); return; }
+        const t = (await DB.perTodos()).find(x => x.sid === btn.dataset.sid);
+        if (!t) return;
+        if ((t.inicio && fecha < t.inicio) || (t.fin && fecha > t.fin)) {
+          toast(`⚠️ Esa fecha cae fuera de los días que trabajó (${t.inicio ? 'desde el ' + fmtFecha(t.inicio) : ''}${t.fin ? ' hasta el ' + fmtFecha(t.fin) : ''}). Ponle una fecha de su etapa para que entre en su cuenta.`, 6000);
+          return;
+        }
+        t.bonos = [...(t.bonos || []), { fecha, importe: Math.round(importe * 100) / 100, motivo }];
+        await DB.perGuardar(t);
+        toast(`🎁 Bono de ${INFORME.eur(importe)} apuntado en ${mesEnLetras(fecha.slice(0, 7) + '-01')}.`);
+        pintarPersonal();
+      }));
+    });
+
+    // Borrar un bono
+    enCajas('.bono-borrar', btn => {
+      btn.addEventListener('click', guardarConAviso(async () => {
+        if (!confirm('¿Quitar este bono?')) return;
+        const t = (await DB.perTodos()).find(x => x.sid === btn.dataset.sid);
+        if (!t || !t.bonos) return;
+        t.bonos.splice(+btn.dataset.idx, 1);
+        await DB.perGuardar(t);
         pintarPersonal();
       }));
     });
@@ -3026,9 +3141,10 @@
         ? {
             id: actual.id, sid: actual.sid,
             dias: actual.dias || [], tardes: actual.tardes || [], faltas: actual.faltas || [], descansos: actual.descansos || [], notasDias: actual.notasDias || [],
+            bonos: actual.bonos || [],
             liquidado: actual.liquidado || '', creado: actual.creado
           }
-        : { dias: [], tardes: [], faltas: [], descansos: [], notasDias: [], liquidado: '', creado: new Date().toISOString() }),
+        : { dias: [], tardes: [], faltas: [], descansos: [], notasDias: [], bonos: [], liquidado: '', creado: new Date().toISOString() }),
       nombre,
       ...nuevas,
       inicio: $('#pe-inicio').value || '',
