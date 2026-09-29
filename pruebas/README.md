@@ -12,7 +12,7 @@ bash pruebas/ejecutar.sh
 
 Al final dice `✅ TODO CORRECTO` o lista los fallos encontrados.
 
-## Qué se comprueba (270 comprobaciones)
+## Qué se comprueba (282 comprobaciones)
 
 **Informe trimestral** — que los ingresos y gastos del trimestre son los
 correctos, que no se cuelan registros de otros meses, que se agrupan las
@@ -36,6 +36,12 @@ restaurar la misma copia dos veces **no duplica nada**.
 por retrasos, ventas del día con retraso contadas por horas, objetivos
 alcanzados o no, deuda arrastrada entre meses y liquidaciones (incluido el
 caso de pagar el finiquito el mes siguiente a la baja).
+
+**Cambios de sueldo y cuenta congelada** — que subir el sueldo desde un mes no toca los
+meses anteriores ya pagados (siguen al día y con el sueldo de entonces, también en el
+mensaje), que el mes nuevo va con el sueldo nuevo, que "desde" en blanco es una corrección
+de todo; que al liquidar se guarda la foto de la cuenta, que si un dato cambia después la
+ficha avisa y el mensaje usa los totales cerrados, y que reabrir borra la foto.
 
 **Días que no vino y cierre en la baja** — que las faltas se ven con su fecha y con su
 motivo (solo en la ficha, nunca en el mensaje), y que no descuentan dinero; que un día marcado antes del alta

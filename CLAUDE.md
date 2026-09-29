@@ -166,6 +166,22 @@ cargar el lector, en vez de romperse.
   **Ojo**: el bucle de `desgloseDeuda` NO se acorta, porque un pago posterior a la baja
   tiene que seguir descontando de la deuda (hay dos pruebas que lo exigen); lo único que
   se filtra es qué meses entran en la lista.
+- **Cambiar el sueldo, los días, la jornada o los objetivos NO reescribe los meses
+  pasados.** El formulario tiene el campo "valen desde" (`#pe-desde`, un mes). El
+  historial vive en `t.condiciones = [{ desde: 'AAAA-MM' | '' (desde siempre), sueldoMensual,
+  diasMes, horasJornada, tramos }]` y `calcularMes`/`ventasParaTrabajador` usan las
+  condiciones vigentes en cada mes (`trabajadorEn(t, mes)`). Cada `c` lleva `c.cond`, y todo
+  lo que se pinta a partir de un `c` usa esas condiciones (`condDe(t, c)`), para que la
+  explicación de un mes antiguo diga el sueldo de entonces. Los campos sueltos de `t` son
+  siempre los vigentes hoy. Con "desde" **en blanco** es una corrección de todo el historial
+  (se borra `condiciones`): es lo que la app hacía siempre antes, ahora explícito. Antes,
+  subir el sueldo a alguien que estaba al día lo dejaba "debiéndole" la diferencia de todos
+  los meses ya pagados.
+- **La cuenta se congela al liquidar** (`t.cuadreLiquidacion`, con `fotoDelCuadre`): fecha, lo
+  que le correspondió, lo pagado y los meses. La ficha del liquidado compara la cuenta de hoy
+  con la cerrada: si coinciden lo dice con un candado; si algo cambió después (un cierre, un
+  día, una entrega) avisa en rojo y **vale la cuenta que se cerró**. El texto de toda la
+  etapa dice "Cuenta cerrada el X" y usa los totales cerrados. Reabrir borra la foto.
 - **La deuda es general, no mensual**: se arrastra de un mes a otro. La vista
   principal muestra el total pendiente; el detalle por meses va plegado.
 - Al dar de baja, se calcula el finiquito completo; al abonarlo queda 10 días
@@ -215,7 +231,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 270 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 282 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.
 
