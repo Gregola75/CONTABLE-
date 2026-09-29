@@ -1211,14 +1211,22 @@
     const ingresos = r2(cierres.reduce((s, r) => s + (r.total || 0), 0));
     const gastos = r2(facturas.reduce((s, r) => s + (r.total || 0), 0));
     const porCategoria = {};
+    const porProveedor = {};
     facturas.forEach(r => {
       const c = r.categoria || 'Otros';
       porCategoria[c] = r2((porCategoria[c] || 0) + (r.total || 0));
+      // Por proveedor: para ver qué % de la facturación se lleva cada uno
+      // (el alquiler, el de las bebidas, la luz…), no solo por categoría.
+      const p = (r.proveedor || 'Sin proveedor').trim() || 'Sin proveedor';
+      if (!porProveedor[p]) porProveedor[p] = { total: 0, facturas: 0, categoria: c };
+      porProveedor[p].total = r2(porProveedor[p].total + (r.total || 0));
+      porProveedor[p].facturas++;
+      if (porProveedor[p].categoria !== c) porProveedor[p].categoria = 'Varias';
     });
     const personal = await costePersonalMes(mes, cierres);
     const sinIVA = facturas.filter(r => typeof r.ivaCuota !== 'number').length;
     return {
-      ingresos, gastos, personal, porCategoria, sinIVA,
+      ingresos, gastos, personal, porCategoria, porProveedor, sinIVA,
       facturas: facturas.length, cierres: cierres.filter(c => !c.mensual).length,
       casa: r2(personalesCasa.reduce((s, r) => s + (r.total || 0), 0)),
       beneficio: r2(ingresos - gastos - personal)
@@ -1275,7 +1283,7 @@
       return ` <small class="${dif >= 0 ? 'txt-ok' : 'txt-bad'}">${dif >= 0 ? '▲' : '▼'} ${Math.abs(dif).toLocaleString('es-ES', { maximumFractionDigits: 0 })} %</small>`;
     };
     const cats = Object.entries(d.porCategoria).sort((a, b) => b[1] - a[1]);
-    const maxCat = Math.max(1, d.personal, ...cats.map(c => c[1]));
+    const maxCat = Math.max(1, d.personal, ...cats.map(c => c[1]), ...Object.values(d.porProveedor).map(p => p.total));
     const filaCat = (nombre, valor) => `
       <div class="fila-mes">
         <span class="mes-etq" style="width:88px">${escapar(nombre)}</span>
@@ -1283,14 +1291,37 @@
         <span class="mes-val" style="width:120px">${INFORME.eur(valor)}${d.ingresos > 0 ? ` <small class="txt-sec">${Math.round(valor / d.ingresos * 100)}%</small>` : ''}</span>
       </div>`;
     const margen = d.ingresos > 0 ? Math.round(d.beneficio / d.ingresos * 100) : null;
+    const costes = r2(d.gastos + d.personal);
+    const pctDe = (parte) => d.ingresos > 0 ? Math.round(parte / d.ingresos * 100) : null;
+
+    // Por proveedor: el alquiler, el de las bebidas, la luz… y qué % de la
+    // facturación se lleva cada uno. Se pinta sobre la misma escala que las
+    // categorías para que las barras se puedan comparar a ojo.
+    const provs = Object.entries(d.porProveedor).sort((a, b) => b[1].total - a[1].total);
+    const filaProv = (nombre, p) => `
+      <div class="fila-mes">
+        <span class="mes-etq" style="width:88px" title="${escapar(nombre)}">${escapar(nombre)}<br><small class="txt-sec">${escapar(p.categoria)}</small></span>
+        <div class="barra"><div class="barra-fill" style="width:${Math.max(2, Math.round(p.total / maxCat * 100))}%"></div></div>
+        <span class="mes-val" style="width:120px">${INFORME.eur(p.total)}${d.ingresos > 0 ? ` <small class="txt-sec">${pctDe(p.total)}%</small>` : ''}</span>
+      </div>`;
+    const provsHTML = provs.length ? `
+      <details class="ocr-details" style="margin:12px 0 0" open>
+        <summary>🏪 Por proveedor: qué % de la facturación se lleva cada uno (${provs.length})</summary>
+        ${provs.map(([n, p]) => filaProv(n, p)).join('')}
+        ${d.personal ? filaProv('Personal', { total: d.personal, categoria: 'sueldos + comisiones' }) : ''}
+        <div class="stat-linea" style="margin-top:6px"><span><strong>Todo junto (proveedores + personal)</strong></span><strong class="txt-bad">${INFORME.eur(costes)}${pctDe(costes) !== null ? ` <small class="txt-sec">${pctDe(costes)} % de la facturación</small>` : ''}</strong></div>
+        ${d.ingresos > 0 ? '' : '<p class="hint" style="margin:6px 0 0">Sin cierres este mes no se puede calcular el % sobre la facturación.</p>'}
+      </details>` : '';
 
     $('#res-contenido').innerHTML = `
       <div class="stat-linea"><span>💰 Ingresos (${d.cierres} cierre${d.cierres === 1 ? '' : 's'})</span><strong class="txt-ok">${INFORME.eur(d.ingresos)}${comparar(d.ingresos, ant.ingresos)}</strong></div>
       <div class="stat-linea"><span>📄 Gastos del negocio (${d.facturas} factura${d.facturas === 1 ? '' : 's'})${pct(d.gastos)}</span><strong class="txt-bad">−${INFORME.eur(d.gastos)}${comparar(d.gastos, ant.gastos)}</strong></div>
       <div class="stat-linea"><span>👥 Personal (sueldos + comisiones devengados)${pct(d.personal)}</span><strong class="txt-bad">−${INFORME.eur(d.personal)}${comparar(d.personal, ant.personal)}</strong></div>
+      <div class="stat-linea"><span>📊 Todos los costes (gastos + personal)${pct(costes)}</span><strong class="txt-bad">−${INFORME.eur(costes)}${comparar(costes, r2(ant.gastos + ant.personal))}</strong></div>
       <div class="stat-linea per-pendiente ${d.beneficio >= 0 ? 'ok' : ''}"><span>${d.beneficio >= 0 ? '✅ TE QUEDA' : '🔴 PIERDES'}${margen !== null ? ` <small class="txt-sec">margen ${margen} %</small>` : ''}</span><strong>${INFORME.eur(Math.abs(d.beneficio))}${comparar(d.beneficio, ant.beneficio)}</strong></div>
       ${d.casa ? `<div class="stat-linea"><span>👤 Gastos de casa (aparte, no restan)</span><span class="txt-sec">${INFORME.eur(d.casa)}</span></div>` : ''}
-      ${cats.length || d.personal ? `<p class="hint" style="margin:12px 0 4px">En qué se va el dinero (y qué % de las ventas es cada cosa):</p>${cats.map(([n, v]) => filaCat(n, v)).join('')}${d.personal ? filaCat('Personal', d.personal) : ''}` : ''}
+      ${cats.length || d.personal ? `<p class="hint" style="margin:12px 0 4px">En qué se va el dinero, por tipo de gasto (y qué % de las ventas es cada cosa):</p>${cats.map(([n, v]) => filaCat(n, v)).join('')}${d.personal ? filaCat('Personal', d.personal) : ''}` : ''}
+      ${provsHTML}
       ${ant.ingresos || ant.gastos ? `<p class="hint" style="margin:12px 0 0">${mesEnLetras(mesAnt + '-01')}: ingresos ${INFORME.eur(ant.ingresos)} · gastos ${INFORME.eur(ant.gastos)} · personal ${INFORME.eur(ant.personal)} · te quedó ${INFORME.eur(ant.beneficio)}</p>` : ''}
       <p class="hint" style="margin:10px 0 0">Referencias de hostelería: mercancía ≈ 25-35 % de las ventas, personal ≈ 25-35 %. Si algo se dispara, ahí está el problema.</p>`;
   }

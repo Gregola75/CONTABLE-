@@ -67,9 +67,13 @@ cargar el lector, en vez de romperse.
   (una caja abierta el 11 que cierra de madrugada el 12 es venta del 11).
 
 **Cuadro de mando** (pestaña Informes, arriba; solo interno)
-- Por mes: ingresos, gastos del negocio, coste de personal devengado, lo que
-  queda y el margen, con % de cada partida sobre las ventas y comparación con
-  el mes anterior. Los gastos de casa se muestran aparte y no restan.
+- Por mes: ingresos, gastos del negocio, coste de personal devengado, **todos los
+  costes juntos**, lo que queda y el margen, con % de cada partida sobre las ventas y
+  comparación con el mes anterior. Los gastos de casa se muestran aparte y no restan.
+- **Por proveedor** (`porProveedor` en `datosMes`): cada proveedor del mes (el alquiler,
+  el de las bebidas, la luz…) con su total, su categoría y el % de la facturación que se
+  lleva, más el personal y la línea "todo junto". Lo pidió el dueño: ver qué % de lo que
+  factura se va en cada cosa. Los gastos de casa no entran.
 - Alertas: trimestre cerrado pendiente de guardar (botón "Ya lo hice", clave
   `contable-trimestre-guardado` en localStorage), días sin cierre, facturas
   sin desglose de IVA y deuda total con el equipo.
@@ -249,7 +253,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 305 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 309 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.
 

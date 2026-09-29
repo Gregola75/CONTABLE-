@@ -12,7 +12,7 @@ bash pruebas/ejecutar.sh
 
 Al final dice `✅ TODO CORRECTO` o lista los fallos encontrados.
 
-## Qué se comprueba (305 comprobaciones)
+## Qué se comprueba (309 comprobaciones)
 
 **Informe trimestral** — que los ingresos y gastos del trimestre son los
 correctos, que no se cuelan registros de otros meses, que se agrupan las
@@ -95,6 +95,11 @@ frente a la de vencimiento y fecha de apertura en los cierres Z.
 
 **Búsquedas** — filtros por proveedor, fechas y tipo, y el orden de los
 resultados.
+
+**Cuadro de mando** — ingresos, gastos, personal y lo que queda del mes con su % sobre las
+ventas; todos los costes juntos (969,23 = 32 %); cada proveedor con su categoría y su % de
+la facturación (Bebidas Pepe 23 %, Endesa 7 %, personal 2 %), sin los gastos de casa; y las
+alertas del trimestre y de las facturas sin IVA.
 
 **Seguridad** — que el PIN no se guarda en claro, que uno incorrecto no abre la
 app, y que las copias cifradas no se pueden leer sin su contraseña.

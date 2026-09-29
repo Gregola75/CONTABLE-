@@ -1721,6 +1721,13 @@ TARJETA 450,00`)]);
   chk('cuadro', 'Margen 68 %', res.includes('margen 68 %'));
   chk('cuadro', 'Gasto de casa aparte (100,00)', res.includes('Gastos de casa') && res.includes('100,00'));
   chk('cuadro', 'Mercancía con su % sobre ventas (23%)', res.includes('Mercancía') && res.includes('23%'));
+  chk('cuadro', 'Todos los costes juntos: 969,23 = 32 % de las ventas',
+    /Todos los costes \(gastos \+ personal\) \(32 % de las ventas\)\s*−969,23 €/.test(res), res.slice(0, 700));
+  chk('cuadro', 'Por proveedor: Bebidas Pepe 700,00 = 23 % y Endesa 200,00 = 7 % de la facturación',
+    /Bebidas Pepe\s*Mercancía\s*700,00 € 23%/.test(res) && /Endesa\s*Luz\s*200,00 € 7%/.test(res), res.slice(-900));
+  chk('cuadro', 'El alquiler de casa NO entra entre los proveedores del negocio', !/Alquiler casa/.test(res));
+  chk('cuadro', 'Personal también en la lista (69,23 = 2 %) y el total "todo junto" 32 %',
+    /Personal\s*sueldos \+ comisiones\s*69,23 € 2%/.test(res) && /Todo junto \(proveedores \+ personal\)\s*969,23 € 32 % de la facturación/.test(res), res.slice(-900));
   chk('cuadro', 'Alerta de trimestre cerrado sin guardar', al.includes('trimestre'));
   chk('cuadro', 'Alerta de facturas sin desglose de IVA (2)', al.includes('2 facturas sin desglose de IVA'));
   await page.click('#res-tri-hecho');
