@@ -183,7 +183,14 @@ cargar el lector, en vez de romperse.
   día, una entrega) avisa en rojo y **vale la cuenta que se cerró**. El texto de toda la
   etapa dice "Cuenta cerrada el X" y usa los totales cerrados. Reabrir borra la foto.
 - **La deuda es general, no mensual**: se arrastra de un mes a otro. La vista
-  principal muestra el total pendiente; el detalle por meses va plegado.
+  principal muestra el total pendiente; el detalle por meses va plegado. **Pero si el
+  total no es solo lo de este mes, el reparto sale a la vista** (`origenDelTotalHTML`):
+  una línea por cada mes que deja saldo, y una pista de cómo corregirlo. Caso real: alta
+  el 31 de agosto con ese día marcado y 16 € entregados; viendo septiembre la cabecera
+  decía "Le debes 918,62 €" con un fijo de 900,00 € y nada a la vista explicaba los
+  18,62 €. El mensaje que se le envía reparte igual el pendiente de otros meses.
+- En la línea del fijo se dice qué es cada número (`sueldo ÷ los 26 días pactados al mes
+  × los 26 días que vino`), porque cuando coinciden "÷ 26 × 26" no se entiende.
 - Al dar de baja, se calcula el finiquito completo; al abonarlo queda 10 días
   visible y luego pasa al historial como prueba de pago.
 - **Un trabajador liquidado conserva su ficha entera y comprobable**, tanto esos
@@ -231,7 +238,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 282 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 292 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.
 

@@ -1381,6 +1381,65 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
   chk('liquidado', 'Al reabrir la ficha, la foto desaparece: la cuenta vuelve a estar abierta',
     await page.evaluate(async () => (await DB.perTodos())[0].cuadreLiquidacion === undefined));
 
+  // ══════════════ 6m. DE DÓNDE SALE EL TOTAL DE LA CABECERA ══════════════
+  // El caso real: alta el 31 de agosto con ese día marcado y 16 € entregados,
+  // septiembre entero trabajado. La cabecera decía "Le debes 918,62 €" con un
+  // fijo de 900,00 € y nada a la vista explicaba los 18,62 € de más.
+  console.log('\n═══ 6m. DE DÓNDE SALE EL TOTAL DE LA CABECERA ═══');
+  await page.evaluate(async () => {
+    for (const t of await DB.perTodos()) await DB.perBorrar(t.id);
+    for (const g of await DB.pagoTodos()) await DB.pagoBorrar(g.id);
+    for (const r of await DB.todos()) await DB.borrar(r.id);
+    const libres = [9, 16, 22, 30];
+    const dias = ['2026-08-31']; const descansos = [];
+    for (let d = 1; d <= 30; d++) (libres.includes(d) ? descansos : dias).push(`2026-09-${String(d).padStart(2, '0')}`);
+    await DB.perGuardar({ nombre: 'Jefferson', sueldoMensual: 900, diasMes: 26, horasJornada: 7.5, tramos: [{ objetivo: 13500, porcentaje: 1 }], dias, tardes: [], faltas: [], descansos, notasDias: [], inicio: '2026-08-31', creado: new Date().toISOString() });
+    const t = (await DB.perTodos())[0];
+    await DB.pagoGuardar({ trabajadorSid: t.sid, fecha: '2026-08-31', importe: 16, notas: '', creado: new Date().toISOString() });
+  });
+  const aLaVista = async () => page.evaluate(() => {
+    const b = document.querySelector('#per-lista .per-body');
+    if (!b) return '';
+    const copia = b.cloneNode(true);
+    copia.querySelectorAll('details').forEach(d => d.remove());   // solo lo que se ve sin desplegar
+    return copia.textContent.replace(/\s+/g, ' ');
+  });
+  let septJ = await verMes('2026-09');
+  chk('personal', 'Septiembre entero: fijo 900 y en la cabecera "Le debes 918,62" (900 + los 18,62 de agosto)',
+    septJ.includes('900,00 € ÷ 26 × 26') && /Le debes 918,62/.test(septJ), septJ.slice(0, 400));
+  let vistaJ = await aLaVista();
+  chk('personal', 'Sin desplegar nada se ve que 18,62 vienen de agosto: le correspondió 34,62 y le diste 16,00',
+    /Agosto 2026: le correspondió 34,62 € y le diste 16,00 €\s*\+18,62 €/.test(vistaJ), vistaJ.slice(0, 900));
+  chk('personal', 'Y la línea de este mes: le corresponde 900,00 y le has dado 0,00',
+    /Septiembre 2026 \(este mes\): le corresponde 900,00 € y le has dado 0,00 €\s*\+900,00 €/.test(vistaJ), vistaJ.slice(0, 900));
+  chk('personal', 'El "÷ 26 × 26" se explica: 26 días pactados al mes × 26 que vino',
+    /los 26 días de trabajo pactados al mes × los 26 días que vino/.test(vistaJ), vistaJ.slice(0, 900));
+  chk('personal', 'Se dice cómo corregirlo si el mes no debería estar (la fecha de alta o el día del calendario)',
+    /Comenzó a trabajar el/.test(vistaJ), vistaJ.slice(0, 900));
+  const envJ = await leerEnvio();
+  chk('personal', 'El mensaje también reparte el pendiente mes a mes: "Agosto 2026: 34,62 € − 16,00 € recibidos = 18,62 €"',
+    /Pendiente de meses anteriores: 18,62 €/.test(envJ) && /Agosto 2026: 34,62 € − 16,00 € recibidos = 18,62 €/.test(envJ), envJ.slice(0, 600));
+  // El dueño corrige la fecha de alta: empezó el 1 de septiembre
+  await page.click('#per-lista .per-editar');
+  await page.waitForTimeout(400);
+  await page.fill('#pe-inicio', '2026-09-01');
+  await page.click('#per-guardar');
+  await page.waitForTimeout(900);
+  septJ = await verMes('2026-09');
+  chk('personal', 'Con el alta el 1 de septiembre, el 31 de agosto ya no se paga: le debes 884,00 (900 − los 16 entregados)',
+    /Le debes 884,00/.test(septJ) && !/918,62/.test(septJ), septJ.slice(0, 400));
+  vistaJ = await aLaVista();
+  chk('personal', 'Y agosto sigue a la vista, pero como 16,00 entregados de más',
+    /Agosto 2026: le correspondió 0,00 € y le diste 16,00 €\s*−16,00 €/.test(vistaJ), vistaJ.slice(0, 900));
+  const agoJ = await verMes('2026-08');
+  chk('personal', 'En agosto la ficha avisa del día marcado fuera del periodo',
+    /1 día\(s\) marcados fuera del periodo/.test(agoJ), agoJ.slice(0, 500));
+  chk('personal', 'Sin otros meses con saldo, no sale el reparto (no hay nada que explicar)',
+    await page.evaluate(async () => {
+      for (const g of await DB.pagoTodos()) await DB.pagoBorrar(g.id);
+      return true;
+    }) && !/Agosto 2026: le correspondió/.test(await (async () => { await verMes('2026-09'); return aLaVista(); })()));
+
   // ══════════════ 7. LECTURA DE FACTURAS (OCR) ══════════════
   console.log('\n═══ 7. DETECCIÓN AUTOMÁTICA DE FACTURAS ═══');
   const ocr = await page.evaluate(() => {

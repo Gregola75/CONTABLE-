@@ -12,7 +12,7 @@ bash pruebas/ejecutar.sh
 
 Al final dice `✅ TODO CORRECTO` o lista los fallos encontrados.
 
-## Qué se comprueba (282 comprobaciones)
+## Qué se comprueba (292 comprobaciones)
 
 **Informe trimestral** — que los ingresos y gastos del trimestre son los
 correctos, que no se cuelan registros de otros meses, que se agrupan las
@@ -42,6 +42,13 @@ meses anteriores ya pagados (siguen al día y con el sueldo de entonces, tambié
 mensaje), que el mes nuevo va con el sueldo nuevo, que "desde" en blanco es una corrección
 de todo; que al liquidar se guarda la foto de la cuenta, que si un dato cambia después la
 ficha avisa y el mensaje usa los totales cerrados, y que reabrir borra la foto.
+
+**De dónde sale el total de la cabecera** — con alta el 31 de agosto (ese día marcado y
+16 € entregados) y septiembre entero, que "Le debes 918,62 €" se explica sin desplegar
+nada (agosto: 34,62 − 16,00 = +18,62; septiembre: +900,00), que el "÷ 26 × 26" dice qué
+es cada número, que el mensaje reparte igual el pendiente, y que al corregir la fecha de
+alta al 1 de septiembre el 31 de agosto deja de pagarse (884,00) y agosto avisa del día
+fuera del periodo.
 
 **Días que no vino y cierre en la baja** — que las faltas se ven con su fecha y con su
 motivo (solo en la ficha, nunca en el mensaje), y que no descuentan dinero; que un día marcado antes del alta

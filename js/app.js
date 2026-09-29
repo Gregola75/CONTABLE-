@@ -2011,6 +2011,9 @@
       lineas.push(arrastre > 0
         ? `Pendiente de meses anteriores: ${INFORME.eur(arrastre)}`
         : `Recibido de más en meses anteriores: ${INFORME.eur(-arrastre)}`);
+      // Mes por mes, para que se vea de dónde sale y no parezca un número caído del cielo
+      otrosMesesConSaldo(deuda, mes).forEach(m => lineas.push(
+        `  · ${mesEnLetras(m.mes + '-01')}: ${INFORME.eur(m.devengado)} − ${INFORME.eur(m.entregado)} recibidos = ${m.saldo > 0 ? '' : '−'}${INFORME.eur(Math.abs(m.saldo))}`));
     }
     lineas.push('');
     lineas.push(deuda.total >= 0
@@ -2021,6 +2024,28 @@
 
   /* Las horas, escritas como en español: 2,5 h y no 2.5 h */
   const numH = (h) => Number(h || 0).toLocaleString('es-ES', { maximumFractionDigits: 2 });
+
+  /* Los meses distintos del que se está viendo que dejan saldo (a favor o en
+     contra). Son los que explican por qué el total de la cabecera no coincide
+     con la cuenta del mes. */
+  function otrosMesesConSaldo(deuda, mes) {
+    return (deuda.meses || []).filter(m => m.mes !== mes && Math.abs(m.saldo) >= 0.01);
+  }
+
+  /* De dónde sale el total de la cabecera cuando no es solo lo de este mes.
+     Va a la vista, no plegado: "Le debes 918,62 €" con un fijo de 900,00 € tiene
+     que poder explicarse sin desplegar nada. El caso real: un trabajador dado de
+     alta el 31 de agosto con ese día marcado, y el dueño viendo septiembre. */
+  function origenDelTotalHTML(c, deuda, mes) {
+    const otros = otrosMesesConSaldo(deuda, mes);
+    if (!otros.length) return '';
+    const signo = (n) => `${n > 0 ? '+' : '−'}${INFORME.eur(Math.abs(n))}`;
+    const filas = otros.map(m => `
+            <div class="stat-linea"><span>· ${mesEnLetras(m.mes + '-01')}: le correspondió ${INFORME.eur(m.devengado)} y le diste ${INFORME.eur(m.entregado)}</span><strong class="${m.saldo > 0 ? 'txt-bad' : 'txt-sec'}">${signo(m.saldo)}</strong></div>`).join('');
+    return `
+            <div class="stat-linea"><span>· ${mesEnLetras(mes + '-01')} (este mes): le corresponde ${INFORME.eur(c.devengado)} y le has dado ${INFORME.eur(c.entregado)}</span><strong class="${c.pendiente > 0 ? 'txt-bad' : 'txt-sec'}">${signo(c.pendiente)}</strong></div>${filas}
+            <p class="hint" style="margin:4px 0 0">El total suma todos los meses. Si un mes no debería estar (por ejemplo, un día marcado antes de que empezara de verdad), corrige en su ficha la fecha «Comenzó a trabajar el» o ese día en el calendario de ese mes.</p>`;
+  }
 
   /* La regla del retraso explicada con palabras, para que la entienda el propio
      trabajador. Hasta ahora solo estaba escrita en el formulario donde se le da de
@@ -2196,9 +2221,12 @@
     const diasMes = t.diasMes || 26;
     const n = c.dias.length;
     const cuenta = `<small class="txt-sec">(${INFORME.eur(sueldo)} ÷ ${diasMes} × ${n})</small>`;
+    // Los dos números pueden coincidir (26 días pactados y 26 que vino) y entonces
+    // "÷ 26 × 26" no se entiende: se dice qué es cada uno.
+    const queEs = `<br><small class="txt-sec">Sueldo ÷ los ${diasMes} días de trabajo pactados al mes × los ${n} día${n === 1 ? '' : 's'} que vino${n === diasMes ? ' (este mes vino todos los pactados: cobra el sueldo entero)' : ''}.</small>`;
     if (!(c.descuentoTardes > 0)) {
       return `
-            <div class="stat-linea"><span>Fijo: ${n} día${n === 1 ? '' : 's'} trabajado${n === 1 ? '' : 's'} ${cuenta}</span><strong>${INFORME.eur(c.fijo)}</strong></div>`;
+            <div class="stat-linea"><span>Fijo: ${n} día${n === 1 ? '' : 's'} trabajado${n === 1 ? '' : 's'} ${cuenta}${queEs}</span><strong>${INFORME.eur(c.fijo)}</strong></div>`;
     }
     const nT = c.tardes.length;
     return `
@@ -2660,6 +2688,7 @@
             ${faltasHTML(t, c)}
             ${objetivoHTML(t, c, ventasT)}
             <div class="stat-linea per-pendiente ${deuda.total > 0 ? '' : 'ok'}"><span>${deuda.total >= 0 ? 'LE DEBES EN TOTAL' : 'TE DEBE (adelantado de más)'}</span><strong>${INFORME.eur(Math.abs(deuda.total))}</strong></div>
+            ${origenDelTotalHTML(c, deuda, mes)}
             <div class="stat-linea"><span>Entregado en total (todos los adelantos y pagas)</span><strong>${INFORME.eur(entregadoTotal)}</strong></div>
             <details class="ocr-details" style="margin:6px 0 0">
               <summary>Ver el detalle (este mes y mes a mes)</summary>
