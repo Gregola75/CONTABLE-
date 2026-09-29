@@ -86,6 +86,12 @@ cargar el lector, en vez de romperse.
   pregunta cierra el menú y no cambia nada.** Antes era un ciclo de toques: marcar una
   falta costaba 4 toques y 2 preguntas, y cancelar la de las horas dejaba el día atascado.
   Los días anteriores a su fecha de inicio (o posteriores a su baja) salen bloqueados.
+- **Las horas de retraso se leen como las escribe una persona** (`leerHoras`): `1,5`,
+  `1:30`, `1h30`, `45 min`, `media hora`, `½`. Lo que no se entiende se vuelve a
+  preguntar, nunca se guarda como 0. Un número suelto mayor que la jornada (`30`) casi
+  siempre son minutos: se pregunta "¿son 30 MINUTOS?" antes de guardar 30 horas y
+  quitarle el día entero. Si son horas de verdad y pasan de la jornada, se pide confirmar.
+  Cancelar deja el día como estaba.
 - **El descanso se marca, no se adivina** (`t.descansos`). Antes se calculaba restando
   los trabajados y las faltas a los días del mes, y cualquier día sin marcar se colaba
   como descanso: a un empleado le salían 3 descansos cuando solo había descansado 2.
@@ -209,7 +215,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 262 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 270 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.
 

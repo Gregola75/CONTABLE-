@@ -1498,6 +1498,58 @@
       <p class="hint" style="margin:0 0 8px">${pie}</p>`;
   }
 
+  /* Lee las horas de retraso tal y como las escribe una persona: "1,5", "1:30",
+     "1h30", "45 min", "media hora", "½". Devuelve null si no se entiende, para
+     volver a preguntar en vez de guardar cualquier cosa. */
+  function leerHoras(texto) {
+    const s = String(texto == null ? '' : texto).trim().toLowerCase().replace(/\s+/g, ' ');
+    if (s === '') return 0;
+    if (/^(media|media hora|½|1\/2)( h| hora)?$/.test(s)) return 0.5;
+    if (/^(un cuarto|cuarto|cuarto de hora|¼|1\/4)( h| hora)?$/.test(s)) return 0.25;
+    if (/^(tres cuartos|tres cuartos de hora|¾|3\/4)( h| hora)?$/.test(s)) return 0.75;
+    let m = s.match(/^(\d+)\s*(?::|h|hora|horas)\s*(\d{1,2})\s*(?:m|min|mins|minutos?)?$/);   // 1:30 · 1h30 · 1 hora 30
+    if (m) return Math.round((Number(m[1]) + Number(m[2]) / 60) * 100) / 100;
+    m = s.match(/^(\d+(?:[.,]\d+)?)\s*(m|min|mins|minuto|minutos)$/);                        // 45 min
+    if (m) return Math.round(parseFloat(m[1].replace(',', '.')) / 60 * 100) / 100;
+    m = s.match(/^(\d+(?:[.,]\d+)?)\s*(h|hora|horas)?$/);                                    // 1,5 · 2 h
+    if (m) return Math.round(parseFloat(m[1].replace(',', '.')) * 100) / 100;
+    return null;
+  }
+
+  /* Pregunta las horas de retraso hasta entenderlas. Un número suelto mayor que la
+     jornada casi siempre son minutos ("30"): se pregunta antes de guardar 30 horas y
+     quitarle el día entero. Devuelve null si se cancela. */
+  function pedirHorasRetraso(t, inicial) {
+    const jornada = t.horasJornada || 7.5;
+    let texto = inicial;
+    for (let intento = 0; intento < 5; intento++) {
+      const resp = prompt('⏰ ¿Cuántas horas llegó tarde ese día?\nPuedes escribir 1,5 · 1:30 · 45 min · media hora\n(0 = se le paga el día entero igualmente)', texto);
+      if (resp === null) return null;
+      const horas = leerHoras(resp);
+      if (horas === null) {
+        alert(`No he entendido «${resp}». Escribe las horas como 1,5 o 1:30, o los minutos como 45 min.`);
+        texto = resp;
+        continue;
+      }
+      if (horas > jornada) {
+        const enteroSuelto = /^\d+$/.test(resp.trim());
+        if (enteroSuelto && horas <= 300) {
+          if (confirm(`Has escrito «${resp}». ¿Son ${resp} MINUTOS?\n\nAceptar = ${resp} minutos · Cancelar = volver a escribirlo`)) {
+            return Math.round(horas / 60 * 100) / 100;
+          }
+          texto = resp;
+          continue;
+        }
+        if (!confirm(`¿${numH(horas)} horas de retraso? Es más que la jornada (${numH(jornada)} h), así que ese día no cobraría nada.\n\n¿Seguro?`)) {
+          texto = resp;
+          continue;
+        }
+      }
+      return horas;
+    }
+    return null;
+  }
+
   /* Estado actual de un día en el calendario de un trabajador */
   function estadoDelDia(t, f) {
     if ((t.dias || []).includes(f)) return 'trabajo';
@@ -1545,10 +1597,9 @@
     let notas = t.notasDias || [];
 
     if (estado === 'tarde') {
-      const resp = prompt('⏰ ¿Cuántas horas llegó tarde ese día?\n(0 = se le paga el día entero igualmente)', eraTarde ? String(eraTarde.horas).replace('.', ',') : '1');
-      if (resp === null) { cerrarModal(); return; }   // canceló: nada cambia
-      const horas = Math.max(0, parseFloat(String(resp || '0').replace(',', '.')) || 0);
-      tardes.push({ fecha: f, horas });
+      const horas = pedirHorasRetraso(t, eraTarde ? String(eraTarde.horas).replace('.', ',') : '1');
+      if (horas === null) { cerrarModal(); return; }   // canceló o no se entendió: nada cambia
+      tardes.push({ fecha: f, horas: Math.max(0, horas) });
     } else if (estado === 'falta') {
       const motivo = prompt('🚫 ¿Por qué faltó ese día?\n(Opcional: médico, avisó, no avisó… Puedes dejarlo en blanco.)', motivoDeFalta(t, f) || '');
       if (motivo === null) { cerrarModal(); return; }   // canceló: nada cambia

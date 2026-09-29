@@ -1267,6 +1267,36 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
     /te debe 145,00/.test(ultimoDialogo) && !/no le debes nada/.test(ultimoDialogo), ultimoDialogo.slice(0, 160));
   aceptarDialogos = true;
 
+  // ══════════════ 6j. LAS HORAS DE RETRASO SE LEEN COMO SE ESCRIBEN ══════════════
+  console.log('\n═══ 6j. LAS HORAS DE RETRASO (como las escribe una persona) ═══');
+  // El prompt devuelve las respuestas de una cola; alert/confirm los acepta el navegador de pruebas
+  const horasCon = async (respuestas) => {
+    await sembrarTrabajador({ nombre: 'Horas', dias: [dd(10)], tardes: [], faltas: [], descansos: [] }, []);
+    await page.evaluate((cola) => {
+      window.__promptOriginal = window.__promptOriginal || window.prompt;
+      window.__cola = cola.slice();
+      window.prompt = () => (window.__cola.length ? window.__cola.shift() : null);
+      const b = [...document.querySelectorAll('#per-lista .cal .dia')].find(x => x.dataset.fecha === '2026-09-10');
+      if (b) b.click();
+      setTimeout(() => { const op = document.querySelector('#modal-body .dia-opcion[data-estado="tarde"]'); if (op) op.click(); }, 300);
+    }, respuestas);
+    await page.waitForTimeout(1100);
+    return page.evaluate(async () => {
+      const t = (await DB.perTodos())[0];
+      const x = (t.tardes || []).find(y => y.fecha === '2026-09-10');
+      return x ? x.horas : (t.dias.includes('2026-09-10') ? 'sigue trabajado' : 'otro');
+    });
+  };
+  chk('retrasos', '"1:30" son 1,5 horas', await horasCon(['1:30']) === 1.5);
+  chk('retrasos', '"1h30" son 1,5 horas', await horasCon(['1h30']) === 1.5);
+  chk('retrasos', '"45 min" son 0,75 horas', await horasCon(['45 min']) === 0.75);
+  chk('retrasos', '"media hora" es 0,5 horas', await horasCon(['media hora']) === 0.5);
+  chk('retrasos', '"1,5" siguen siendo 1,5 horas', await horasCon(['1,5']) === 1.5);
+  chk('retrasos', '"30" suelto pregunta si son minutos y se guarda 0,5 h (antes eran 30 horas)', await horasCon(['30']) === 0.5);
+  chk('retrasos', 'Algo que no se entiende se vuelve a preguntar en vez de guardarse como 0', await horasCon(['hola', '2']) === 2);
+  chk('retrasos', 'Si nunca se entiende ni se contesta, el día no cambia', await horasCon(['hola']) === 'sigue trabajado');
+  await page.evaluate(() => { if (window.__promptOriginal) window.prompt = window.__promptOriginal; });
+
   // ══════════════ 7. LECTURA DE FACTURAS (OCR) ══════════════
   console.log('\n═══ 7. DETECCIÓN AUTOMÁTICA DE FACTURAS ═══');
   const ocr = await page.evaluate(() => {
