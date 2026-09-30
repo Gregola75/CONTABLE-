@@ -115,6 +115,7 @@ const NUBE = (() => {
     const copia = { ...obj };
     delete copia.id;
     delete copia._thumb;
+    delete copia.miniatura;   // solo local: cada móvil se hace la suya
     const imagen = copia.imagen;
     delete copia.imagen;
     const limpio = JSON.parse(JSON.stringify(copia));

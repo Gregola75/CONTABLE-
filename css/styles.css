@@ -864,6 +864,63 @@ select { appearance: none; -webkit-appearance: none; }
 }
 .per-baja .btn { margin-top: 8px; width: 100%; }
 
+/* Inicio: el panel visual del negocio */
+.ini-cab {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.ini-cab .btn:disabled { opacity: .35; cursor: default; }
+.ini-titulo { text-align: center; line-height: 1.2; }
+.ini-titulo strong { display: block; font-size: 1.02rem; letter-spacing: 1px; text-transform: uppercase; color: var(--plata); }
+.ini-titulo small { font-size: .72rem; color: var(--texto-sec); }
+.kpis {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.kpi {
+  background: var(--panel-2);
+  border: 1px solid var(--borde);
+  border-radius: 12px;
+  padding: 10px 12px;
+  min-width: 0;
+}
+.kpi-etq { font-size: .72rem; letter-spacing: .8px; text-transform: uppercase; color: var(--texto-sec); }
+.kpi-val { font-size: 1.28rem; font-weight: 800; letter-spacing: .3px; margin: 2px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.kpi-sub { font-size: .72rem; color: var(--texto-sec); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kpi-destacado { grid-column: 1 / -1; background: #101014; border: 1.5px dashed var(--plata-osc); }
+.kpi-destacado.ok .kpi-val { color: var(--ok); }
+.kpi-destacado.mal .kpi-val { color: var(--bad); }
+.acciones-rapidas { display: flex; gap: 8px; margin-top: 12px; }
+.acciones-rapidas .btn { flex: 1; padding: 12px 6px; font-size: .88rem; }
+.grafico { width: 100%; height: auto; display: block; overflow: visible; }
+.leyenda { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: .74rem; color: var(--texto-sec); margin-top: 4px; }
+.leyenda i, .leyenda-fila i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; vertical-align: -1px; margin-right: 4px; }
+.apilada {
+  display: flex;
+  height: 22px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #0f0f12;
+  border: 1px solid var(--borde);
+}
+.apilada > div { min-width: 2px; height: 100%; }
+.leyenda-lista { margin-top: 8px; }
+.leyenda-fila {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 10px;
+  align-items: center;
+  font-size: .84rem;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--borde);
+}
+.leyenda-fila strong { min-width: 44px; text-align: right; font-variant-numeric: tabular-nums; }
+#ini-alertas { margin-bottom: 6px; }
+
 /* Alertas del cuadro de mando */
 .alerta {
   display: flex;

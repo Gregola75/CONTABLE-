@@ -34,6 +34,75 @@
     return blob instanceof Blob ? URL.createObjectURL(blob) : null;
   }
 
+  /* ---------- Fotos: lo que se guarda y la miniatura de las listas ----------
+     La foto del móvil pesa 3-6 MB y mide 4.000 px. Se guarda a 2.000 px como
+     mucho (JPEG), que sigue dejando leer la letra pequeña del IVA con el zoom,
+     y con una MINIATURA de 220 px para las listas. Antes cada lista obligaba al
+     móvil a decodificar diez fotos de 12 megapíxeles para enseñar 52 px, y eso
+     era lo que hacía lenta la app al abrir y al buscar. */
+  const LADO_FOTO = 2000;
+  const LADO_MINIATURA = 220;
+
+  function cargarImagen(blob) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const url = URL.createObjectURL(blob);
+      img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('No se pudo abrir la imagen.')); };
+      img.src = url;
+    });
+  }
+
+  function reducirImagen(img, maxLado, calidad) {
+    const escala = Math.min(1, maxLado / Math.max(img.width, img.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(img.width * escala));
+    canvas.height = Math.max(1, Math.round(img.height * escala));
+    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+    return new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', calidad));
+  }
+
+  /* Devuelve { imagen, miniatura } listas para guardar. Una foto que ya está
+     a tamaño razonable no se vuelve a comprimir (corregir una factura no le
+     quita calidad a la foto cada vez). Si algo falla, se guarda tal cual. */
+  async function optimizarFoto(blob) {
+    if (!(blob instanceof Blob)) return { imagen: null, miniatura: null };
+    try {
+      const img = await cargarImagen(blob);
+      const grande = Math.max(img.width, img.height) > LADO_FOTO || blob.size > 1500000;
+      const imagen = grande ? ((await reducirImagen(img, LADO_FOTO, 0.85)) || blob) : blob;
+      const miniatura = await reducirImagen(img, LADO_MINIATURA, 0.72);
+      return { imagen, miniatura };
+    } catch (e) {
+      console.error(e);
+      return { imagen: blob, miniatura: null };
+    }
+  }
+
+  /* Miniaturas de las fotos guardadas antes de que existieran: se crean en
+     segundo plano, de una en una, y se guardan SOLO en local (no cambia la
+     fecha de modificación ni se vuelve a subir nada a la nube). */
+  let creandoMiniaturas = false;
+  async function crearMiniaturasQueFaltan() {
+    if (creandoMiniaturas) return 0;
+    creandoMiniaturas = true;
+    let hechas = 0;
+    try {
+      const faltan = (await DB.todos()).filter(r => r.imagen instanceof Blob && !(r.miniatura instanceof Blob));
+      for (const r of faltan) {
+        try {
+          const miniatura = await reducirImagen(await cargarImagen(r.imagen), LADO_MINIATURA, 0.72);
+          if (miniatura) { await DB.guardar({ ...r, miniatura }, { remoto: true }); hechas++; }
+        } catch (e) { console.error(e); }
+        await new Promise(res => setTimeout(res, 30));   // dejar respirar a la pantalla
+      }
+      if (hechas) pintarRecientes();
+    } finally {
+      creandoMiniaturas = false;
+    }
+    return hechas;
+  }
+
   function fmtFecha(iso) {
     return INFORME.formatear(iso);
   }
@@ -85,6 +154,7 @@
       $$('.tab-panel').forEach(p => p.classList.remove('active'));
       btn.classList.add('active');
       $('#tab-' + btn.dataset.tab).classList.add('active');
+      if (btn.dataset.tab === 'inicio') pintarInicio();
       if (btn.dataset.tab === 'ajustes') { pintarStats(); pintarSeguridad(); pintarNube(); }
       if (btn.dataset.tab === 'consultar') buscar();
       if (btn.dataset.tab === 'personal') pintarPersonal();
@@ -525,7 +595,7 @@
       retCuota: isNaN(retCuota) || retCuota <= 0 ? null : Math.round(retCuota * 100) / 100,
       personal: $('#f-personal').checked,
       notas: $('#f-notas').value.trim(),
-      imagen: facturaPendiente ? facturaPendiente.imagen : null,
+      ...(await optimizarFoto(facturaPendiente ? facturaPendiente.imagen : null)),
       ocrTexto: facturaPendiente ? facturaPendiente.ocrTexto : ''
     });
 
@@ -673,7 +743,7 @@
       efectivo: isNaN(efectivo) ? null : Math.round(efectivo * 100) / 100,
       tarjeta: isNaN(tarjeta) ? null : Math.round(tarjeta * 100) / 100,
       notas: $('#c-notas').value.trim(),
-      imagen: cierrePendiente ? cierrePendiente.imagen : null,
+      ...(await optimizarFoto(cierrePendiente ? cierrePendiente.imagen : null)),
       ocrTexto: cierrePendiente ? cierrePendiente.ocrTexto : ''
     });
 
@@ -822,7 +892,7 @@
     return `
       <div class="item" data-id="${r.id}">
         ${r._thumb
-          ? `<img class="item-thumb" src="${r._thumb}" alt="">`
+          ? `<img class="item-thumb" src="${r._thumb}" alt="" loading="lazy" decoding="async">`
           : `<div class="item-thumb placeholder">${esFactura ? '📄' : '💰'}</div>`}
         <div class="item-info">
           <div class="item-titulo">${escapar(titulo)}</div>
@@ -832,8 +902,19 @@
       </div>`;
   }
 
-  function prepararThumbs(lista) {
-    lista.forEach(r => { r._thumb = r.imagen instanceof Blob ? URL.createObjectURL(r.imagen) : null; });
+  /* Las listas usan la miniatura (o la foto entera si aún no la tiene). Las
+     direcciones de la pintada anterior de esa misma lista se liberan, para que
+     buscar veinte veces no deje veinte tandas de fotos retenidas en memoria. */
+  const thumbsVivos = new Map();
+  function prepararThumbs(lista, clave = 'consulta') {
+    (thumbsVivos.get(clave) || []).forEach(u => { try { URL.revokeObjectURL(u); } catch (e) { /* nada */ } });
+    const urls = [];
+    lista.forEach(r => {
+      const src = r.miniatura instanceof Blob ? r.miniatura : r.imagen;
+      r._thumb = src instanceof Blob ? URL.createObjectURL(src) : null;
+      if (r._thumb) urls.push(r._thumb);
+    });
+    thumbsVivos.set(clave, urls);
   }
 
   function conectarDetalle(contenedor, lista) {
@@ -848,8 +929,8 @@
   async function pintarRecientes() {
     const facturas = (await DB.buscar({ tipo: 'factura' })).slice(0, 5);
     const cierres = (await DB.buscar({ tipo: 'cierre' })).slice(0, 5);
-    prepararThumbs(facturas);
-    prepararThumbs(cierres);
+    prepararThumbs(facturas, 'recientes-facturas');
+    prepararThumbs(cierres, 'recientes-cierres');
 
     const fDiv = $('#facturas-recientes');
     fDiv.innerHTML = facturas.length ? facturas.map(itemHTML).join('') : '<p class="vacio">Aún no hay facturas guardadas.</p>';
@@ -1114,7 +1195,7 @@
       div.innerHTML = ultimosResultados.map(r => `
         <div class="foto" data-id="${r.id}">
           ${r._thumb
-            ? `<img src="${r._thumb}" alt="">`
+            ? `<img src="${r._thumb}" alt="" loading="lazy" decoding="async">`
             : `<div style="display:flex;align-items:center;justify-content:center;height:100%;font-size:2rem">${r.tipo === 'factura' ? '📄' : '💰'}</div>`}
           <div class="pie">${escapar(r.tipo === 'factura' ? (r.proveedor || 'Factura') : 'Cierre')}<br>${fmtFecha(r.fecha)} · ${INFORME.eur(r.total)}</div>
         </div>`).join('');
@@ -1192,9 +1273,10 @@
     return tActual === 1 ? { anio: hoy.getFullYear() - 1, t: 4 } : { anio: hoy.getFullYear(), t: tActual - 1 };
   }
 
-  /* Coste de personal devengado en un mes (todos los empleados) */
-  async function costePersonalMes(mes, cierresMes) {
-    const trabajadores = await DB.perTodos();
+  /* Coste de personal devengado en un mes (todos los empleados), a partir de
+     los trabajadores y los cierres ya cargados: así el panel de inicio calcula
+     seis meses con una sola lectura de la base de datos. */
+  function costePersonalDe(trabajadores, cierresMes, mes) {
     let total = 0;
     for (const t of trabajadores) {
       const ventasT = ventasParaTrabajador(t, cierresMes, mes);
@@ -1203,15 +1285,18 @@
     return r2(total);
   }
 
-  async function datosMes(mes) {
-    const regs = await DB.buscar({ desde: mes + '-01', hasta: mes + '-31' });
-    const cierres = regs.filter(r => r.tipo === 'cierre');
-    const facturas = regs.filter(r => r.tipo === 'factura' && !r.personal);
-    const personalesCasa = regs.filter(r => r.tipo === 'factura' && r.personal);
+  /* Los números de un mes a partir de los registros ya cargados. */
+  function datosMesDe(regs, trabajadores, mes) {
+    const delMes = regs.filter(r => (r.fecha || '').startsWith(mes));
+    const cierres = delMes.filter(r => r.tipo === 'cierre');
+    const facturas = delMes.filter(r => r.tipo === 'factura' && !r.personal);
+    const personalesCasa = delMes.filter(r => r.tipo === 'factura' && r.personal);
     const ingresos = r2(cierres.reduce((s, r) => s + (r.total || 0), 0));
     const gastos = r2(facturas.reduce((s, r) => s + (r.total || 0), 0));
     const porCategoria = {};
     const porProveedor = {};
+    const porDia = {};
+    cierres.forEach(c => { if (!c.mensual) porDia[c.fecha] = r2((porDia[c.fecha] || 0) + (c.total || 0)); });
     facturas.forEach(r => {
       const c = r.categoria || 'Otros';
       porCategoria[c] = r2((porCategoria[c] || 0) + (r.total || 0));
@@ -1223,57 +1308,87 @@
       porProveedor[p].facturas++;
       if (porProveedor[p].categoria !== c) porProveedor[p].categoria = 'Varias';
     });
-    const personal = await costePersonalMes(mes, cierres);
+    const personal = costePersonalDe(trabajadores, cierres, mes);
     const sinIVA = facturas.filter(r => typeof r.ivaCuota !== 'number').length;
     return {
-      ingresos, gastos, personal, porCategoria, porProveedor, sinIVA,
+      mes, ingresos, gastos, personal, porCategoria, porProveedor, porDia, sinIVA,
+      mensual: cierres.some(c => c.mensual),
       facturas: facturas.length, cierres: cierres.filter(c => !c.mensual).length,
       casa: r2(personalesCasa.reduce((s, r) => s + (r.total || 0), 0)),
       beneficio: r2(ingresos - gastos - personal)
     };
   }
 
+  async function datosMes(mes) {
+    const [regs, trabajadores] = await Promise.all([
+      DB.buscar({ desde: mes + '-01', hasta: mes + '-31' }), DB.perTodos()
+    ]);
+    return datosMesDe(regs, trabajadores, mes);
+  }
+
+  /* Lo que se debe al equipo hoy (solo los que siguen en activo). */
+  async function deudaConElEquipo(cierresDeMes) {
+    const [trabajadores, pagos] = await Promise.all([DB.perTodos(), DB.pagoTodos()]);
+    const filas = [];
+    let total = 0;
+    for (const t of trabajadores.filter(x => !x.liquidado)) {
+      const deuda = await desgloseDeuda(t, pagos.filter(p => p.trabajadorSid === t.sid), cierresDeMes);
+      filas.push({ t, deuda: deuda.total });
+      if (deuda.total > 0) total += deuda.total;
+    }
+    return { total: r2(total), filas };
+  }
+
+  /* Un lector de cierres por mes que no vuelve a la base de datos si ya se
+     tienen todos los registros cargados. */
+  function cierresDesde(regs) {
+    return async (m) => regs.filter(r => r.tipo === 'cierre' && (r.fecha || '').startsWith(m));
+  }
+
+  /* Los avisos de un mes, iguales en el inicio y en el cuadro de mando. */
+  async function alertasDelMes(mes, d, regs, equipo) {
+    const alertas = [];
+    const hoy = hoyISO();
+    const tri = ultimoTrimestreCerrado();
+    const claveTri = `${tri.anio}-T${tri.t}`;
+    if (localStorage.getItem(CLAVE_TRIMESTRE) !== claveTri) {
+      alertas.push(`<div class="alerta"><span>📦 El <strong>${tri.t}º trimestre de ${tri.anio}</strong> ya cerró: genera el informe, descarga el CSV y el PDF, haz la copia de seguridad y guárdalos en Drive.</span><button class="btn btn-small tri-hecho" data-clave="${claveTri}">Ya lo hice ✓</button></div>`);
+    }
+    if (mes === hoy.slice(0, 7) && !d.mensual) {
+      const faltan = [];
+      for (let dia = 1; dia < +hoy.slice(8); dia++) {
+        const f = `${mes}-${String(dia).padStart(2, '0')}`;
+        if (!d.porDia[f]) faltan.push(dia);
+      }
+      if (faltan.length) alertas.push(`<div class="alerta">⚠️ <strong>${faltan.length} día${faltan.length === 1 ? '' : 's'} sin cierre</strong> este mes: ${faltan.slice(0, 8).join(', ')}${faltan.length > 8 ? '…' : ''}. Sin cierre no hay ingreso anotado.</div>`);
+    }
+    if (d.sinIVA) alertas.push(`<div class="alerta">🧾 <strong>${d.sinIVA} factura${d.sinIVA === 1 ? '' : 's'} sin desglose de IVA</strong> este mes: la previsión de impuestos lo estima. Ábrelas y pon el IVA para afinar.</div>`);
+    if (equipo.total > 0) alertas.push(`<div class="alerta">👥 Debes <strong>${INFORME.eur(equipo.total)}</strong> al equipo en total (ver pestaña Personal).</div>`);
+    return alertas;
+  }
+
+  function conectarAlertas(contenedor) {
+    contenedor.querySelectorAll('.tri-hecho').forEach(b => b.addEventListener('click', () => {
+      localStorage.setItem(CLAVE_TRIMESTRE, b.dataset.clave);
+      toast('📦 Trimestre marcado como guardado.');
+      pintarInicio();
+      if (document.querySelector('.tab[data-tab="informe"]').classList.contains('active')) pintarResumen();
+    }));
+  }
+
   async function pintarResumen() {
     if (!$('#res-mes').value) $('#res-mes').value = hoyISO().slice(0, 7);
     const mes = $('#res-mes').value;
     const mesAnt = mesAnteriorDe(mes);
-    const [d, ant] = await Promise.all([datosMes(mes), datosMes(mesAnt)]);
-    const hoy = hoyISO();
-    const esMesActual = mes === hoy.slice(0, 7);
+    const [regs, trabajadores] = await Promise.all([DB.todos(), DB.perTodos()]);
+    const d = datosMesDe(regs, trabajadores, mes);
+    const ant = datosMesDe(regs, trabajadores, mesAnt);
 
     // ── Alertas: lo que necesita tu atención ──
-    const alertas = [];
-    const tri = ultimoTrimestreCerrado();
-    const claveTri = `${tri.anio}-T${tri.t}`;
-    if (localStorage.getItem(CLAVE_TRIMESTRE) !== claveTri) {
-      alertas.push(`<div class="alerta"><span>📦 El <strong>${tri.t}º trimestre de ${tri.anio}</strong> ya cerró: genera el informe, descarga el CSV y el PDF, haz la copia de seguridad y guárdalos en Drive.</span><button class="btn btn-small" id="res-tri-hecho">Ya lo hice ✓</button></div>`);
-    }
-    if (esMesActual) {
-      const cierresMes = await DB.buscar({ tipo: 'cierre', desde: mes + '-01', hasta: mes + '-31' });
-      if (!cierresMes.some(c => c.mensual)) {
-        const conCierre = new Set(cierresMes.map(c => c.fecha));
-        const faltan = [];
-        for (let dia = 1; dia < +hoy.slice(8); dia++) {
-          const f = `${mes}-${String(dia).padStart(2, '0')}`;
-          if (!conCierre.has(f)) faltan.push(dia);
-        }
-        if (faltan.length) alertas.push(`<div class="alerta">⚠️ <strong>${faltan.length} día${faltan.length === 1 ? '' : 's'} sin cierre</strong> este mes: ${faltan.slice(0, 8).join(', ')}${faltan.length > 8 ? '…' : ''}. Sin cierre no hay ingreso anotado.</div>`);
-      }
-    }
-    if (d.sinIVA) alertas.push(`<div class="alerta">🧾 <strong>${d.sinIVA} factura${d.sinIVA === 1 ? '' : 's'} sin desglose de IVA</strong> este mes: la previsión de impuestos lo estima. Ábrelas y pon el IVA para afinar.</div>`);
-    const trabajadores = await DB.perTodos();
-    const pagos = await DB.pagoTodos();
-    let deudaEquipo = 0;
-    const cacheC = new Map();
-    const cierresDe = async (m) => { if (!cacheC.has(m)) cacheC.set(m, await DB.buscar({ tipo: 'cierre', desde: m + '-01', hasta: m + '-31' })); return cacheC.get(m); };
-    for (const t of trabajadores.filter(x => !x.liquidado)) {
-      const deuda = await desgloseDeuda(t, pagos.filter(p => p.trabajadorSid === t.sid), cierresDe);
-      if (deuda.total > 0) deudaEquipo += deuda.total;
-    }
-    if (deudaEquipo > 0) alertas.push(`<div class="alerta">👥 Debes <strong>${INFORME.eur(deudaEquipo)}</strong> al equipo en total (ver pestaña Personal).</div>`);
+    const equipo = await deudaConElEquipo(cierresDesde(regs));
+    const alertas = await alertasDelMes(mes, d, regs, equipo);
     $('#res-alertas').innerHTML = alertas.length ? alertas.join('') : '<p class="hint txt-ok" style="margin-bottom:8px">✅ Todo al día: sin avisos pendientes.</p>';
-    const btnTri = $('#res-tri-hecho');
-    if (btnTri) btnTri.addEventListener('click', () => { localStorage.setItem(CLAVE_TRIMESTRE, claveTri); pintarResumen(); toast('📦 Trimestre marcado como guardado.'); });
+    conectarAlertas($('#res-alertas'));
 
     // ── Números del mes ──
     const pct = (parte) => d.ingresos > 0 ? ` <small class="txt-sec">(${Math.round(parte / d.ingresos * 100)} % de las ventas)</small>` : '';
@@ -1327,6 +1442,215 @@
   }
 
   $('#res-mes').addEventListener('change', pintarResumen);
+
+  /* ---------- INICIO: el panel visual del negocio ----------
+     Lo primero que se ve al abrir la app: cómo va el mes de un vistazo, con
+     gráficos dibujados aquí mismo (SVG, sin librerías): ventas de cada día,
+     los últimos seis meses, en qué se va cada euro, los proveedores que más
+     pesan y el equipo. Todo sale de UNA lectura de la base de datos, sin
+     tocar ninguna foto, para que aparezca al instante tras desbloquear. */
+
+  let mesInicio = hoyISO().slice(0, 7);
+
+  /* Importe corto para los gráficos: 3.240 → "3,2k", 640 → "640" */
+  function eurCorto(n) {
+    const a = Math.abs(n);
+    const s = a >= 10000 ? Math.round(a / 1000) + 'k'
+      : a >= 1000 ? (a / 1000).toLocaleString('es-ES', { maximumFractionDigits: 1 }) + 'k'
+      : Math.round(a).toLocaleString('es-ES');
+    return (n < 0 ? '−' : '') + s;
+  }
+
+  const COLORES_INICIO = ['#d7dbe2', '#9aa0ab', '#6f7683', '#5b8def', '#9a6fd0', '#d5643f', '#1fa383', '#b8892e', '#8a4f7d'];
+
+  /* Ventas de cada día del mes (barras), con la media y el mejor día. */
+  function svgVentasDias(d, mes) {
+    const [a, m] = mes.split('-').map(Number);
+    const nDias = new Date(a, m, 0).getDate();
+    const hoy = hoyISO();
+    const hastaDia = mes === hoy.slice(0, 7) ? +hoy.slice(8) : nDias;
+    const valores = [];
+    for (let dia = 1; dia <= nDias; dia++) valores.push(d.porDia[`${mes}-${String(dia).padStart(2, '0')}`] || 0);
+    const max = Math.max(...valores);
+    if (!(max > 0)) return '';
+    const conVenta = valores.filter(v => v > 0);
+    const media = conVenta.reduce((s, v) => s + v, 0) / conVenta.length;
+    const mejor = valores.indexOf(max);
+    const W = 340, H = 130, top = 18, base = H - 18, izq = 4;
+    const paso = (W - izq * 2) / nDias;
+    const alto = (v) => (v / max) * (base - top);
+    let barras = '';
+    for (let i = 0; i < nDias; i++) {
+      const v = valores[i];
+      const x = izq + i * paso + 1;
+      const w = Math.max(2, paso - 2);
+      if (v > 0) {
+        barras += `<rect x="${x.toFixed(1)}" y="${(base - alto(v)).toFixed(1)}" width="${w.toFixed(1)}" height="${alto(v).toFixed(1)}" rx="1.5" fill="${i === mejor ? 'var(--ok)' : 'var(--plata-osc)'}"><title>${fmtFecha(`${mes}-${String(i + 1).padStart(2, '0')}`)}: ${INFORME.eur(v)}</title></rect>`;
+      } else if (i < hastaDia - 1 || (i === hastaDia - 1 && mes !== hoy.slice(0, 7))) {
+        barras += `<rect x="${x.toFixed(1)}" y="${base - 3}" width="${w.toFixed(1)}" height="3" fill="var(--bad)" opacity=".55"><title>${fmtFecha(`${mes}-${String(i + 1).padStart(2, '0')}`)}: sin cierre</title></rect>`;
+      }
+      if ((i + 1) % 5 === 0 || i === 0) {
+        barras += `<text x="${(x + w / 2).toFixed(1)}" y="${H - 5}" text-anchor="middle" font-size="8" fill="var(--texto-sec)">${i + 1}</text>`;
+      }
+    }
+    const yMedia = base - alto(media);
+    return `
+      <svg viewBox="0 0 ${W} ${H}" class="grafico" role="img" aria-label="Ventas de cada día">
+        ${barras}
+        <line x1="${izq}" x2="${W - izq}" y1="${yMedia.toFixed(1)}" y2="${yMedia.toFixed(1)}" stroke="var(--oro)" stroke-dasharray="3 3" stroke-width="1"/>
+        <text x="${W - izq}" y="${(yMedia - 3).toFixed(1)}" text-anchor="end" font-size="8" fill="var(--oro)">media ${eurCorto(media)}</text>
+        <text x="${(izq + mejor * paso + paso / 2).toFixed(1)}" y="${(base - alto(max) - 4).toFixed(1)}" text-anchor="middle" font-size="8" fill="var(--ok)">${eurCorto(max)}</text>
+      </svg>`;
+  }
+
+  /* Los últimos meses: ingresos frente a costes, y lo que quedó de cada uno. */
+  function svgMeses(lista) {
+    const max = Math.max(1, ...lista.map(x => Math.max(x.ingresos, x.gastos + x.personal)));
+    const W = 340, H = 150, top = 22, base = H - 20;
+    const grupo = W / lista.length;
+    const alto = (v) => (v / max) * (base - top);
+    const ancho = Math.min(22, grupo / 3);
+    let out = '';
+    lista.forEach((x, i) => {
+      const cx = grupo * i + grupo / 2;
+      const costes = x.gastos + x.personal;
+      out += `<rect x="${(cx - ancho - 1).toFixed(1)}" y="${(base - alto(x.ingresos)).toFixed(1)}" width="${ancho}" height="${alto(x.ingresos).toFixed(1)}" rx="2" fill="var(--plata)"><title>${mesEnLetras(x.mes + '-01')}: ingresos ${INFORME.eur(x.ingresos)}</title></rect>`;
+      out += `<rect x="${(cx + 1).toFixed(1)}" y="${(base - alto(costes)).toFixed(1)}" width="${ancho}" height="${alto(costes).toFixed(1)}" rx="2" fill="var(--bad)" opacity=".8"><title>${mesEnLetras(x.mes + '-01')}: gastos + personal ${INFORME.eur(costes)}</title></rect>`;
+      if (x.ingresos || costes) {
+        out += `<text x="${cx.toFixed(1)}" y="${(base - alto(Math.max(x.ingresos, costes)) - 5).toFixed(1)}" text-anchor="middle" font-size="8.5" font-weight="700" fill="${x.beneficio >= 0 ? 'var(--ok)' : 'var(--bad)'}">${x.beneficio >= 0 ? '+' : ''}${eurCorto(x.beneficio)}</text>`;
+      }
+      out += `<text x="${cx.toFixed(1)}" y="${H - 6}" text-anchor="middle" font-size="8.5" fill="var(--texto-sec)">${mesCorto(x.mes)}</text>`;
+    });
+    return `
+      <svg viewBox="0 0 ${W} ${H}" class="grafico" role="img" aria-label="Últimos meses">
+        <line x1="0" x2="${W}" y1="${base}" y2="${base}" stroke="var(--borde)"/>
+        ${out}
+      </svg>
+      <div class="leyenda"><span><i style="background:var(--plata)"></i> Ventas</span><span><i style="background:var(--bad)"></i> Gastos + personal</span><span>Encima, lo que quedó</span></div>`;
+  }
+
+  /* En qué se va cada euro de ventas: una barra de 100 % con cada partida. */
+  function barraApiladaHTML(d) {
+    if (!(d.ingresos > 0)) return '<p class="hint" style="margin:0">Sin cierres este mes no se puede repartir la facturación.</p>';
+    const partes = Object.entries(d.porCategoria).sort((a, b) => b[1] - a[1]).map(([n, v], i) => ({ n, v, color: COLORES_INICIO[i % COLORES_INICIO.length] }));
+    if (d.personal > 0) partes.push({ n: 'Personal', v: d.personal, color: 'var(--oro)' });
+    const costes = partes.reduce((s, p) => s + p.v, 0);
+    const total = Math.max(d.ingresos, costes);
+    if (d.beneficio > 0) partes.push({ n: 'Te queda', v: d.beneficio, color: 'var(--ok)' });
+    const pctTxt = (v) => Math.round(v / d.ingresos * 100) + ' %';
+    return `
+      <div class="apilada">${partes.map(p => `<div style="width:${(p.v / total * 100).toFixed(2)}%;background:${p.color}" title="${escapar(p.n)}: ${INFORME.eur(p.v)}"></div>`).join('')}</div>
+      <div class="leyenda-lista">${partes.map(p => `<div class="leyenda-fila"><span><i style="background:${p.color}"></i> ${escapar(p.n)}</span><span class="txt-sec">${INFORME.eur(p.v)}</span><strong>${pctTxt(p.v)}</strong></div>`).join('')}</div>
+      ${d.beneficio < 0 ? `<p class="hint txt-bad" style="margin:6px 0 0">🔴 Los costes superan las ventas: pierdes ${INFORME.eur(-d.beneficio)} este mes.</p>` : ''}`;
+  }
+
+  async function pintarInicio() {
+    const cont = $('#ini-contenido');
+    if (!cont) return;
+    const mes = mesInicio;
+    const hoy = hoyISO();
+    const esMesActual = mes === hoy.slice(0, 7);
+    let regs, trabajadores;
+    try {
+      [regs, trabajadores] = await Promise.all([DB.todos(), DB.perTodos()]);
+    } catch (e) {
+      console.error(e);
+      cont.innerHTML = `<div class="card"><p class="vacio">⚠️ ${escapar(e.message || 'No se pudieron leer los datos guardados.')}</p></div>`;
+      return;
+    }
+    const meses = [];
+    for (let m = mes, i = 0; i < 6; i++) { meses.unshift(m); m = mesAnteriorDe(m); }
+    const datos = meses.map(m => datosMesDe(regs, trabajadores, m));
+    const d = datos[datos.length - 1];
+    const ant = datos[datos.length - 2];
+    const equipo = await deudaConElEquipo(cierresDesde(regs));
+    const alertas = await alertasDelMes(mes, d, regs, equipo);
+
+    const pct = (parte) => d.ingresos > 0 ? `${Math.round(parte / d.ingresos * 100)} % de las ventas` : '';
+    const variacion = (ahora, antes) => {
+      if (!antes) return '';
+      const dif = (ahora - antes) / Math.abs(antes) * 100;
+      return `<span class="${dif >= 0 ? 'txt-ok' : 'txt-bad'}">${dif >= 0 ? '▲' : '▼'} ${Math.abs(dif).toLocaleString('es-ES', { maximumFractionDigits: 0 })} %</span> vs ${INFORME.MESES[+ant.mes.slice(5) - 1].toLowerCase()}`;
+    };
+    const margen = d.ingresos > 0 ? Math.round(d.beneficio / d.ingresos * 100) : null;
+    const diasConVenta = Object.keys(d.porDia).length;
+    const mediaDia = diasConVenta ? r2(d.ingresos / diasConVenta) : 0;
+    const hayDatos = regs.length > 0 || trabajadores.length > 0;
+
+    const provs = Object.entries(d.porProveedor).sort((a, b) => b[1].total - a[1].total).slice(0, 5);
+    const maxProv = Math.max(1, ...provs.map(([, p]) => p.total));
+    const provsHTML = provs.map(([n, p]) => `
+      <div class="fila-mes">
+        <span class="mes-etq" style="width:96px;text-transform:none;letter-spacing:0" title="${escapar(n)}">${escapar(n)}</span>
+        <div class="barra"><div class="barra-fill" style="width:${Math.max(2, Math.round(p.total / maxProv * 100))}%"></div></div>
+        <span class="mes-val" style="width:110px">${INFORME.eur(p.total)}${d.ingresos > 0 ? ` <small class="txt-sec">${Math.round(p.total / d.ingresos * 100)}%</small>` : ''}</span>
+      </div>`).join('');
+
+    const equipoHTML = equipo.filas.map(({ t, deuda }) => {
+      const c = calcularMes(t, ventasParaTrabajador(t, regs.filter(r => r.tipo === 'cierre' && (r.fecha || '').startsWith(mes)), mes), [], mes);
+      return `<div class="stat-linea"><span>${escapar(t.nombre)} <small class="txt-sec">· ${c.dias.length} día${c.dias.length === 1 ? '' : 's'} ${esMesActual ? 'este mes' : 'ese mes'}${c.tardes.length ? ` · ⏰ ${c.tardes.length}` : ''}</small></span>${deuda > 0 ? `<strong class="txt-bad">debes ${INFORME.eur(deuda)}</strong>` : (deuda < 0 ? `<strong class="txt-sec">adelantado ${INFORME.eur(-deuda)}</strong>` : '<strong class="txt-ok">✓ al día</strong>')}</div>`;
+    }).join('');
+
+    cont.innerHTML = `
+      <div class="card ini-resumen">
+        <div class="ini-cab">
+          <button class="btn btn-small ini-mes" data-ir="-1" title="Mes anterior">◀</button>
+          <div class="ini-titulo"><strong>${mesEnLetras(mes + '-01')}</strong><small>${esMesActual ? `hasta hoy, día ${+hoy.slice(8)}` : 'mes completo'}</small></div>
+          <button class="btn btn-small ini-mes" data-ir="1" title="Mes siguiente" ${esMesActual ? 'disabled' : ''}>▶</button>
+        </div>
+        <div class="kpis">
+          <div class="kpi"><div class="kpi-etq">💰 Ventas</div><div class="kpi-val txt-ok">${INFORME.eur(d.ingresos)}</div><div class="kpi-sub">${variacion(d.ingresos, ant.ingresos) || (diasConVenta ? `${diasConVenta} día${diasConVenta === 1 ? '' : 's'} con cierre` : 'sin cierres')}</div></div>
+          <div class="kpi"><div class="kpi-etq">📄 Gastos</div><div class="kpi-val txt-bad">${INFORME.eur(d.gastos)}</div><div class="kpi-sub">${pct(d.gastos) || `${d.facturas} factura${d.facturas === 1 ? '' : 's'}`}</div></div>
+          <div class="kpi"><div class="kpi-etq">👥 Personal</div><div class="kpi-val txt-bad">${INFORME.eur(d.personal)}</div><div class="kpi-sub">${pct(d.personal) || 'sueldos + comisiones'}</div></div>
+          <div class="kpi kpi-destacado ${d.beneficio >= 0 ? 'ok' : 'mal'}"><div class="kpi-etq">${d.beneficio >= 0 ? '✅ Te queda' : '🔴 Pierdes'}</div><div class="kpi-val">${INFORME.eur(Math.abs(d.beneficio))}</div><div class="kpi-sub">${margen !== null ? `margen ${margen} %` : '—'}${ant.ingresos ? ` · ${variacion(d.beneficio, ant.beneficio)}` : ''}</div></div>
+        </div>
+        ${mediaDia ? `<p class="hint" style="margin:8px 0 0">Media por día con cierre: <strong>${INFORME.eur(mediaDia)}</strong>${equipo.total > 0 ? ` · Debes al equipo <strong class="txt-bad">${INFORME.eur(equipo.total)}</strong>` : ''}</p>` : ''}
+        <div class="acciones-rapidas">
+          <button class="btn btn-primary ini-ir" data-tab="facturas">📷 Nueva factura</button>
+          <button class="btn btn-secondary ini-ir" data-tab="cierres">💰 Cierre de caja</button>
+        </div>
+      </div>
+      <div id="ini-alertas">${alertas.join('')}</div>
+      ${!hayDatos ? '<div class="card"><p class="vacio">Aún no hay nada anotado. Empieza con una factura o un cierre de caja y aquí verás cómo va el negocio.</p></div>' : ''}
+      ${d.ingresos > 0 ? `
+      <div class="card">
+        <h2>📈 Ventas de cada día</h2>
+        ${svgVentasDias(d, mes) || '<p class="hint" style="margin:0">Este mes está anotado como total del mes, sin cierres por día.</p>'}
+        <p class="hint" style="margin:6px 0 0">En verde el mejor día; la línea dorada es la media. Un guion rojo abajo es un día sin cierre.</p>
+      </div>` : ''}
+      <div class="card">
+        <h2>📅 Últimos 6 meses</h2>
+        ${svgMeses(datos)}
+      </div>
+      <div class="card">
+        <h2>🧾 En qué se va cada euro de ${INFORME.MESES[+mes.slice(5) - 1].toLowerCase()}</h2>
+        ${barraApiladaHTML(d)}
+        ${d.casa ? `<p class="hint" style="margin:8px 0 0">Gastos de casa, aparte: ${INFORME.eur(d.casa)} (no restan).</p>` : ''}
+      </div>
+      ${provs.length ? `
+      <div class="card">
+        <h2>🏪 Los proveedores que más pesan</h2>
+        ${provsHTML}
+        <p class="hint" style="margin:8px 0 0">El % es sobre las ventas del mes. El detalle completo, por proveedor y por tipo de gasto, está en Informes.</p>
+      </div>` : ''}
+      ${equipo.filas.length ? `
+      <div class="card">
+        <h2>👥 Equipo</h2>
+        ${equipoHTML}
+        <div class="stat-linea"><span><strong>Pendiente con el equipo</strong></span><strong class="${equipo.total > 0 ? 'txt-bad' : 'txt-ok'}">${INFORME.eur(equipo.total)}</strong></div>
+      </div>` : ''}`;
+
+    conectarAlertas(cont);
+    cont.querySelectorAll('.ini-mes').forEach(b => b.addEventListener('click', () => {
+      mesInicio = b.dataset.ir === '1' ? mesSiguiente(mesInicio) : mesAnteriorDe(mesInicio);
+      if (mesInicio > hoy.slice(0, 7)) mesInicio = hoy.slice(0, 7);
+      pintarInicio();
+    }));
+    cont.querySelectorAll('.ini-ir').forEach(b => b.addEventListener('click', () => {
+      document.querySelector(`.tab[data-tab="${b.dataset.tab}"]`).click();
+      window.scrollTo({ top: 0 });
+    }));
+  }
 
   /* ---------- INFORME ---------- */
 
@@ -3343,12 +3667,25 @@
     }
   }
 
+  /* Lo que se pinta al entrar cuando la app arrancó bloqueada: mientras el
+     bloqueo está puesto no se pinta nada pesado, para que la huella responda
+     al instante; al entrar se pinta todo de golpe. */
+  let pendienteTrasDesbloqueo = null;
+  function desbloqueada() {
+    intentosFallidos = 0;
+    $('#lock-screen').classList.add('hidden');
+    if (pendienteTrasDesbloqueo) {
+      const f = pendienteTrasDesbloqueo;
+      pendienteTrasDesbloqueo = null;
+      f();
+    }
+  }
+
   async function intentarHuella() {
     if (!SEGURIDAD.biometriaActivada()) return;
     const ok = await SEGURIDAD.verificarBiometria();
     if (ok) {
-      intentosFallidos = 0;
-      $('#lock-screen').classList.add('hidden');
+      desbloqueada();
     } else {
       $('#lock-error').textContent = 'No se pudo verificar la huella. Usa el PIN o inténtalo de nuevo.';
       $('#lock-error').classList.remove('hidden');
@@ -3367,8 +3704,7 @@
     }
     const ok = await SEGURIDAD.verificarPIN(pin);
     if (ok) {
-      intentosFallidos = 0;
-      $('#lock-screen').classList.add('hidden');
+      desbloqueada();
     } else {
       intentosFallidos++;
       $('#lock-pin').value = '';
@@ -3573,9 +3909,21 @@
   iniciarSelectorAnio();
   pintarConfig();
   pintarSeguridad();
-  pintarRecientes();
-  pintarProveedores();
   cargarProveedores();
+
+  // Lo que se ve al entrar: el panel de inicio (una lectura, sin fotos) y las
+  // listas recientes. Si la app arranca bloqueada, se deja para el momento de
+  // entrar: así la huella no compite con nada y, al entrar, todo aparece ya.
+  const pintarAlEntrar = () => { pintarInicio(); pintarRecientes(); pintarProveedores(); };
+  if (SEGURIDAD.pinActivado()) pendienteTrasDesbloqueo = pintarAlEntrar;
+  else pintarAlEntrar();
+
+  // Miniaturas de las fotos antiguas: en segundo plano, cuando el móvil esté libre
+  setTimeout(() => {
+    const tarea = () => { crearMiniaturasQueFaltan().catch(e => console.error(e)); };
+    if ('requestIdleCallback' in window) requestIdleCallback(tarea, { timeout: 15000 });
+    else tarea();
+  }, 5000);
 
   // Nube: al cambiar la sesión o llegar datos de otro dispositivo,
   // refrescar las listas en pantalla. Arranca un momento después de pintar
@@ -3585,10 +3933,15 @@
     pintarRecientes();
     pintarProveedores();
     cargarProveedores();
+    if (document.querySelector('.tab[data-tab="inicio"]').classList.contains('active')) pintarInicio();
     if (document.querySelector('.tab[data-tab="consultar"]').classList.contains('active')) buscar();
     if (document.querySelector('.tab[data-tab="personal"]').classList.contains('active')) pintarPersonal();
     if (document.querySelector('.tab[data-tab="cierres"]').classList.contains('active')) pintarFacturacion();
     if (document.querySelector('.tab[data-tab="informe"]').classList.contains('active')) pintarResumen();
   }), 1200);
   pintarNube();
+
+  // Para la verificación automática (pruebas/): poder lanzar a mano lo que la
+  // app hace sola en segundo plano o al entrar.
+  window.APP = { inicio: pintarInicio, recientes: pintarRecientes, miniaturas: crearMiniaturasQueFaltan };
 })();

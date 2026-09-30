@@ -12,7 +12,7 @@ bash pruebas/ejecutar.sh
 
 Al final dice `✅ TODO CORRECTO` o lista los fallos encontrados.
 
-## Qué se comprueba (309 comprobaciones)
+## Qué se comprueba (337 comprobaciones)
 
 **Informe trimestral** — que los ingresos y gastos del trimestre son los
 correctos, que no se cuelan registros de otros meses, que se agrupan las
@@ -100,6 +100,20 @@ resultados.
 ventas; todos los costes juntos (969,23 = 32 %); cada proveedor con su categoría y su % de
 la facturación (Bebidas Pepe 23 %, Endesa 7 %, personal 2 %), sin los gastos de casa; y las
 alertas del trimestre y de las facturas sin IVA.
+
+**Inicio (panel visual)** — que es la primera pestaña, que las cifras grandes son las del
+cuadro de mando (ventas 3.000, gastos 30 %, personal 2 %, te queda 2.030,77 con margen 68 %),
+que se dibujan los dos gráficos (ventas por día y últimos 6 meses), que la barra de "en qué se
+va cada euro" reparte mercancía, luz, personal y lo que queda con su %, los proveedores que más
+pesan, el equipo, los avisos, las flechas de mes y los botones rápidos.
+
+**Fotos** — que a una foto guardada antes se le crea la miniatura (220 px, menos de 40 KB) sin
+tocar la foto ni su fecha de modificación, que la lista usa la miniatura en diferido, que una
+foto nueva de 2.600 px se guarda a 2.000 px en JPEG y ya con miniatura, y que la copia de
+seguridad lleva las fotos pero no las miniaturas.
+
+**Arranque bloqueado** — que la fuente de Google no bloquea la primera pintada, que con PIN la
+app arranca sin pintar el inicio ni las listas con fotos, y que al entrar se pinta todo.
 
 **Seguridad** — que el PIN no se guarda en claro, que uno incorrecto no abre la
 app, y que las copias cifradas no se pueden leer sin su contraseña.

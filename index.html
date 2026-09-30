@@ -9,7 +9,11 @@
 <link rel="manifest" href="manifest.json">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<!-- La fuente se carga sin bloquear: con mala cobertura, esperar a Google Fonts
+     retrasaba la primera pintada (y la huella) varios segundos. Mientras llega, se
+     usa la del sistema. -->
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet"></noscript>
 <link rel="stylesheet" href="css/styles.css">
 <link rel="icon" type="image/png" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -40,7 +44,8 @@
 </header>
 
 <nav class="tabs">
-  <button class="tab active" data-tab="facturas">📄 Facturas</button>
+  <button class="tab active" data-tab="inicio">🏠 Inicio</button>
+  <button class="tab" data-tab="facturas">📄 Facturas</button>
   <button class="tab" data-tab="cierres">💰 Facturación</button>
   <button class="tab" data-tab="consultar">🔍 Consultar</button>
   <button class="tab" data-tab="personal">👥 Personal</button>
@@ -50,8 +55,13 @@
 
 <main>
 
+<!-- ==================== INICIO: panel visual del negocio ==================== -->
+<section id="tab-inicio" class="tab-panel active">
+  <div id="ini-contenido"><p class="vacio">Cargando…</p></div>
+</section>
+
 <!-- ==================== FACTURAS ==================== -->
-<section id="tab-facturas" class="tab-panel active">
+<section id="tab-facturas" class="tab-panel">
   <div class="card">
     <h2>Nueva factura de gasto</h2>
     <p class="hint">Haz una foto de la factura o ticket del proveedor. El sistema intentará detectar el proveedor, la fecha y el total automáticamente.</p>

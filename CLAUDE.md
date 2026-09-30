@@ -13,7 +13,7 @@ desde la rama por defecto del repositorio.
 
 | Archivo | Qué hace |
 |---|---|
-| `index.html` | Toda la interfaz, en pestañas (Facturas, Cierres, Consultar, Personal, Informe, Ajustes) |
+| `index.html` | Toda la interfaz, en pestañas (Inicio, Facturas, Facturación, Consultar, Personal, Informes, Ajustes) |
 | `js/db.js` | Almacenamiento local (IndexedDB): registros, proveedores, personal, pagos |
 | `js/nube.js` | Sincronización con Firebase (Firestore) del proyecto del propio usuario |
 | `js/ocr.js` | Lectura de fotos con Tesseract y detección de proveedor, fechas, totales, IVA y retenciones |
@@ -34,6 +34,24 @@ cuando hacen falta. Si volvieran al HTML, el móvil tendría que procesarlos ent
 responder (medido: unos 600 ms de espera de más). Hay dos comprobaciones que lo vigilan.
 Sin conexión todo sigue: la nube queda "apagada" y una foto avisa de que no se pudo
 cargar el lector, en vez de romperse.
+
+**Con PIN, la app arranca sin pintar nada pesado.** Lo que se ve al entrar (el panel de
+inicio y las listas recientes) queda en `pendienteTrasDesbloqueo` y se pinta al desbloquear
+(`desbloqueada()`), para que la huella no compita con nada. Sin PIN se pinta al momento. La
+fuente de Google se carga sin bloquear (`rel="preload" as="style"`): con mala cobertura,
+esperar a la hoja de estilos retrasaba la primera pintada varios segundos.
+
+**Las fotos se guardan ligeras y con miniatura.** Al guardar una factura o un cierre,
+`optimizarFoto` deja la foto a 2.000 px como mucho (JPEG; con el zoom se sigue leyendo el
+IVA) y crea `miniatura` (220 px) para las listas. Antes cada lista obligaba al móvil a
+decodificar diez fotos de 12 megapíxeles para enseñar 52 px, y eso era lo que hacía lenta la
+app al abrir y al buscar. Las listas usan `r.miniatura || r.imagen`, con `loading="lazy"`
+(ojo: una imagen en diferido dentro de una pestaña oculta no se carga hasta que se ve). A
+las fotos guardadas antes se les crea la miniatura en segundo plano
+(`crearMiniaturasQueFaltan`, unos segundos después de arrancar), guardando con
+`{ remoto: true }` para **no** cambiar `mod` ni volver a subir nada a la nube. La miniatura
+es solo local: `nube.js` la quita al subir y `db.js` al exportar la copia (se rehace al
+restaurar). `window.APP` expone `inicio`, `recientes` y `miniaturas` para la verificación.
 
 ## Reglas de negocio (acordadas con el dueño, no cambiar sin preguntar)
 
@@ -65,6 +83,23 @@ cargar el lector, en vez de romperse.
   días más flojos, media por día de la semana y días sin cierre anotado.
 - La fecha de un ticket Z es la de **apertura** de caja, no la de impresión
   (una caja abierta el 11 que cierra de madrugada el 12 es venta del 11).
+
+**Inicio** (la primera pestaña, lo que se ve al abrir; solo interno)
+- El panel visual del negocio (`pintarInicio`): el mes con ◀ ▶, cuatro cifras grandes
+  (ventas con la variación frente al mes anterior, gastos y personal con su % de las ventas,
+  y lo que queda con el margen), media por día con cierre, botones de "Nueva factura" y
+  "Cierre de caja", los mismos avisos que el cuadro de mando (`alertasDelMes`, botón
+  `.tri-hecho`), y gráficos dibujados en SVG sin librerías: **ventas de cada día** (mejor
+  día en verde, media en dorado, día sin cierre como guion rojo), **últimos 6 meses**
+  (ventas frente a gastos + personal, con lo que quedó encima), **en qué se va cada euro**
+  (barra apilada al 100 % con cada partida, personal y lo que queda), los **cinco
+  proveedores que más pesan** y el **equipo** (días del mes y lo pendiente con cada uno).
+- Todo sale de UNA lectura de la base de datos (`datosMesDe(regs, trabajadores, mes)`, la
+  versión sin `await` de `datosMes`) y no toca ninguna foto, para que aparezca al instante
+  tras desbloquear. Los números son los mismos del cuadro de mando: comparten
+  `datosMesDe`, `deudaConElEquipo` y `alertasDelMes`.
+- Ojo con `toLocaleString('es-ES')`: un número de cuatro cifras sale **sin** punto de
+  millar (`3000,00 €`), así que las comprobaciones usan `3\.?000`.
 
 **Cuadro de mando** (pestaña Informes, arriba; solo interno)
 - Por mes: ingresos, gastos del negocio, coste de personal devengado, **todos los
@@ -253,7 +288,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 309 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 337 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.
 

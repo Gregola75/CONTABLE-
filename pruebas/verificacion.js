@@ -1730,7 +1730,7 @@ TARJETA 450,00`)]);
     /Personal\s*sueldos \+ comisiones\s*69,23 € 2%/.test(res) && /Todo junto \(proveedores \+ personal\)\s*969,23 € 32 % de la facturación/.test(res), res.slice(-900));
   chk('cuadro', 'Alerta de trimestre cerrado sin guardar', al.includes('trimestre'));
   chk('cuadro', 'Alerta de facturas sin desglose de IVA (2)', al.includes('2 facturas sin desglose de IVA'));
-  await page.click('#res-tri-hecho');
+  await page.click('#res-alertas .tri-hecho');
   await page.waitForTimeout(600);
   al = (await page.textContent('#res-alertas')).replace(/\s+/g, ' ');
   chk('cuadro', '"Ya lo hice" quita el aviso del trimestre', !al.includes('trimestre'));
@@ -1751,6 +1751,144 @@ TARJETA 450,00`)]);
     arranque.externos.length === 0, arranque.externos.join(' | '));
   chk('estabilidad', 'El desbloqueo (huella o PIN) est\u00e1 listo sin esperar a nada de fuera',
     arranque.seguridad && arranque.db && arranque.app);
+
+  // ══════════════ 9f. INICIO: EL PANEL VISUAL DEL NEGOCIO ══════════════
+  // Con los datos del cuadro de mando (3.000 de ventas, 900 de gastos, Juan 69,23)
+  console.log('\n═══ 9f. INICIO (panel visual) ═══');
+  await page.click('.tab[data-tab="inicio"]');
+  await page.waitForTimeout(1000);
+  let ini = (await page.textContent('#ini-contenido')).replace(/\s+/g, ' ');
+  chk('inicio', 'Es la primera pestaña y sale al abrir', await page.evaluate(() => document.querySelector('.tab').dataset.tab === 'inicio'));
+  chk('inicio', 'Ventas del mes 3.000,00 y gastos 900,00 (30 % de las ventas)',
+    /Ventas\s*3\.?000,00 €/.test(ini) && /Gastos\s*900,00 €\s*30 % de las ventas/.test(ini), ini.slice(0, 400));
+  chk('inicio', 'Personal 69,23 (2 % de las ventas)', /Personal\s*69,23 €\s*2 % de las ventas/.test(ini), ini.slice(0, 400));
+  chk('inicio', 'Te queda 2.030,77 con margen 68 %', /Te queda\s*2\.?030,77 €\s*margen 68 %/.test(ini), ini.slice(0, 500));
+  chk('inicio', 'Media por día con cierre: 1.500,00', /Media por día con cierre: 1\.?500,00 €/.test(ini), ini.slice(0, 600));
+  const graficos = await page.evaluate(() => ({
+    svgs: document.querySelectorAll('#ini-contenido svg').length,
+    barrasDia: document.querySelectorAll('#ini-contenido svg[aria-label="Ventas de cada día"] rect').length,
+    meses: document.querySelectorAll('#ini-contenido svg[aria-label="Últimos meses"] text').length,
+    apilada: document.querySelectorAll('#ini-contenido .apilada > div').length,
+    alertas: document.querySelectorAll('#ini-alertas .alerta').length
+  }));
+  chk('inicio', 'Dos gráficos dibujados: ventas por día y últimos 6 meses', graficos.svgs === 2 && graficos.barrasDia >= 2 && graficos.meses >= 6, JSON.stringify(graficos));
+  chk('inicio', 'La barra de "en qué se va cada euro" tiene mercancía, luz, personal y lo que queda', graficos.apilada === 4, JSON.stringify(graficos));
+  chk('inicio', 'Reparto con su %: Mercancía 23 %, Luz 7 %, Personal 2 %, Te queda 68 %',
+    /Mercancía\s*700,00 €\s*23 %/.test(ini) && /Luz\s*200,00 €\s*7 %/.test(ini) && /Personal\s*69,23 €\s*2 %/.test(ini) && /Te queda\s*2\.?030,77 €\s*68 %/.test(ini), ini.slice(600, 1400));
+  chk('inicio', 'Los proveedores que más pesan: Bebidas Pepe 700,00 (23%) y Endesa 200,00 (7%)',
+    /Bebidas Pepe\s*700,00 € 23%/.test(ini) && /Endesa\s*200,00 € 7%/.test(ini), ini.slice(-900));
+  chk('inicio', 'El alquiler de casa no aparece entre los proveedores', !/Alquiler casa/.test(ini));
+  chk('inicio', 'El equipo: Juan con 2 días este mes y lo que se le debe (69,23)', /Juan · 2 días este mes\s*debes 69,23 €/.test(ini), ini.slice(-500));
+  chk('inicio', 'Los avisos también salen aquí (trimestre y facturas sin IVA)', graficos.alertas >= 2 && /sin desglose de IVA/.test(ini) && /trimestre/.test(ini));
+  // Navegar por meses
+  await page.click('#ini-contenido .ini-mes[data-ir="-1"]');
+  await page.waitForTimeout(800);
+  const mesAntTxt = await page.textContent('#ini-contenido .ini-titulo strong');
+  const mesAntEsperado = await page.evaluate(() => { const h = new Date(); const d = new Date(h.getFullYear(), h.getMonth() - 1, 1); return INFORME.MESES[d.getMonth()] + ' ' + d.getFullYear(); });
+  chk('inicio', 'La flecha ◀ enseña el mes anterior', mesAntTxt.trim() === mesAntEsperado, `${mesAntTxt} vs ${mesAntEsperado}`);
+  await page.click('#ini-contenido .ini-mes[data-ir="1"]');
+  await page.waitForTimeout(800);
+  chk('inicio', 'Y ▶ vuelve al mes actual, donde ya no se puede pasar de hoy',
+    await page.evaluate(() => document.querySelector('#ini-contenido .ini-mes[data-ir="1"]').disabled));
+  // "Ya lo hice" desde el inicio
+  await page.click('#ini-alertas .tri-hecho');
+  await page.waitForTimeout(700);
+  ini = (await page.textContent('#ini-contenido')).replace(/\s+/g, ' ');
+  chk('inicio', '"Ya lo hice" desde el inicio quita el aviso del trimestre', !/trimestre/.test(ini));
+  await page.evaluate(() => localStorage.removeItem('contable-trimestre-guardado'));
+  // Acciones rápidas
+  await page.click('#ini-contenido .ini-ir[data-tab="cierres"]');
+  await page.waitForTimeout(300);
+  chk('inicio', 'El botón "Cierre de caja" lleva a Facturación', await page.evaluate(() => document.querySelector('.tab[data-tab="cierres"]').classList.contains('active')));
+
+  // ══════════════ 9g. FOTOS: SE GUARDAN LIGERAS Y CON MINIATURA ══════════════
+  console.log('\n═══ 9g. FOTOS (ligeras y con miniatura) ═══');
+  const fotoGrande = await page.evaluate(async () => {
+    // Una "foto" de 2600 × 1900 con algo dibujado, como la que hace un móvil
+    const c = document.createElement('canvas'); c.width = 2600; c.height = 1900;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+    ctx.fillStyle = '#222'; ctx.font = '80px sans-serif';
+    for (let i = 0; i < 20; i++) ctx.fillText('FACTURA TOTAL 121,00 €', 100, 150 + i * 90);
+    const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.95));
+    const hoy = new Date(); const p = (n) => String(n).padStart(2, '0');
+    const fecha = `${hoy.getFullYear()}-${p(hoy.getMonth() + 1)}-${p(hoy.getDate())}`;
+    // Una factura de ANTES de existir las miniaturas: foto entera y nada más
+    const id = await DB.guardar({ tipo: 'factura', fecha, proveedor: 'Foto Antigua', total: 121, categoria: 'Mercancía', imagen: blob, creado: new Date().toISOString() });
+    const r = await DB.obtener(id);
+    const b64 = await new Promise(res => { const fr = new FileReader(); fr.onload = () => res(fr.result.split(',')[1]); fr.readAsDataURL(blob); });
+    return { id, tam: blob.size, mod: r.mod, b64 };
+  });
+  chk('fotos', 'La foto de prueba es grande de verdad (más de 300 KB)', fotoGrande.tam > 300000, String(fotoGrande.tam));
+  const migradas = await page.evaluate(() => APP.miniaturas());
+  const mini = await page.evaluate(async (id) => {
+    const r = await DB.obtener(id);
+    if (!(r.miniatura instanceof Blob)) return { hay: false };
+    const bm = await createImageBitmap(r.miniatura);
+    return { hay: true, tam: r.miniatura.size, w: bm.width, h: bm.height, mod: r.mod, fotoIntacta: r.imagen.size };
+  }, fotoGrande.id);
+  chk('fotos', 'A una foto guardada antes se le crea la miniatura en segundo plano', migradas === 1 && mini.hay, JSON.stringify(mini));
+  chk('fotos', 'La miniatura es pequeña: 220 px y menos de 40 KB', mini.hay && Math.max(mini.w, mini.h) <= 220 && mini.tam < 40000, JSON.stringify(mini));
+  chk('fotos', 'Crear la miniatura NO toca la foto ni la fecha de modificación (no se vuelve a subir a la nube)',
+    mini.hay && mini.mod === fotoGrande.mod && mini.fotoIntacta === fotoGrande.tam, `${mini.mod} vs ${fotoGrande.mod}`);
+  await page.evaluate(() => APP.recientes());
+  await page.click('.tab[data-tab="facturas"]');   // en diferido: solo se carga cuando la lista se ve
+  await page.waitForTimeout(900);
+  const thumb = await page.evaluate(async () => {
+    const img = document.querySelector('#facturas-recientes .item img.item-thumb');
+    if (!img) return { hay: false };
+    if (!img.complete) await new Promise(r => { img.onload = r; img.onerror = r; setTimeout(r, 4000); });
+    return { hay: true, lazy: img.getAttribute('loading') === 'lazy', w: img.naturalWidth, h: img.naturalHeight, blob: img.src.startsWith('blob:') };
+  });
+  chk('fotos', 'La lista usa la miniatura (220 px), no la foto entera, y la carga en diferido',
+    thumb.hay && thumb.blob && thumb.lazy && Math.max(thumb.w, thumb.h) <= 220, JSON.stringify(thumb));
+  // Una factura nueva hecha con foto: se guarda a 2.000 px como mucho y con miniatura
+  await page.evaluate(() => { window.__leerImagenOriginal = OCR.leerImagen; OCR.leerImagen = async () => 'TOTAL 50,00'; });
+  await page.click('.tab[data-tab="facturas"]');
+  await page.setInputFiles('#factura-file', { name: 'foto.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(fotoGrande.b64, 'base64') });
+  await page.waitForTimeout(1200);
+  await page.fill('#f-proveedor', 'Foto Nueva S.L.');
+  await page.fill('#f-fecha', '2026-09-15');
+  await page.fill('#f-total', '50');
+  await page.click('#factura-guardar');
+  await page.waitForTimeout(1500);
+  const nueva = await page.evaluate(async () => {
+    const r = (await DB.todos()).find(x => x.proveedor === 'Foto Nueva S.L.');
+    if (!r || !(r.imagen instanceof Blob)) return { hay: false };
+    const bm = await createImageBitmap(r.imagen);
+    return { hay: true, w: bm.width, h: bm.height, tam: r.imagen.size, mini: r.miniatura instanceof Blob, tipo: r.imagen.type };
+  });
+  chk('fotos', 'Una foto nueva de 2600 px se guarda a 2000 px como mucho, en JPEG', nueva.hay && Math.max(nueva.w, nueva.h) <= 2000 && nueva.tipo === 'image/jpeg', JSON.stringify(nueva));
+  chk('fotos', 'Y ya nace con su miniatura', nueva.hay && nueva.mini, JSON.stringify(nueva));
+  chk('fotos', 'La foto guardada pesa menos que la original', nueva.hay && nueva.tam < fotoGrande.tam, `${nueva.tam} vs ${fotoGrande.tam}`);
+  await page.evaluate(() => { OCR.leerImagen = window.__leerImagenOriginal; });
+  const copia = await page.evaluate(async () => { const d = await DB.exportarTodo(); return { conMini: d.registros.some(r => 'miniatura' in r), conFoto: d.registros.filter(r => typeof r.imagen === 'string').length }; });
+  chk('fotos', 'La copia de seguridad lleva las fotos pero no las miniaturas (se rehacen al restaurar)', !copia.conMini && copia.conFoto === 2, JSON.stringify(copia));
+
+  // ══════════════ 9h. ARRANQUE BLOQUEADO: NADA PESADO HASTA ENTRAR ══════════════
+  console.log('\n═══ 9h. ARRANQUE BLOQUEADO (la huella primero) ═══');
+  chk('estabilidad', 'La fuente de Google no bloquea la primera pintada',
+    await page.evaluate(async () => { const html = await (await fetch('index.html')).text(); return !/<link[^>]*rel="stylesheet"[^>]*fonts\.googleapis/.test(html); }));
+  await page.evaluate(() => SEGURIDAD.establecerPIN('2468'));
+  await page.goto('http://localhost:8904/index.html');
+  await page.waitForTimeout(1200);
+  const bloqueado = await page.evaluate(() => ({
+    lock: !document.querySelector('#lock-screen').classList.contains('hidden'),
+    inicio: document.querySelector('#ini-contenido').textContent.trim(),
+    recientes: document.querySelector('#facturas-recientes').children.length
+  }));
+  chk('estabilidad', 'Con PIN, la app arranca bloqueada y sin pintar nada pesado (ni el inicio ni las listas con fotos)',
+    bloqueado.lock && bloqueado.inicio === 'Cargando…' && bloqueado.recientes === 0, JSON.stringify(bloqueado));
+  await page.fill('#lock-pin', '2468');
+  await page.click('#lock-entrar');
+  await page.waitForTimeout(1500);
+  const entrado = await page.evaluate(() => ({
+    lock: document.querySelector('#lock-screen').classList.contains('hidden'),
+    inicio: /Ventas/.test(document.querySelector('#ini-contenido').textContent),
+    recientes: document.querySelectorAll('#facturas-recientes .item').length
+  }));
+  chk('estabilidad', 'Al entrar se pinta todo de golpe: el inicio y las listas', entrado.lock && entrado.inicio && entrado.recientes >= 2, JSON.stringify(entrado));
+  await page.evaluate(() => SEGURIDAD.desactivarPIN());
 
   // ══════════════ 10. ERRORES DE JAVASCRIPT ══════════════
   console.log('\n═══ 10. ESTABILIDAD ═══');

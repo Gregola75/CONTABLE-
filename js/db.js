@@ -203,6 +203,7 @@ const DB = (() => {
     const salida = [];
     for (const r of lista) {
       const copia = { ...r };
+      delete copia.miniatura;   // se vuelve a crear al restaurar; la copia va más ligera
       if (copia.imagen instanceof Blob) {
         copia.imagen = await blobADataURL(copia.imagen);
       }
@@ -234,6 +235,7 @@ const DB = (() => {
     for (const r of datos.registros) {
       const copia = { ...r };
       delete copia.id; // evitar choques de ids: se reasignan
+      delete copia.miniatura;
       if (copia.sid && sidsExistentes.has(copia.sid)) continue;
       if (typeof copia.imagen === 'string' && copia.imagen.startsWith('data:')) {
         copia.imagen = dataURLABlob(copia.imagen);
