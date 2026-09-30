@@ -1360,10 +1360,10 @@
         const f = `${mes}-${String(dia).padStart(2, '0')}`;
         if (!d.porDia[f]) faltan.push(dia);
       }
-      if (faltan.length) alertas.push(`<div class="alerta">⚠️ <strong>${faltan.length} día${faltan.length === 1 ? '' : 's'} sin cierre</strong> este mes: ${faltan.slice(0, 8).join(', ')}${faltan.length > 8 ? '…' : ''}. Sin cierre no hay ingreso anotado.</div>`);
+      if (faltan.length) alertas.push(`<div class="alerta"><span>⚠️ <strong>${faltan.length} día${faltan.length === 1 ? '' : 's'} sin cierre</strong> este mes: ${faltan.slice(0, 8).join(', ')}${faltan.length > 8 ? '…' : ''}. Sin cierre no hay ingreso anotado.</span></div>`);
     }
-    if (d.sinIVA) alertas.push(`<div class="alerta">🧾 <strong>${d.sinIVA} factura${d.sinIVA === 1 ? '' : 's'} sin desglose de IVA</strong> este mes: la previsión de impuestos lo estima. Ábrelas y pon el IVA para afinar.</div>`);
-    if (equipo.total > 0) alertas.push(`<div class="alerta">👥 Debes <strong>${INFORME.eur(equipo.total)}</strong> al equipo en total (ver pestaña Personal).</div>`);
+    if (d.sinIVA) alertas.push(`<div class="alerta"><span>🧾 <strong>${d.sinIVA} factura${d.sinIVA === 1 ? '' : 's'} sin desglose de IVA</strong> este mes: la previsión de impuestos lo estima. Ábrelas y pon el IVA para afinar.</span></div>`);
+    if (equipo.total > 0) alertas.push(`<div class="alerta"><span>👥 Debes <strong>${INFORME.eur(equipo.total)}</strong> al equipo en total (ver pestaña Personal).</span></div>`);
     return alertas;
   }
 
