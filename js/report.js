@@ -371,7 +371,14 @@ const INFORME = (() => {
       facturas.filter(r => r.fecha >= desde && r.fecha <= hasta).forEach(r => {
         const clave = (r.proveedor || 'Sin proveedor').trim() || 'Sin proveedor';
         if (!por[clave]) por[clave] = { meses: new Set(), total: 0, categoria: r.categoria || '' };
-        por[clave].meses.add(r.fecha.slice(0, 7));
+        if (r.trimestral) {
+          // Un total de trimestre cubre sus tres meses
+          const a = +r.fecha.slice(0, 4);
+          const t0 = Math.floor((+r.fecha.slice(5, 7) - 1) / 3);
+          for (let i = 1; i <= 3; i++) por[clave].meses.add(`${a}-${String(t0 * 3 + i).padStart(2, '0')}`);
+        } else {
+          por[clave].meses.add(r.fecha.slice(0, 7));
+        }
         por[clave].total += (r.total || 0);
       });
       return por;

@@ -103,10 +103,30 @@
       <label for="f-nif">NIF / CIF (opcional)</label>
       <input type="text" id="f-nif" placeholder="B12345678">
     </div>
+    <div class="form-group">
+      <label for="f-alcance">¿Qué apuntas?</label>
+      <select id="f-alcance">
+        <option value="fecha">Una factura con su fecha</option>
+        <option value="trimestre">El total de un trimestre (todas sus facturas juntas)</option>
+      </select>
+    </div>
     <div class="form-row">
-      <div class="form-group">
+      <div class="form-group" id="f-fecha-wrap">
         <label for="f-fecha">Fecha</label>
         <input type="date" id="f-fecha">
+      </div>
+      <div class="form-group hidden" id="f-trianio-wrap">
+        <label for="f-trianio">Año</label>
+        <select id="f-trianio"></select>
+      </div>
+      <div class="form-group hidden" id="f-tritri-wrap">
+        <label for="f-tritri">Trimestre</label>
+        <select id="f-tritri">
+          <option value="1">1º (ene–mar)</option>
+          <option value="2">2º (abr–jun)</option>
+          <option value="3">3º (jul–sep)</option>
+          <option value="4">4º (oct–dic)</option>
+        </select>
       </div>
       <div class="form-group">
         <label for="f-total">Total (€)</label>

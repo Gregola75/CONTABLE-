@@ -445,6 +445,7 @@
     }
     $('#f-proveedor').value = datos.proveedor || '';
     $('#f-nif').value = datos.nif || '';
+    ponerAlcanceFactura(false); // una foto siempre es una factura con su fecha
     $('#f-fecha').value = datos.fecha || hoyISO();
     $('#f-total').value = datos.total != null ? datos.total : '';
     $('#f-ivatipo').value = datos.ivaTipo != null ? String(datos.ivaTipo) : '';
@@ -532,9 +533,45 @@
     });
   }
 
+  /* Apunte de factura por trimestre completo: la fecha del registro es el
+     primer día del trimestre y lleva trimestral: true. */
+  function fechaDeTrimestre(anio, t) {
+    return `${anio}-${String((t - 1) * 3 + 1).padStart(2, '0')}-01`;
+  }
+
+  function triDe(fecha) {
+    return { anio: +fecha.slice(0, 4), t: Math.floor((+fecha.slice(5, 7) - 1) / 3) + 1 };
+  }
+
+  function etiquetaTrimestre(fecha) {
+    const { anio, t } = triDe(fecha);
+    return `${t}º trimestre ${anio}`;
+  }
+
+  $('#f-alcance').addEventListener('change', () => {
+    const esTri = $('#f-alcance').value === 'trimestre';
+    $('#f-fecha-wrap').classList.toggle('hidden', esTri);
+    $('#f-trianio-wrap').classList.toggle('hidden', !esTri);
+    $('#f-tritri-wrap').classList.toggle('hidden', !esTri);
+  });
+
+  function ponerAlcanceFactura(esTri, fecha = null) {
+    $('#f-alcance').value = esTri ? 'trimestre' : 'fecha';
+    $('#f-fecha-wrap').classList.toggle('hidden', esTri);
+    $('#f-trianio-wrap').classList.toggle('hidden', !esTri);
+    $('#f-tritri-wrap').classList.toggle('hidden', !esTri);
+    // Por defecto, el último trimestre cerrado: es el que se suele poner al día
+    const tri = fecha ? triDe(fecha) : ultimoTrimestreCerrado();
+    if ($(`#f-trianio option[value="${tri.anio}"]`)) $('#f-trianio').value = String(tri.anio);
+    $('#f-tritri').value = String(tri.t);
+  }
+
   $('#factura-guardar').addEventListener('click', guardarConAviso(async () => {
     const total = parseFloat($('#f-total').value);
-    const fecha = $('#f-fecha').value;
+    const esTrimestral = $('#f-alcance').value === 'trimestre';
+    const fecha = esTrimestral
+      ? fechaDeTrimestre(+$('#f-trianio').value, +$('#f-tritri').value)
+      : $('#f-fecha').value;
     if (!fecha) { toast('⚠️ Falta la fecha.'); return; }
     if (isNaN(total) || total <= 0) { toast('⚠️ Pon el total de la factura.'); return; }
 
@@ -555,8 +592,28 @@
       .filter(r => r.id !== idActual && Math.abs((r.total || 0) - total) < 0.005 &&
         normalizarNombre(r.proveedor) === normalizarNombre(proveedor));
     if (iguales.length && !confirm(
-      `⚠️ Ya hay una factura de "${proveedor}" del ${fmtFecha(fecha)} por ${INFORME.eur(total)}.\n\n` +
+      `⚠️ Ya hay una factura de "${proveedor}" ${esTrimestral ? 'del ' + etiquetaTrimestre(fecha) : 'del ' + fmtFecha(fecha)} por ${INFORME.eur(total)}.\n\n` +
       'Si la guardas, ese gasto y su IVA se contarán DOS VECES en el informe.\n\n¿Seguro que es otra factura distinta?')) return;
+
+    // Un total de trimestre junto a facturas sueltas del mismo proveedor en ese
+    // trimestre se contaría dos veces: avisar en los dos sentidos
+    if (esTrimestral) {
+      const { anio, t } = triDe(fecha);
+      const hastaTri = `${anio}-${String(t * 3).padStart(2, '0')}-31`;
+      const sueltas = (await DB.buscar({ tipo: 'factura', desde: fecha, hasta: hastaTri }))
+        .filter(r => r.id !== idActual && !r.trimestral && normalizarNombre(r.proveedor) === normalizarNombre(proveedor));
+      if (sueltas.length && !confirm(
+        `⚠️ "${proveedor}" ya tiene ${sueltas.length} factura${sueltas.length === 1 ? '' : 's'} suelta${sueltas.length === 1 ? '' : 's'} en el ${etiquetaTrimestre(fecha)}.\n\n` +
+        'Si además guardas el total del trimestre, ese gasto se contaría DOS VECES en el informe.\n\n¿Guardar de todas formas?')) return;
+    } else {
+      const { anio, t } = triDe(fecha);
+      const triFecha = fechaDeTrimestre(anio, t);
+      const totales = (await DB.buscar({ tipo: 'factura', desde: triFecha, hasta: triFecha }))
+        .filter(r => r.id !== idActual && r.trimestral && normalizarNombre(r.proveedor) === normalizarNombre(proveedor));
+      if (totales.length && !confirm(
+        `⚠️ "${proveedor}" ya tiene guardado el TOTAL del ${etiquetaTrimestre(fecha)}.\n\n` +
+        'Si además guardas esta factura suelta, ese gasto se contaría DOS VECES en el informe.\n\n¿Guardar de todas formas?')) return;
+    }
 
     // Coherencia del desglose: base + IVA − retención tiene que dar el total
     if (!isNaN(base) && !isNaN(ivaCuota)) {
@@ -583,6 +640,7 @@
         : { creado: new Date().toISOString() }),
       tipo: 'factura',
       fecha,
+      trimestral: esTrimestral,
       proveedor,
       nif,
       categoria,
@@ -888,7 +946,9 @@
     const titulo = esFactura ? (r.proveedor || 'Sin proveedor') : (r.mensual ? 'Ventas del mes' : 'Cierre de caja');
     const sub = r.mensual
       ? mesEnLetras(r.fecha) + ' · mes completo'
-      : fmtFecha(r.fecha) + (esFactura && r.categoria ? ' · ' + escapar(r.categoria) : '') + (esFactura && r.personal ? ' · 👤 personal' : '');
+      : (r.trimestral
+        ? etiquetaTrimestre(r.fecha) + ' · trimestre completo' + (r.categoria ? ' · ' + escapar(r.categoria) : '')
+        : fmtFecha(r.fecha) + (esFactura && r.categoria ? ' · ' + escapar(r.categoria) : '') + (esFactura && r.personal ? ' · 👤 personal' : ''));
     return `
       <div class="item" data-id="${r.id}">
         ${r._thumb
@@ -945,8 +1005,8 @@
     const esFactura = r.tipo === 'factura';
     const img = r.imagen instanceof Blob ? URL.createObjectURL(r.imagen) : null;
     const lineas = [
-      ['Tipo', esFactura ? 'Factura (gasto)' : (r.mensual ? 'Ventas de un mes completo (ingreso)' : 'Cierre de caja (ingreso)')],
-      r.mensual ? ['Mes', mesEnLetras(r.fecha)] : ['Fecha', fmtFecha(r.fecha)],
+      ['Tipo', esFactura ? (r.trimestral ? 'Total de un trimestre (gasto)' : 'Factura (gasto)') : (r.mensual ? 'Ventas de un mes completo (ingreso)' : 'Cierre de caja (ingreso)')],
+      r.mensual ? ['Mes', mesEnLetras(r.fecha)] : (r.trimestral ? ['Trimestre', etiquetaTrimestre(r.fecha)] : ['Fecha', fmtFecha(r.fecha)]),
       esFactura ? ['Proveedor', r.proveedor || '—'] : null,
       esFactura && r.nif ? ['NIF/CIF', r.nif] : null,
       esFactura ? ['Categoría', r.categoria || '—'] : null,
@@ -1011,6 +1071,7 @@
       }
       $('#f-proveedor').value = r.proveedor || '';
       $('#f-nif').value = r.nif || '';
+      ponerAlcanceFactura(!!r.trimestral, r.trimestral ? r.fecha : null);
       $('#f-fecha').value = r.fecha || hoyISO();
       $('#f-total').value = r.total != null ? r.total : '';
       $('#f-categoria').value = r.categoria || 'Mercancía';
@@ -1388,7 +1449,7 @@
   /* Una línea legible para un gasto que puede faltar en el trimestre. */
   function textoGastoQueFalta(f) {
     const quien = `<strong>${escapar(f.proveedor)}</strong>${f.categoria ? ` <small class="txt-sec">(${escapar(f.categoria)})</small>` : ''}`;
-    if (!f.mensual) return `${quien} — sin ninguna factura en todo el trimestre`;
+    if (!f.mensual || f.meses.length === 3) return `${quien} — sin ninguna factura en todo el trimestre`;
     const meses = f.meses.map(m => INFORME.MESES[+m.slice(5) - 1].toLowerCase()).join(' y ');
     return `${quien} — falta ${meses}`;
   }
@@ -1681,13 +1742,14 @@
   /* ---------- INFORME ---------- */
 
   function iniciarSelectorAnio() {
-    const sel = $('#i-anio');
     const actual = new Date().getFullYear();
-    for (let a = actual; a >= actual - 4; a--) {
-      const op = document.createElement('option');
-      op.value = a;
-      op.textContent = a;
-      sel.appendChild(op);
+    for (const sel of [$('#i-anio'), $('#f-trianio')]) {
+      for (let a = actual; a >= actual - 4; a--) {
+        const op = document.createElement('option');
+        op.value = a;
+        op.textContent = a;
+        sel.appendChild(op);
+      }
     }
     // Trimestre actual por defecto
     $('#i-trimestre').value = String(Math.floor(new Date().getMonth() / 3) + 1);

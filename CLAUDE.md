@@ -63,6 +63,15 @@ restaurar). `window.APP` expone `inicio`, `recientes` y `miniaturas` para la ver
   del negocio ni al resultado: la gestoría decide qué parte es deducible. En
   la previsión interna no se descuentan (prudencia) y no entran en las
   estadísticas del negocio.
+- **Apunte del total de un trimestre** (`trimestral: true`): para empresas cuyas
+  facturas se cargan de golpe (la asesoría, etc.), el apunte manual permite elegir
+  "una factura con su fecha" o "el total de un trimestre". El registro se guarda
+  con la fecha del **primer día del trimestre** y la marca `trimestral`. Entra en
+  el informe de la gestoría como un gasto más, y en el repaso de gastos que faltan
+  **cubre sus tres meses**. Aviso de doble cuenta en los dos sentidos: al guardar
+  el total si ya hay facturas sueltas del proveedor en ese trimestre, y al guardar
+  una suelta si ya está el total. Ojo: en las vistas por mes (Inicio y cuadro de
+  mando) el total cae entero en el primer mes del trimestre, no se reparte.
 - Al guardar una factura se avisa si ya existe otra con el mismo proveedor,
   fecha y total (contarla dos veces deduce IVA de más) y si el desglose no
   cuadra (`base + IVA − retención ≠ total`). Son avisos con confirmación, no
@@ -303,7 +312,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 352 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 358 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.
 

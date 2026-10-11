@@ -1974,6 +1974,49 @@ TARJETA 450,00`)]);
   const csvRepaso = await page.evaluate(async () => INFORME.generarCSV(await INFORME.generar(2026, 3)));
   chk('informe', 'El repaso es solo interno: el CSV de la gestoría no lo lleva', !csvRepaso.includes('Repaso') && !csvRepaso.includes('faltar') && !csvRepaso.includes('Movistar'));
 
+  // — Apunte del total de un trimestre (empresas que se cargan de golpe) —
+  await page.click('.tab[data-tab="facturas"]');
+  await page.click('#factura-manual');
+  await page.waitForTimeout(400);
+  await page.selectOption('#f-alcance', 'trimestre');
+  const camposTri = await page.evaluate(() => ({
+    fechaOculta: document.querySelector('#f-fecha-wrap').classList.contains('hidden'),
+    anio: document.querySelector('#f-trianio').value,
+    tri: document.querySelector('#f-tritri').value
+  }));
+  chk('informe', 'Al elegir trimestre, la fecha se oculta y salen año y trimestre', camposTri.fechaOculta && camposTri.anio !== '' && camposTri.tri !== '', JSON.stringify(camposTri));
+  await page.selectOption('#f-trianio', '2026');
+  await page.selectOption('#f-tritri', '3');
+  await page.fill('#f-proveedor', 'Asesoría Fiscal SL');
+  await page.fill('#f-total', '363');
+  await page.click('#factura-guardar');
+  await page.waitForTimeout(500);
+  const triGuardado = await page.evaluate(async () => (await DB.todos()).find(r => r.proveedor === 'Asesoría Fiscal SL'));
+  chk('informe', 'El total del trimestre se guarda con su marca y la fecha del primer día', triGuardado && triGuardado.trimestral === true && triGuardado.fecha === '2026-07-01', JSON.stringify({ fecha: triGuardado && triGuardado.fecha, trimestral: triGuardado && triGuardado.trimestral }));
+  const infTri = await page.evaluate(async () => (await INFORME.generar(2026, 3)).gastosPorProveedor['Asesoría Fiscal SL']);
+  chk('informe', 'Entra en el informe de la gestoría como un gasto más del trimestre', infTri && cerca(infTri.total, 363), JSON.stringify(infTri));
+  const cobertura = await page.evaluate(async () => {
+    await DB.guardar({ tipo: 'factura', fecha: '2026-04-01', trimestral: true, proveedor: 'Asesoría Fiscal SL', categoria: 'Otros', total: 363, creado: new Date().toISOString() });
+    const f = INFORME.queFaltaDe(await DB.todos(), 2026, 3, '2026-10-11');
+    return f.some(x => x.proveedor === 'Asesoría Fiscal SL');
+  });
+  chk('informe', 'Un total de trimestre cubre sus 3 meses: el repaso no lo reclama', cobertura === false);
+  // Doble cuenta: una factura suelta con el total del trimestre ya guardado avisa, y cancelar no guarda
+  aceptarDialogos = false;
+  ultimoDialogo = '';
+  await page.click('#factura-manual');
+  await page.waitForTimeout(400);
+  await page.fill('#f-proveedor', 'Asesoría Fiscal SL');
+  await page.fill('#f-fecha', '2026-08-05');
+  await page.fill('#f-total', '50');
+  await page.click('#factura-guardar');
+  await page.waitForTimeout(500);
+  const trasAviso = await page.evaluate(async () => (await DB.todos()).filter(r => r.proveedor === 'Asesoría Fiscal SL').length);
+  chk('informe', 'Una factura suelta con el total del trimestre ya guardado avisa de la doble cuenta', ultimoDialogo.includes('TOTAL del 3º trimestre'), ultimoDialogo.slice(0, 200));
+  chk('informe', 'Y al cancelar no se guarda nada', trasAviso === 2, 'hay ' + trasAviso);
+  aceptarDialogos = true;
+  await page.click('#factura-cancelar');
+
   // ══════════════ 10. ERRORES DE JAVASCRIPT ══════════════
   console.log('\n═══ 10. ESTABILIDAD ═══');
   chk('estabilidad', 'Ningún error de JavaScript durante toda la verificación',
