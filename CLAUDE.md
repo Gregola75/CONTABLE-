@@ -99,6 +99,14 @@ restaurar). `window.APP` expone `inicio`, `recientes` y `miniaturas` para la ver
 - La pestaña se llama "Facturación". Tiene el panel "Cómo va el mes": total,
   media por día, comparación con el mes anterior por media diaria, mejor día,
   días más flojos, media por día de la semana y días sin cierre anotado.
+- **Formas de pago**: cada cierre puede desglosarse en **efectivo, tarjeta y
+  SumUp** (los tres opcionales; el OCR detecta "SumUp" antes que "tarjeta" para
+  que "TARJETA SUMUP" cuente como SumUp). Si el total está vacío se rellena solo
+  con la suma según se escribe (sin pisar un total puesto a mano, vía
+  `dataset.auto`), y si el desglose suma más que el total se avisa antes de
+  guardar. El panel del mes y la tarjeta "El trimestre entero" (`#ftri-resumen`,
+  con su año y trimestre) enseñan "cómo entró el dinero": efectivo, tarjeta,
+  SumUp y lo sin desglosar, con su % del total, y el trimestre además por mes.
 - La fecha de un ticket Z es la de **apertura** de caja, no la de impresión
   (una caja abierta el 11 que cierra de madrugada el 12 es venta del 11).
 
@@ -312,7 +320,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 358 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 367 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.
 

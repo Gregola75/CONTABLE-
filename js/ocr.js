@@ -591,6 +591,7 @@ const OCR = (() => {
     let total = null;
     let efectivo = null;
     let tarjeta = null;
+    let sumup = null;
 
     for (const linea of lineas) {
       const nums = [];
@@ -603,16 +604,18 @@ const OCR = (() => {
       if (!nums.length) continue;
       const mayor = Math.max(...nums);
       if (/efectivo|metalico|met[aá]lico|cash/i.test(linea) && efectivo === null) efectivo = mayor;
+      // SumUp va antes que tarjeta: "TARJETA SUMUP" debe contar como SumUp
+      else if (/sum\s*up/i.test(linea) && sumup === null) sumup = mayor;
       else if (/tarjeta|visa|card|datafono|dat[aá]fono|tpv/i.test(linea) && tarjeta === null) tarjeta = mayor;
       else if (clavesVentas.test(linea)) total = Math.max(total || 0, mayor);
     }
 
     if (total === null) total = detectarTotal(texto);
-    if (total === null && efectivo !== null && tarjeta !== null) {
-      total = Math.round((efectivo + tarjeta) * 100) / 100;
+    if (total === null && efectivo !== null && (tarjeta !== null || sumup !== null)) {
+      total = Math.round((efectivo + (tarjeta || 0) + (sumup || 0)) * 100) / 100;
     }
 
-    return { fecha: detectarFechaCierre(texto), total, efectivo, tarjeta };
+    return { fecha: detectarFechaCierre(texto), total, efectivo, tarjeta, sumup };
   }
 
   return { leerImagen, precargar, analizarFactura, analizarCierre, normalizarNumero };

@@ -158,7 +158,7 @@
       if (btn.dataset.tab === 'ajustes') { pintarStats(); pintarSeguridad(); pintarNube(); }
       if (btn.dataset.tab === 'consultar') buscar();
       if (btn.dataset.tab === 'personal') pintarPersonal();
-      if (btn.dataset.tab === 'cierres') pintarFacturacion();
+      if (btn.dataset.tab === 'cierres') { pintarFacturacion(); pintarFacturacionTrimestre(); }
       if (btn.dataset.tab === 'informe') pintarResumen();
     });
   });
@@ -725,8 +725,10 @@
     $('#c-fecha').value = datos.fecha || hoyISO();
     $('#c-mes').value = hoyISO().slice(0, 7);
     $('#c-total').value = datos.total != null ? datos.total : '';
+    $('#c-total').dataset.auto = '';
     $('#c-efectivo').value = datos.efectivo != null ? datos.efectivo : '';
     $('#c-tarjeta').value = datos.tarjeta != null ? datos.tarjeta : '';
+    $('#c-sumup').value = datos.sumup != null ? datos.sumup : '';
     $('#c-notas').value = '';
     $('#c-ocr-text').textContent = texto || '(sin foto)';
     $('#cierre-form-card').classList.remove('hidden');
@@ -788,6 +790,16 @@
 
     const efectivo = parseFloat($('#c-efectivo').value);
     const tarjeta = parseFloat($('#c-tarjeta').value);
+    const sumup = parseFloat($('#c-sumup').value);
+
+    // Si el desglose suma más que el total, algo está mal apuntado
+    const partes = [efectivo, tarjeta, sumup].filter(n => !isNaN(n));
+    if (partes.length) {
+      const sumaPartes = Math.round(partes.reduce((s, n) => s + n, 0) * 100) / 100;
+      if (sumaPartes > total + 0.05 && !confirm(
+        `⚠️ El desglose suma ${INFORME.eur(sumaPartes)} (efectivo + tarjeta + SumUp), ` +
+        `pero el total de ventas es ${INFORME.eur(total)}.\n\nRevisa los números. ¿Guardar de todas formas?`)) return;
+    }
 
     await DB.guardar({
       ...(registroEditando && registroEditando.tipo === 'cierre'
@@ -800,6 +812,7 @@
       total: Math.round(total * 100) / 100,
       efectivo: isNaN(efectivo) ? null : Math.round(efectivo * 100) / 100,
       tarjeta: isNaN(tarjeta) ? null : Math.round(tarjeta * 100) / 100,
+      sumup: isNaN(sumup) ? null : Math.round(sumup * 100) / 100,
       notas: $('#c-notas').value.trim(),
       ...(await optimizarFoto(cierrePendiente ? cierrePendiente.imagen : null)),
       ocrTexto: cierrePendiente ? cierrePendiente.ocrTexto : ''
@@ -812,6 +825,7 @@
     toast(eraEdicion ? '✏️ Cierre corregido.' : '💾 Cierre guardado.');
     pintarRecientes();
     pintarFacturacion();
+    pintarFacturacionTrimestre();
     buscar();
   }));
 
@@ -821,11 +835,94 @@
     $('#cierre-form-card').classList.add('hidden');
   });
 
+  /* Si el total está vacío (o lo rellenó esta misma suma), se calcula solo
+     con efectivo + tarjeta + SumUp según se escribe; lo puesto a mano no se pisa. */
+  ['#c-efectivo', '#c-tarjeta', '#c-sumup'].forEach(sel => {
+    $(sel).addEventListener('input', () => {
+      const totalEl = $('#c-total');
+      if (totalEl.value !== '' && totalEl.dataset.auto !== totalEl.value) return;
+      const suma = ['#c-efectivo', '#c-tarjeta', '#c-sumup']
+        .reduce((s, x) => s + (parseFloat($(x).value) || 0), 0);
+      if (suma > 0) {
+        totalEl.value = (Math.round(suma * 100) / 100).toFixed(2);
+        totalEl.dataset.auto = totalEl.value;
+      }
+    });
+  });
+
   /* ---------- FACTURACIÓN: cómo va el mes ---------- */
 
   const DIAS_SEMANA = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
   const diaSemanaDe = (iso) => DIAS_SEMANA[new Date(iso + 'T00:00:00').getDay()];
   const r2 = (n) => Math.round(n * 100) / 100;
+
+  /* Cómo entró el dinero en una lista de cierres: efectivo, tarjeta, SumUp
+     y lo que quedó sin desglosar (cierres anotados solo con el total). */
+  function formasDePago(cierres) {
+    const d = { total: 0, efectivo: 0, tarjeta: 0, sumup: 0 };
+    cierres.forEach(c => {
+      d.total += (c.total || 0);
+      d.efectivo += (c.efectivo || 0);
+      d.tarjeta += (c.tarjeta || 0);
+      d.sumup += (c.sumup || 0);
+    });
+    d.total = r2(d.total); d.efectivo = r2(d.efectivo); d.tarjeta = r2(d.tarjeta); d.sumup = r2(d.sumup);
+    d.sinDesglosar = r2(Math.max(0, d.total - d.efectivo - d.tarjeta - d.sumup));
+    return d;
+  }
+
+  function formasDePagoHTML(d) {
+    if (d.efectivo + d.tarjeta + d.sumup <= 0) {
+      return '<p class="hint" style="margin:10px 0 0">💶 Sin desglose de formas de pago: apunta efectivo, tarjeta y SumUp en los cierres para verlo aquí.</p>';
+    }
+    const filas = [
+      ['💵 Efectivo', d.efectivo],
+      ['💳 Tarjeta', d.tarjeta],
+      ['📲 SumUp', d.sumup],
+      ['Sin desglosar', d.sinDesglosar]
+    ].filter(([, v]) => v > 0);
+    const max = Math.max(1, ...filas.map(([, v]) => v));
+    return '<p class="hint" style="margin:12px 0 4px">💶 Cómo entró el dinero:</p>' + filas.map(([n, v]) => `
+      <div class="fila-mes">
+        <span class="mes-etq" style="width:96px;text-transform:none;letter-spacing:0">${n}</span>
+        <div class="barra"><div class="barra-fill" style="width:${Math.max(2, Math.round(v / max * 100))}%"></div></div>
+        <span class="mes-val" style="width:118px">${INFORME.eur(v)}${d.total > 0 ? ` <small class="txt-sec">${Math.round(v / d.total * 100)}%</small>` : ''}</span>
+      </div>`).join('');
+  }
+
+  /* El trimestre entero: total, cada mes y las formas de pago. */
+  async function pintarFacturacionTrimestre() {
+    if (!$('#ftri-anio').value) return;
+    const anio = +$('#ftri-anio').value;
+    const t = +$('#ftri-tri').value;
+    const desde = `${anio}-${String((t - 1) * 3 + 1).padStart(2, '0')}-01`;
+    const hasta = `${anio}-${String(t * 3).padStart(2, '0')}-31`;
+    const cierres = await DB.buscar({ tipo: 'cierre', desde, hasta });
+    const div = $('#ftri-resumen');
+    if (!cierres.length) {
+      div.innerHTML = '<p class="vacio">No hay cierres anotados en ese trimestre.</p>';
+      return;
+    }
+    const d = formasDePago(cierres);
+    const meses = [0, 1, 2].map(i => `${anio}-${String((t - 1) * 3 + 1 + i).padStart(2, '0')}`);
+    const porMes = meses.map(m => ({
+      m, v: r2(cierres.filter(c => (c.fecha || '').startsWith(m)).reduce((s, c) => s + (c.total || 0), 0))
+    }));
+    const maxMes = Math.max(1, ...porMes.map(x => x.v));
+    div.innerHTML = `
+      <div class="stat-linea per-pendiente ok"><span>Facturado en el ${t}º trimestre de ${anio}</span><strong>${INFORME.eur(d.total)}</strong></div>
+      <p class="hint" style="margin:10px 0 4px">Por mes:</p>
+      ${porMes.map(x => `
+        <div class="fila-mes">
+          <span class="mes-etq">${INFORME.MESES[+x.m.slice(5) - 1].slice(0, 3)} ${x.m.slice(2, 4)}</span>
+          <div class="barra"><div class="barra-fill" style="width:${Math.max(2, Math.round(x.v / maxMes * 100))}%"></div></div>
+          <span class="mes-val" style="width:118px">${INFORME.eur(x.v)}</span>
+        </div>`).join('')}
+      ${formasDePagoHTML(d)}`;
+  }
+
+  $('#ftri-anio').addEventListener('change', pintarFacturacionTrimestre);
+  $('#ftri-tri').addEventListener('change', pintarFacturacionTrimestre);
 
   function mesAnteriorDe(mes) {
     const [a, m] = mes.split('-').map(Number);
@@ -926,6 +1023,7 @@
       <div class="stat-linea"><span>${dias.length} día${dias.length === 1 ? '' : 's'} con cierre${totalMensuales ? ' + total mensual' : ''} · media</span><strong>${INFORME.eur(media)}/día</strong></div>
       ${comparaHTML}
       ${ritmoHTML}
+      ${formasDePagoHTML(formasDePago(cierres))}
       ${mejor ? `<div class="stat-linea"><span>🥇 Mejor día: ${fmtFecha(mejor[0])} (${diaSemanaDe(mejor[0])})</span><strong class="txt-ok">${INFORME.eur(mejor[1])}</strong></div>` : ''}
       ${flojos.length ? `<p class="hint" style="margin:10px 0 2px">🔻 Los días más flojos del mes:</p>${flojos.map(([f, v]) => `<div class="stat-linea"><span>${fmtFecha(f)} (${diaSemanaDe(f)})</span><strong class="txt-bad">${INFORME.eur(v)}</strong></div>`).join('')}` : ''}
       ${sinCierre.length ? `<p class="hint" style="margin:10px 0 0;color:var(--oro)">⚠️ ${sinCierre.length} día${sinCierre.length === 1 ? '' : 's'} sin cierre anotado: ${sinCierre.slice(0, 6).map(f => +f.slice(8)).join(', ')}${sinCierre.length > 6 ? '…' : ''}</p>` : ''}
@@ -1018,6 +1116,7 @@
       esFactura && typeof r.retCuota === 'number' ? ['Retención IRPF' + (r.retTipo ? ` (${r.retTipo} %)` : ''), INFORME.eur(r.retCuota)] : null,
       !esFactura && r.efectivo != null ? ['Efectivo', INFORME.eur(r.efectivo)] : null,
       !esFactura && r.tarjeta != null ? ['Tarjeta', INFORME.eur(r.tarjeta)] : null,
+      !esFactura && r.sumup != null ? ['SumUp', INFORME.eur(r.sumup)] : null,
       r.notas ? ['Notas', r.notas] : null,
       ['Registrado', r.creado ? new Date(r.creado).toLocaleString('es-ES') : '—']
     ].filter(Boolean);
@@ -1106,8 +1205,10 @@
       $('#c-fecha').value = r.fecha || hoyISO();
       $('#c-mes').value = (r.fecha || hoyISO()).slice(0, 7);
       $('#c-total').value = r.total != null ? r.total : '';
+      $('#c-total').dataset.auto = '';
       $('#c-efectivo').value = r.efectivo != null ? r.efectivo : '';
       $('#c-tarjeta').value = r.tarjeta != null ? r.tarjeta : '';
+      $('#c-sumup').value = r.sumup != null ? r.sumup : '';
       $('#c-notas').value = r.notas || '';
       $('#c-ocr-text').textContent = r.ocrTexto || '(sin foto)';
       $('#cierre-form-card').classList.remove('hidden');
@@ -1743,7 +1844,7 @@
 
   function iniciarSelectorAnio() {
     const actual = new Date().getFullYear();
-    for (const sel of [$('#i-anio'), $('#f-trianio')]) {
+    for (const sel of [$('#i-anio'), $('#f-trianio'), $('#ftri-anio')]) {
       for (let a = actual; a >= actual - 4; a--) {
         const op = document.createElement('option');
         op.value = a;
@@ -1753,6 +1854,7 @@
     }
     // Trimestre actual por defecto
     $('#i-trimestre').value = String(Math.floor(new Date().getMonth() / 3) + 1);
+    $('#ftri-tri').value = String(Math.floor(new Date().getMonth() / 3) + 1);
   }
 
   $('#i-generar').addEventListener('click', async () => {
@@ -4054,7 +4156,7 @@
     if (document.querySelector('.tab[data-tab="inicio"]').classList.contains('active')) pintarInicio();
     if (document.querySelector('.tab[data-tab="consultar"]').classList.contains('active')) buscar();
     if (document.querySelector('.tab[data-tab="personal"]').classList.contains('active')) pintarPersonal();
-    if (document.querySelector('.tab[data-tab="cierres"]').classList.contains('active')) pintarFacturacion();
+    if (document.querySelector('.tab[data-tab="cierres"]').classList.contains('active')) { pintarFacturacion(); pintarFacturacionTrimestre(); }
     if (document.querySelector('.tab[data-tab="informe"]').classList.contains('active')) pintarResumen();
   }), 1200);
   pintarNube();

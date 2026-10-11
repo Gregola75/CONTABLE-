@@ -2017,6 +2017,67 @@ TARJETA 450,00`)]);
   aceptarDialogos = true;
   await page.click('#factura-cancelar');
 
+  // ══════════════ 9j. FORMAS DE PAGO: EFECTIVO, TARJETA Y SUMUP ══════════════
+  console.log('\n═══ 9j. FORMAS DE PAGO (efectivo, tarjeta, SumUp) ═══');
+  await limpiar();
+  const ocrSumup = await page.evaluate(() => OCR.analizarCierre(
+    'CIERRE Z 05/09/2026\nEFECTIVO 300,00\nTARJETA SUMUP 150,50\nDATAFONO 200,00\nTOTAL 650,50'));
+  chk('ocr', 'El cierre detecta SumUp aparte de la tarjeta', cerca(ocrSumup.sumup, 150.5) && cerca(ocrSumup.efectivo, 300) && cerca(ocrSumup.tarjeta, 200), JSON.stringify(ocrSumup));
+
+  // Guardar un cierre por la interfaz con las tres formas y el total en automático
+  await page.click('.tab[data-tab="cierres"]');
+  await page.click('#cierre-manual');
+  await page.waitForTimeout(400);
+  await page.fill('#c-fecha', '2026-09-04');
+  await page.fill('#c-efectivo', '300');
+  await page.fill('#c-tarjeta', '200');
+  await page.fill('#c-sumup', '150.50');
+  const totalAuto = await page.inputValue('#c-total');
+  chk('facturacion', 'El total se rellena solo sumando efectivo + tarjeta + SumUp', totalAuto === '650.50', totalAuto);
+  await page.click('#cierre-guardar');
+  await page.waitForTimeout(400);
+  const cierreSumup = await page.evaluate(async () => (await DB.todos()).find(r => r.tipo === 'cierre'));
+  chk('facturacion', 'El cierre guarda el SumUp como importe propio', cierreSumup && cerca(cierreSumup.sumup, 150.5) && cerca(cierreSumup.total, 650.5), JSON.stringify({ sumup: cierreSumup && cierreSumup.sumup, total: cierreSumup && cierreSumup.total }));
+
+  // Si el desglose suma más que el total escrito a mano, avisa y cancelar no guarda
+  aceptarDialogos = false;
+  ultimoDialogo = '';
+  await page.click('#cierre-manual');
+  await page.waitForTimeout(400);
+  await page.fill('#c-fecha', '2026-09-05');
+  await page.fill('#c-total', '600');
+  await page.fill('#c-efectivo', '300');
+  await page.fill('#c-tarjeta', '200');
+  await page.fill('#c-sumup', '150.50');
+  await page.click('#cierre-guardar');
+  await page.waitForTimeout(400);
+  const cierresTras = await page.evaluate(async () => (await DB.todos()).filter(r => r.tipo === 'cierre').length);
+  chk('facturacion', 'Si el desglose suma más que el total, avisa antes de guardar', ultimoDialogo.includes('desglose suma'), ultimoDialogo.slice(0, 150));
+  chk('facturacion', 'Y al cancelar no se guarda', cierresTras === 1, 'hay ' + cierresTras);
+  aceptarDialogos = true;
+  await page.click('#cierre-cancelar');
+
+  // El mes y el trimestre enseñan cómo entró el dinero
+  await page.evaluate(async () => {
+    const g = (fecha, total, extra = {}) => DB.guardar({ tipo: 'cierre', fecha, total, proveedor: '', creado: new Date().toISOString(), ...extra });
+    await g('2026-07-10', 1000, { efectivo: 400, tarjeta: 350, sumup: 250 });
+    await g('2026-08-01', 2000, { mensual: true, efectivo: 800, tarjeta: 700, sumup: 500 });
+    await g('2026-09-20', 349.5, {}); // solo el total, sin desglosar
+  });
+  await page.fill('#fac-mes', '2026-09');
+  await page.waitForTimeout(500);
+  const mesTxt = await page.$eval('#fac-resumen', el => el.textContent.replace(/\s+/g, ' '));
+  chk('facturacion', 'El mes enseña cómo entró el dinero, con SumUp y lo sin desglosar',
+    mesTxt.includes('Cómo entró el dinero') && mesTxt.includes('SumUp') && /150,50/.test(mesTxt) && mesTxt.includes('Sin desglosar') && /349,50/.test(mesTxt), mesTxt.slice(0, 300));
+  await page.selectOption('#ftri-anio', '2026');
+  await page.selectOption('#ftri-tri', '3');
+  await page.waitForTimeout(500);
+  const triTxt = await page.$eval('#ftri-resumen', el => el.textContent.replace(/\s+/g, ' '));
+  chk('facturacion', 'El trimestre entero suma sus 3 meses (4.000,00)', triTxt.includes('3º trimestre de 2026') && /4\.?000,00/.test(triTxt), triTxt.slice(0, 200));
+  chk('facturacion', 'Y desglosa el trimestre por formas de pago (SumUp 900,50 · efectivo 1.500,00)',
+    /900,50/.test(triTxt) && /1\.?500,00/.test(triTxt) && triTxt.includes('SumUp'), triTxt.slice(0, 300));
+  chk('facturacion', 'Con el reparto por mes del trimestre', /Jul/.test(triTxt) && /Ago/.test(triTxt) && /Sep/.test(triTxt), triTxt.slice(0, 300));
+
   // ══════════════ 10. ERRORES DE JAVASCRIPT ══════════════
   console.log('\n═══ 10. ESTABILIDAD ═══');
   chk('estabilidad', 'Ningún error de JavaScript durante toda la verificación',
