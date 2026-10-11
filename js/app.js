@@ -1353,6 +1353,13 @@
     const claveTri = `${tri.anio}-T${tri.t}`;
     if (localStorage.getItem(CLAVE_TRIMESTRE) !== claveTri) {
       alertas.push(`<div class="alerta"><span>📦 El <strong>${tri.t}º trimestre de ${tri.anio}</strong> ya cerró: genera el informe, descarga el CSV y el PDF, haz la copia de seguridad y guárdalos en Drive.</span><button class="btn btn-small tri-hecho" data-clave="${claveTri}">Ya lo hice ✓</button></div>`);
+      // Antes de enviarlo, repasar qué gastos habituales faltan por cargar
+      const faltan = INFORME.queFaltaDe(regs, tri.anio, tri.t);
+      if (faltan.length) {
+        const lista = faltan.slice(0, 3).map(textoGastoQueFalta).join('; ');
+        const mas = faltan.length > 3 ? ` … y ${faltan.length - 3} más (el detalle sale al generar el informe)` : '';
+        alertas.push(`<div class="alerta"><span>🔎 Para el ${tri.t}º trimestre <strong>pueden faltar gastos por cargar</strong> (comparado con el anterior): ${lista}${mas}.</span></div>`);
+      }
     }
     if (mes === hoy.slice(0, 7) && !d.mensual) {
       const faltan = [];
@@ -1364,7 +1371,26 @@
     }
     if (d.sinIVA) alertas.push(`<div class="alerta"><span>🧾 <strong>${d.sinIVA} factura${d.sinIVA === 1 ? '' : 's'} sin desglose de IVA</strong> este mes: la previsión de impuestos lo estima. Ábrelas y pon el IVA para afinar.</span></div>`);
     if (equipo.total > 0) alertas.push(`<div class="alerta"><span>👥 Debes <strong>${INFORME.eur(equipo.total)}</strong> al equipo en total (ver pestaña Personal).</span></div>`);
+    // Descanso semanal: si alguien trabajó los 7 días de una semana, avisar (solo al dueño)
+    for (const { t } of equipo.filas) {
+      const semanas = semanasSinDescanso(t, mes);
+      if (semanas.length) {
+        const rangos = semanas.map(s => {
+          const cruzaMes = s.desde.slice(5, 7) !== s.hasta.slice(5, 7);
+          return `del ${+s.desde.slice(8)} al ${+s.hasta.slice(8)}${cruzaMes ? ' de ' + INFORME.MESES[+s.hasta.slice(5, 7) - 1].toLowerCase() : ''}`;
+        }).join(' y ');
+        alertas.push(`<div class="alerta"><span>🛌 <strong>${escapar(t.nombre)}</strong> trabajó los 7 días ${semanas.length === 1 ? 'la semana' : 'las semanas'} ${rangos}: no libró su día de descanso.</span></div>`);
+      }
+    }
     return alertas;
+  }
+
+  /* Una línea legible para un gasto que puede faltar en el trimestre. */
+  function textoGastoQueFalta(f) {
+    const quien = `<strong>${escapar(f.proveedor)}</strong>${f.categoria ? ` <small class="txt-sec">(${escapar(f.categoria)})</small>` : ''}`;
+    if (!f.mensual) return `${quien} — sin ninguna factura en todo el trimestre`;
+    const meses = f.meses.map(m => INFORME.MESES[+m.slice(5) - 1].toLowerCase()).join(' y ');
+    return `${quien} — falta ${meses}`;
   }
 
   function conectarAlertas(contenedor) {
@@ -1673,6 +1699,13 @@
     informeActual = await INFORME.generar(anio, trimestre);
     $('#informe-contenido').innerHTML = INFORME.renderHTML(informeActual);
     $('#informe-resultado').classList.remove('hidden');
+
+    // Repaso interno: gastos que el trimestre anterior sí estaban y aquí faltan
+    const faltan = INFORME.queFaltaDe(await DB.todos(), anio, trimestre);
+    $('#faltan-contenido').innerHTML = faltan.length
+      ? faltan.map(f => `<div class="alerta"><span>${textoGastoQueFalta(f)} <small class="txt-sec">· el trimestre anterior: ${INFORME.eur(f.totalAnterior)}</small></span></div>`).join('')
+      : '<p class="hint txt-ok" style="margin:0">✅ No falta nada respecto al trimestre anterior: están todos los gastos habituales.</p>';
+    $('#faltan-card').classList.remove('hidden');
 
     // Previsión interna de impuestos (no va en el CSV ni en la impresión)
     const cfg = leerConfig();
@@ -1995,6 +2028,29 @@
     ? { fecha: x, horas: 0 }
     : { ...x, horas: Math.max(0, Number(x.horas) || 0) }));
   const fechasTardes = (t) => tardesDe(t).map(x => x.fecha);
+
+  /* Semanas (de lunes a domingo) en las que trabajó los 7 días: no libró su
+     día de descanso semanal. Solo cuenta si los 7 días están marcados como
+     trabajados (venir tarde es venir); un día sin marcar no dispara el aviso.
+     Cada semana pertenece al mes de su lunes. Es un aviso solo para el dueño:
+     no va en los mensajes que se le envían al trabajador. */
+  function semanasSinDescanso(t, mes) {
+    const trabajados = new Set([...(t.dias || []), ...fechasTardes(t)]);
+    const [a, m] = mes.split('-').map(Number);
+    const nDias = new Date(a, m, 0).getDate();
+    const semanas = [];
+    for (let dia = 1; dia <= nDias; dia++) {
+      if ((new Date(a, m - 1, dia).getDay() + 6) % 7 !== 0) continue; // solo lunes
+      const siete = [];
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(a, m - 1, dia + i);
+        siete.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
+      }
+      if (siete.every(f => trabajados.has(f))) semanas.push({ desde: siete[0], hasta: siete[6] });
+    }
+    return semanas;
+  }
+
 
   /* Un cambio de sueldo, días, jornada u objetivos se aplica DESDE un mes: los meses
      anteriores, ya pagados o no, se quedan como estaban. El historial vive en
@@ -3943,5 +3999,5 @@
 
   // Para la verificación automática (pruebas/): poder lanzar a mano lo que la
   // app hace sola en segundo plano o al entrar.
-  window.APP = { inicio: pintarInicio, recientes: pintarRecientes, miniaturas: crearMiniaturasQueFaltan };
+  window.APP = { inicio: pintarInicio, recientes: pintarRecientes, miniaturas: crearMiniaturasQueFaltan, semanas: semanasSinDescanso };
 })();

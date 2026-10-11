@@ -348,6 +348,53 @@ const INFORME = (() => {
     return `${d}/${m}/${a}`;
   }
 
+  /* Gastos que probablemente faltan por cargar en un trimestre, comparando
+     con el trimestre anterior. Solo facturas del negocio (las de casa no).
+     - Un proveedor que el trimestre pasado facturó en 2 o 3 meses se trata
+       como mensual (la luz, el alquiler…): se espera en cada mes del
+       trimestre que ya haya terminado.
+     - Uno que apareció solo un mes (un seguro, una reparación…) se espera al
+       menos una vez, y solo se reclama cuando el trimestre entero ha acabado.
+     Nunca se reclama un mes que aún no ha terminado. */
+  function queFaltaDe(regs, anio, trimestre, hoy = null) {
+    hoy = hoy || hoyISO();
+    const ant = trimestre === 1 ? { anio: anio - 1, t: 4 } : { anio, t: trimestre - 1 };
+    const rAnt = rangoTrimestre(ant.anio, ant.t);
+    const rAct = rangoTrimestre(anio, trimestre);
+    const mesesAct = rAct.meses.map(m => `${anio}-${String(m + 1).padStart(2, '0')}`);
+    const mesTerminado = (m) => m < hoy.slice(0, 7);
+    const trimestreTerminado = rAct.hasta < hoy;
+
+    const facturas = regs.filter(r => r.tipo === 'factura' && !r.personal && r.fecha);
+    const agrupar = (desde, hasta) => {
+      const por = {};
+      facturas.filter(r => r.fecha >= desde && r.fecha <= hasta).forEach(r => {
+        const clave = (r.proveedor || 'Sin proveedor').trim() || 'Sin proveedor';
+        if (!por[clave]) por[clave] = { meses: new Set(), total: 0, categoria: r.categoria || '' };
+        por[clave].meses.add(r.fecha.slice(0, 7));
+        por[clave].total += (r.total || 0);
+      });
+      return por;
+    };
+    const anterior = agrupar(rAnt.desde, rAnt.hasta);
+    const actual = agrupar(rAct.desde, rAct.hasta);
+
+    const faltan = [];
+    for (const [proveedor, p] of Object.entries(anterior)) {
+      const mesesConFactura = actual[proveedor] ? actual[proveedor].meses : new Set();
+      if (p.meses.size >= 2) {
+        const meses = mesesAct.filter(m => mesTerminado(m) && !mesesConFactura.has(m));
+        if (meses.length) {
+          faltan.push({ proveedor, categoria: p.categoria, mensual: true, meses, totalAnterior: Math.round(p.total * 100) / 100 });
+        }
+      } else if (mesesConFactura.size === 0 && trimestreTerminado) {
+        faltan.push({ proveedor, categoria: p.categoria, mensual: false, meses: [], totalAnterior: Math.round(p.total * 100) / 100 });
+      }
+    }
+    return faltan.sort((a, b) => b.totalAnterior - a.totalAnterior);
+  }
+
+
   function hoyISO() {
     const f = new Date();
     const p = (n) => String(n).padStart(2, '0');
@@ -358,5 +405,5 @@ const INFORME = (() => {
     return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
-  return { generar, prevision, renderPrevisionHTML, renderHTML, generarCSV, descargarCSV, estadisticas, eur, formatear, MESES };
+  return { generar, prevision, renderPrevisionHTML, renderHTML, generarCSV, descargarCSV, estadisticas, queFaltaDe, eur, formatear, MESES };
 })();

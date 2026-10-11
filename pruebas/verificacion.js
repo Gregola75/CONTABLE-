@@ -1890,6 +1890,90 @@ TARJETA 450,00`)]);
   chk('estabilidad', 'Al entrar se pinta todo de golpe: el inicio y las listas', entrado.lock && entrado.inicio && entrado.recientes >= 2, JSON.stringify(entrado));
   await page.evaluate(() => SEGURIDAD.desactivarPIN());
 
+  // ══════════════ 9i. DESCANSO SEMANAL Y GASTOS QUE FALTAN EN EL TRIMESTRE ══════════════
+  console.log('\n═══ 9i. AVISOS: DESCANSO SEMANAL Y GASTOS DEL TRIMESTRE ═══');
+  await limpiar();
+
+  // — Semanas sin día de descanso (todos los días valen lo mismo; 1 libre a la semana) —
+  const sem = await page.evaluate(() => {
+    let lunes; for (let d = 1; d <= 7; d++) if ((new Date(2026, 8, d).getDay() + 6) % 7 === 0) { lunes = d; break; }
+    const f = (n) => `2026-09-${String(n).padStart(2, '0')}`;
+    const siete = Array.from({ length: 7 }, (_, i) => f(lunes + i));
+    return {
+      siete,
+      completa: APP.semanas({ dias: siete }, '2026-09'),
+      conDescanso: APP.semanas({ dias: siete.filter((x, i) => i !== 3), descansos: [siete[3]] }, '2026-09').length,
+      sinMarcar: APP.semanas({ dias: siete.slice(0, 6) }, '2026-09').length,
+      conTarde: APP.semanas({ dias: siete.slice(0, 6), tardes: [{ fecha: siete[6], horas: 2 }] }, '2026-09').length
+    };
+  });
+  chk('personal', 'Trabajar los 7 días de una semana (lunes a domingo) se detecta', sem.completa.length === 1 && sem.completa[0].desde === sem.siete[0] && sem.completa[0].hasta === sem.siete[6], JSON.stringify(sem.completa));
+  chk('personal', 'Con su día de descanso marcado no hay aviso', sem.conDescanso === 0);
+  chk('personal', 'Un día sin marcar NO dispara el aviso (no se adivina)', sem.sinMarcar === 0);
+  chk('personal', 'Venir tarde es venir: la semana cuenta como trabajada entera', sem.conTarde === 1);
+
+  // — Gastos que faltan: 2º trimestre completo, 3º con huecos —
+  const faltanTri = await page.evaluate(async () => {
+    const g = (fecha, proveedor, categoria, total, extra = {}) =>
+      DB.guardar({ tipo: 'factura', fecha, proveedor, categoria, total, creado: new Date().toISOString(), ...extra });
+    // 2º trimestre (el anterior): luz y bebidas todos los meses, internet los 3, seguro 1 vez
+    await g('2026-04-10', 'Endesa', 'Luz', 95); await g('2026-05-10', 'Endesa', 'Luz', 90); await g('2026-06-10', 'Endesa', 'Luz', 99);
+    await g('2026-04-05', 'Movistar', 'Teléfono/Internet', 60); await g('2026-05-05', 'Movistar', 'Teléfono/Internet', 60); await g('2026-06-05', 'Movistar', 'Teléfono/Internet', 60);
+    await g('2026-05-20', 'Mapfre', 'Seguros', 210);
+    await g('2026-04-02', 'Bebidas Sur', 'Mercancía', 400); await g('2026-05-02', 'Bebidas Sur', 'Mercancía', 420); await g('2026-06-02', 'Bebidas Sur', 'Mercancía', 410);
+    // Gasto de casa el trimestre pasado: no se reclama
+    await g('2026-05-15', 'Carrefour', 'Otros', 80, { personal: true });
+    // 3er trimestre (el que se revisa): luz solo jul y ago, bebidas los 3; Movistar y Mapfre, nada
+    await g('2026-07-10', 'Endesa', 'Luz', 97); await g('2026-08-10', 'Endesa', 'Luz', 96);
+    await g('2026-07-02', 'Bebidas Sur', 'Mercancía', 400); await g('2026-08-02', 'Bebidas Sur', 'Mercancía', 400); await g('2026-09-02', 'Bebidas Sur', 'Mercancía', 400);
+    const regs = await DB.todos();
+    return {
+      t3: INFORME.queFaltaDe(regs, 2026, 3, '2026-10-11'),
+      enCurso: INFORME.queFaltaDe(regs, 2026, 4, '2026-10-11')
+    };
+  });
+  const porProv = Object.fromEntries(faltanTri.t3.map(f => [f.proveedor, f]));
+  chk('informe', 'La luz (mensual) reclama justo el mes que falta: septiembre', porProv['Endesa'] && porProv['Endesa'].mensual && porProv['Endesa'].meses.join() === '2026-09', JSON.stringify(porProv['Endesa']));
+  chk('informe', 'Internet (mensual) reclama los 3 meses si no hay ninguna', porProv['Movistar'] && porProv['Movistar'].meses.length === 3, JSON.stringify(porProv['Movistar']));
+  chk('informe', 'El seguro (una vez al trimestre) se reclama sin mes concreto', porProv['Mapfre'] && !porProv['Mapfre'].mensual && porProv['Mapfre'].meses.length === 0, JSON.stringify(porProv['Mapfre']));
+  chk('informe', 'Un proveedor al día no aparece', !porProv['Bebidas Sur']);
+  chk('informe', 'Los gastos de casa no se reclaman', !porProv['Carrefour']);
+  chk('informe', 'Ordenado por lo que pesaba el trimestre anterior', faltanTri.t3[0].proveedor === 'Endesa' && faltanTri.t3[1].proveedor === 'Mapfre', JSON.stringify(faltanTri.t3.map(f => f.proveedor)));
+  chk('informe', 'De un trimestre aún en curso no se reclama nada: octubre no ha terminado', faltanTri.enCurso.length === 0, JSON.stringify(faltanTri.enCurso));
+
+  // — Los dos avisos en el cuadro de mando —
+  await page.evaluate(async (siete) => {
+    await DB.perGuardar({ nombre: 'Prueba Descanso', sueldoMensual: 900, diasMes: 26, horasJornada: 7.5, dias: siete, tardes: [], faltas: [], descansos: [], notasDias: [], creado: new Date().toISOString() });
+    // Que el trimestre cerrado de verdad (según la fecha de hoy) tenga un gasto que falte
+    const hoy = new Date();
+    const tA = Math.floor(hoy.getMonth() / 3) + 1;
+    const tri = tA === 1 ? { anio: hoy.getFullYear() - 1, t: 4 } : { anio: hoy.getFullYear(), t: tA - 1 };
+    const ant = tri.t === 1 ? { anio: tri.anio - 1, t: 4 } : { anio: tri.anio, t: tri.t - 1 };
+    const mesDe = (x, i) => `${x.anio}-${String((x.t - 1) * 3 + 1 + i).padStart(2, '0')}`;
+    for (let i = 0; i < 3; i++) await DB.guardar({ tipo: 'factura', fecha: mesDe(ant, i) + '-15', proveedor: 'Luz del Local', categoria: 'Luz', total: 90, creado: new Date().toISOString() });
+    for (let i = 0; i < 2; i++) await DB.guardar({ tipo: 'factura', fecha: mesDe(tri, i) + '-15', proveedor: 'Luz del Local', categoria: 'Luz', total: 90, creado: new Date().toISOString() });
+    localStorage.removeItem('contable-trimestre-guardado');
+  }, sem.siete);
+  await page.click('.tab[data-tab="informe"]');
+  await page.fill('#res-mes', '2026-09');
+  await page.waitForTimeout(700);
+  const avisos = await page.$eval('#res-alertas', el => el.textContent);
+  chk('personal', 'El cuadro de mando avisa de la semana sin librar, con nombre y fechas', avisos.includes('Prueba Descanso') && avisos.includes('no libró su día de descanso') && avisos.includes(`del ${+sem.siete[0].slice(8)} al ${+sem.siete[6].slice(8)}`), avisos.slice(0, 300));
+  chk('informe', 'El cuadro de mando avisa de los gastos que faltan del trimestre cerrado', avisos.includes('pueden faltar gastos por cargar') && avisos.includes('Luz del Local'), avisos.slice(0, 300));
+
+  // — El repaso al generar el informe (interno: no va al CSV) —
+  await page.selectOption('#i-anio', '2026');
+  await page.selectOption('#i-trimestre', '3');
+  await page.click('#i-generar');
+  await page.waitForTimeout(600);
+  const repaso = await page.evaluate(() => ({
+    visible: !document.querySelector('#faltan-card').classList.contains('hidden'),
+    texto: document.querySelector('#faltan-contenido').textContent
+  }));
+  chk('informe', 'Al generar el informe sale el repaso con lo que falta', repaso.visible && repaso.texto.includes('Endesa') && repaso.texto.includes('septiembre') && repaso.texto.includes('Movistar'), repaso.texto.slice(0, 300));
+  const csvRepaso = await page.evaluate(async () => INFORME.generarCSV(await INFORME.generar(2026, 3)));
+  chk('informe', 'El repaso es solo interno: el CSV de la gestoría no lo lleva', !csvRepaso.includes('Repaso') && !csvRepaso.includes('faltar') && !csvRepaso.includes('Movistar'));
+
   // ══════════════ 10. ERRORES DE JAVASCRIPT ══════════════
   console.log('\n═══ 10. ESTABILIDAD ═══');
   chk('estabilidad', 'Ningún error de JavaScript durante toda la verificación',

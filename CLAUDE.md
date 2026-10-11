@@ -76,6 +76,15 @@ restaurar). `window.APP` expone `inicio`, `recientes` y `miniaturas` para la ver
   descontada: `base = total − IVA + retención`.
 - La previsión de impuestos (IVA, retenciones, IRPF) es **solo interna**: nunca
   debe aparecer en el CSV ni en la impresión que va a la gestoría.
+- **Repaso de gastos que faltan en el trimestre** (`INFORME.queFaltaDe`): compara
+  el trimestre con el anterior, solo facturas del negocio (las de casa no). Un
+  proveedor con facturas en ≥2 meses del trimestre anterior se trata como mensual
+  y se reclama cada mes **ya terminado** que no tenga factura; uno que apareció un
+  solo mes se reclama una vez, y solo cuando el trimestre entero ha acabado. Nunca
+  se reclama un mes sin terminar. Sale como aviso (Inicio y cuadro de mando)
+  mientras el trimestre cerrado no esté marcado como guardado, y como tarjeta
+  "Repaso antes de enviarlo" al generar el informe (`#faltan-card`). Es **solo
+  interno**: jamás en el CSV ni en la impresión.
 
 **Facturación (cierres de caja)**
 - La pestaña se llama "Facturación". Tiene el panel "Cómo va el mes": total,
@@ -135,6 +144,12 @@ restaurar). `window.APP` expone `inicio`, `recientes` y `miniaturas` para la ver
   los trabajados y las faltas a los días del mes, y cualquier día sin marcar se colaba
   como descanso: a un empleado le salían 3 descansos cuando solo había descansado 2.
   Un día sin marcar **no cuenta como nada**.
+- **Semana sin librar** (`semanasSinDescanso`, expuesta como `APP.semanas`): cada
+  trabajador tiene 1 día libre a la semana; si una semana (de lunes a domingo, la
+  semana es del mes de su lunes) tiene **los 7 días marcados como trabajados**
+  (venir tarde es venir), sale un aviso en el Inicio y en el cuadro de mando con el
+  nombre y las fechas. Solo con los 7 marcados: un día sin marcar no lo dispara.
+  **Es solo para el dueño**: no va en los mensajes que se le envían al trabajador.
 - **Retrasos**: descuentan del fijo la parte proporcional
   (`horas de retraso ÷ horas de jornada × precio del día`). Jornada por
   defecto 7,5 h (el local abre de 20:00 a 3:30). El descuento se calcula con el
@@ -288,7 +303,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 337 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 352 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.
 
