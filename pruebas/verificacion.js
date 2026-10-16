@@ -2247,6 +2247,30 @@ TARJETA 450,00`)]);
   chk('personal', 'Y cierra con lo recibido y lo pendiente (205 − 120 = 85,00)',
     cuentaRRPP.includes('Recibido: 120,00 €') && cuentaRRPP.includes('PENDIENTE A DÍA DE HOY: 85,00 €'), cuentaRRPP.slice(-200));
 
+  // La fecha de inicio: antes de empezar no hay noches
+  const inicioRRPP = await page.evaluate(async () => {
+    await DB.perGuardar({ esRRPP: true, nombre: 'Nuevo RRPP', inicio: '2026-09-10', noches: [], creado: new Date().toISOString() });
+    const r = (await DB.perTodos()).find(x => x.nombre === 'Nuevo RRPP');
+    await APP.rrppNoche(r.sid, '2026-09-08', 200); // antes de su inicio: no se guarda
+    await APP.rrppNoche(r.sid, '2026-09-11', 200); // después: sí
+    return ((await DB.perTodos()).find(x => x.nombre === 'Nuevo RRPP').noches).map(n => n.fecha);
+  });
+  chk('personal', 'A un RRPP no se le pueden apuntar noches de antes de su fecha de inicio',
+    inicioRRPP.length === 1 && inicioRRPP[0] === '2026-09-11', JSON.stringify(inicioRRPP));
+  await page.click('.tab[data-tab="inicio"]');
+  await page.click('.tab[data-tab="personal"]');
+  await page.fill('#per-mes', '2026-09');
+  await page.waitForTimeout(800);
+  const calInicio = await page.evaluate(() => {
+    const tarjeta = [...document.querySelectorAll('#rrpp-lista [data-sid]')].find(el => el.textContent.includes('Nuevo RRPP'));
+    return {
+      comenzo: tarjeta.textContent.includes('comenzó el 10/09/2026'),
+      bloqueados: tarjeta.querySelectorAll('.rrpp-dia:disabled').length
+    };
+  });
+  chk('personal', 'Su ficha dice cuándo comenzó y el calendario bloquea los 9 días anteriores',
+    calInicio.comenzo && calInicio.bloqueados === 9, JSON.stringify(calInicio));
+
   // ══════════════ 10. ERRORES DE JAVASCRIPT ══════════════
   console.log('\n═══ 10. ESTABILIDAD ═══');
   chk('estabilidad', 'Ningún error de JavaScript durante toda la verificación',

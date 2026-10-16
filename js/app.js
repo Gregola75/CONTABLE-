@@ -4349,6 +4349,7 @@
     rrppEditando = r || null;
     const cfg = condRRPP(r || {});
     $('#rp-nombre').value = r ? r.nombre : '';
+    $('#rp-inicio').value = r ? (r.inicio || '') : hoyISO();
     $('#rp-limite1').value = cfg.limite1; $('#rp-pct1').value = cfg.pct1;
     $('#rp-limite2').value = cfg.limite2; $('#rp-pct2').value = cfg.pct2;
     $('#rp-pct3').value = cfg.pct3;
@@ -4373,6 +4374,7 @@
       : { esRRPP: true, noches: [], creado: new Date().toISOString() };
     await DB.perGuardar({
       ...base, esRRPP: true, nombre,
+      inicio: $('#rp-inicio').value || '',
       limite1, pct1: num('#rp-pct1', RRPP_DEFECTO.pct1),
       limite2, pct2: num('#rp-pct2', RRPP_DEFECTO.pct2),
       pct3: num('#rp-pct3', RRPP_DEFECTO.pct3),
@@ -4398,7 +4400,9 @@
     for (let d = 1; d <= nDias; d++) {
       const fecha = `${mes}-${String(d).padStart(2, '0')}`;
       const n = noches.get(fecha);
-      celdas += `<button type="button" class="dia rrpp-dia ${n ? 'on' : ''}" data-sid="${r.sid}" data-fecha="${fecha}"${n ? ` title="${INFORME.eur(n.importe)}"` : ''}>${d}</button>`;
+      // Antes de su fecha de inicio no trabajaba: en negro, sin poder tocar
+      const bloqueado = r.inicio && fecha < r.inicio;
+      celdas += `<button type="button" class="dia rrpp-dia ${n ? 'on' : ''}"${bloqueado ? ' disabled' : ''} data-sid="${r.sid}" data-fecha="${fecha}"${n ? ` title="${INFORME.eur(n.importe)}"` : ''}>${d}</button>`;
     }
     return `<div class="cal">${cab}${celdas}</div>
       <p class="hint" style="margin:0 0 8px">Toca un día y apunta lo facturado esa noche (sus primeras consumiciones), el bono del día y la cifra a superar. Con 0 se quita la noche.</p>`;
@@ -4421,6 +4425,7 @@
     const todos = (await DB.perTodos()).filter(x => x.esRRPP);
     const r = todos.find(x => x.sid === sid);
     if (!r) return;
+    if (r.inicio && fecha < r.inicio) return; // antes de empezar no hay noches
     const cfg = condRRPP(r);
     const dia = bonoDelDia(todos, fecha);
     const bImp = r2(bonoImporte !== null ? bonoImporte : (dia ? dia.bonoImporte : cfg.bonoImporte));
@@ -4445,6 +4450,7 @@
     const todos = (await DB.perTodos()).filter(x => x.esRRPP);
     const r = todos.find(x => x.sid === sid);
     if (!r) return;
+    if (r.inicio && fecha < r.inicio) { toast(`⚠️ ${r.nombre} comenzó el ${fmtFecha(r.inicio)}: antes no se le pueden apuntar noches.`); return; }
     const cfg = condRRPP(r);
     const actual = (r.noches || []).find(n => n.fecha === fecha);
     const num = (s) => { const v = parseFloat(String(s).replace(',', '.')); return isNaN(v) ? null : v; };
@@ -4553,7 +4559,7 @@
         </details>`).join('');
       return `
         <div class="item" style="display:block" data-sid="${r.sid}">
-          <div class="stat-linea"><span><strong>🎤 ${escapar(r.nombre)}</strong></span></div>
+          <div class="stat-linea"><span><strong>🎤 ${escapar(r.nombre)}</strong>${r.inicio ? ` <small class="txt-sec">· comenzó el ${fmtFecha(r.inicio)}</small>` : ''}</span></div>
           <p class="hint" style="margin:0 0 6px">${cfg.pct1} % hasta ${INFORME.eur(cfg.limite1)} · ${cfg.pct2} % hasta ${INFORME.eur(cfg.limite2)} · ${cfg.pct3} % de lo que pase · bono por defecto ${INFORME.eur(cfg.bonoImporte)} si la noche pasa de ${INFORME.eur(cfg.bonoUmbral)}</p>
           <div class="stat-linea per-pendiente ${pendiente > 0 ? '' : 'ok'}"><span>${pendiente >= 0 ? 'LE DEBES' : 'TE DEBE (adelantado de más)'}</span><strong>${INFORME.eur(Math.abs(pendiente))}</strong></div>
           <div class="stat-linea"><span>Le corresponde en total ${INFORME.eur(devengado)} · entregado ${INFORME.eur(entregado)}</span></div>

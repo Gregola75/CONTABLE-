@@ -336,6 +336,9 @@ restaurar). `window.APP` expone `inicio`, `recientes` y `miniaturas` para la ver
   aplica solo sin preguntar, y corregirlo lo cambia para todos los de esa noche.
 - Tienen **calendario como los trabajadores** (`calendarioRRPPHTML`): se toca el
   día, se apunta lo facturado esa noche (0 la quita; cancelar no cambia nada).
+  La ficha lleva **"Comenzó el"** (`inicio`): los días anteriores salen
+  bloqueados y una noche de antes del inicio no se guarda
+  (`guardarNocheRRPP` la descarta).
 - **Lo que factura un RRPP se descuenta de la venta del día en la base de
   comisión de los trabajadores** (`ventasParaTrabajador` recibe `rrpps`;
   `desgloseDeuda` los lee solo si no se los pasan): contarlo dos veces sería
@@ -377,7 +380,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 390 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 392 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.
 
