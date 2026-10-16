@@ -2162,6 +2162,83 @@ TARJETA 450,00`)]);
   chk('personal', 'Los meses ya pagados no se reescriben: septiembre mantiene la fórmula antigua (3 % de 15.100 = 453,00)',
     cerca(tramosChk.antes.comision, 453) && tramosChk.antes.comisionTramos.length === 1 && cerca(tramosChk.antes.comisionTramos[0].base, 15100), 'obtenido ' + tramosChk.antes.comision);
 
+  // ══════════════ 9n. RRPP (PROMOTORES): SEMANA POR TRAMOS + BONO POR NOCHE ══════════════
+  console.log('\n═══ 9n. RRPP: pago semanal por tramos y bono de cada noche ═══');
+  await limpiar();
+  // Semana de lunes 2026-09-07 a domingo 2026-09-13, condiciones por defecto
+  const rrppCalc = await page.evaluate(() => {
+    const r = { nombre: 'x' };
+    const semana = APP.rrppSemana(r, [
+      { fecha: '2026-09-07', importe: 160.5 },                         // bono por defecto (20, pasa de 150)
+      { fecha: '2026-09-09', importe: 100 },                           // sin bono
+      { fecha: '2026-09-11', importe: 389.5, bonoImporte: 30, bonoUmbral: 300 } // bono del día: 30 si pasa de 300
+    ]);
+    const justo200 = APP.rrppSemana(r, [{ fecha: '2026-09-07', importe: 200 }]);
+    const sin150 = APP.rrppSemana(r, [{ fecha: '2026-09-07', importe: 150 }]);
+    return { semana, justo200, sin150 };
+  });
+  chk('personal', 'Semana de 650: 20 % de 200 + 25 % de 300 + 30 % de 150 = 160,00 de comisión',
+    cerca(rrppCalc.semana.ventas, 650) && cerca(rrppCalc.semana.comision, 160) && rrppCalc.semana.comisionTramos.length === 3, JSON.stringify(rrppCalc.semana.comisionTramos));
+  chk('personal', 'El bono es de cada noche: 20 por defecto + 30 el día que lo cambió = 50,00',
+    cerca(rrppCalc.semana.bonos, 50) && rrppCalc.semana.nochesBono.length === 2 && cerca(rrppCalc.semana.total, 210), JSON.stringify(rrppCalc.semana.nochesBono));
+  chk('personal', 'Semana de 200 justos: un solo tramo, 40,00', cerca(rrppCalc.justo200.comision, 40) && rrppCalc.justo200.comisionTramos.length === 1, 'obtenido ' + rrppCalc.justo200.comision);
+  chk('personal', '150 justos NO dan bono (hay que SUPERAR la cifra)', cerca(rrppCalc.sin150.bonos, 0));
+
+  // En pantalla: calendario propio, pendiente, y fuera de la lista de trabajadores
+  await page.evaluate(async () => {
+    await DB.perGuardar({ esRRPP: true, nombre: 'Marco RRPP', noches: [
+      { fecha: '2026-09-07', importe: 160.5 }, { fecha: '2026-09-09', importe: 100 },
+      { fecha: '2026-09-11', importe: 389.5, bonoImporte: 30, bonoUmbral: 300 }
+    ], creado: new Date().toISOString() });
+    const r = (await DB.perTodos()).find(x => x.nombre === 'Marco RRPP');
+    await DB.pagoGuardar({ trabajadorSid: r.sid, fecha: '2026-09-14', importe: 120, notas: 'RRPP', creado: new Date().toISOString() });
+  });
+  await page.click('.tab[data-tab="inicio"]');
+  await page.click('.tab[data-tab="personal"]');
+  await page.fill('#per-mes', '2026-09');
+  await page.waitForTimeout(800);
+  const rrppUI = await page.evaluate(() => ({
+    lista: document.querySelector('#rrpp-lista').textContent.replace(/\s+/g, ' '),
+    dias: document.querySelectorAll('#rrpp-lista .rrpp-dia.on').length,
+    trabajadores: (document.querySelector('#per-lista') || { textContent: '' }).textContent
+  }));
+  chk('personal', 'La ficha del RRPP enseña la semana con su desglose y lo pendiente (210 − 120 = 90,00)',
+    rrppUI.lista.includes('Marco RRPP') && rrppUI.lista.includes('20 % de 200,00') && /LE DEBES\s*90,00/.test(rrppUI.lista), rrppUI.lista.slice(0, 300));
+  chk('personal', 'Su calendario marca las 3 noches anotadas', rrppUI.dias === 3, 'marcadas ' + rrppUI.dias);
+  chk('personal', 'Un RRPP no se cuela en la lista de trabajadores', !rrppUI.trabajadores.includes('Marco RRPP'));
+
+  // Sus semanas son coste de personal del mes de su lunes
+  const costeSep = await page.evaluate(async () => (await APP.datosMes('2026-09')).personal);
+  chk('personal', 'La semana del RRPP entra como coste de personal de septiembre (210,00)', cerca(costeSep, 210), 'obtenido ' + costeSep);
+
+  // Lo que factura el RRPP no cuenta para la comisión de los trabajadores (sería doble)
+  const sinDoble = await page.evaluate(async () => {
+    await DB.guardar({ tipo: 'cierre', fecha: '2026-09-07', total: 10000, proveedor: '', creado: new Date().toISOString() });
+    await DB.perGuardar({ nombre: 'Camarero Base', sueldoMensual: 900, diasMes: 26, horasJornada: 7.5, tramos: [{ objetivo: 9900, porcentaje: 2 }], dias: ['2026-09-07'], tardes: [], faltas: [], descansos: [], notasDias: [], creado: new Date().toISOString() });
+    const d = await APP.deudaDe('Camarero Base', true);
+    return d.meses.find(m => m.mes === '2026-09').calc;
+  });
+  chk('personal', 'Al camarero se le descuentan los 160,50 del RRPP de ese día: base 9.839,50, sin llegar al objetivo',
+    cerca(sinDoble.comision, 0) && !sinDoble.tramoActual, JSON.stringify({ comision: sinDoble.comision }));
+
+  // El bono es del día: el primero lo fija y a los demás de esa noche se les aplica solo
+  const bonoDia = await page.evaluate(async () => {
+    await DB.perGuardar({ esRRPP: true, nombre: 'Leo RRPP', noches: [], creado: new Date().toISOString() });
+    const leo = (await DB.perTodos()).find(x => x.nombre === 'Leo RRPP');
+    // Marco ya fijó el 11/09 un bono de 30 si pasa de 300; a Leo se le aplica sin preguntar
+    await APP.rrppNoche(leo.sid, '2026-09-11', 310);
+    const leoNoche = ((await DB.perTodos()).find(x => x.nombre === 'Leo RRPP').noches).find(n => n.fecha === '2026-09-11');
+    // Y si se corrige el bono de esa noche en Marco, cambia para todos
+    const marco = (await DB.perTodos()).find(x => x.nombre === 'Marco RRPP');
+    await APP.rrppNoche(marco.sid, '2026-09-11', 389.5, 25, 250);
+    const leoDespues = ((await DB.perTodos()).find(x => x.nombre === 'Leo RRPP').noches).find(n => n.fecha === '2026-09-11');
+    return { leoNoche, leoDespues };
+  });
+  chk('personal', 'El bono del día se aplica solo al segundo RRPP de esa noche (30 si pasa de 300)',
+    bonoDia.leoNoche && bonoDia.leoNoche.bonoImporte === 30 && bonoDia.leoNoche.bonoUmbral === 300, JSON.stringify(bonoDia.leoNoche));
+  chk('personal', 'Corregir el bono de la noche lo cambia para todos los RRPP de esa noche (25 si pasa de 250)',
+    bonoDia.leoDespues && bonoDia.leoDespues.bonoImporte === 25 && bonoDia.leoDespues.bonoUmbral === 250, JSON.stringify(bonoDia.leoDespues));
+
   // ══════════════ 10. ERRORES DE JAVASCRIPT ══════════════
   console.log('\n═══ 10. ESTABILIDAD ═══');
   chk('estabilidad', 'Ningún error de JavaScript durante toda la verificación',

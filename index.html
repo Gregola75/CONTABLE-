@@ -564,6 +564,42 @@
     <p class="hint">Antiguos trabajadores ya abonados y liquidados. <strong>Toca cualquiera</strong> para ver todo lo que le pagaste y cómo se calculó: es tu prueba de que le pagaste bien.</p>
     <div id="per-historial"></div>
   </div>
+
+  <div class="card">
+    <h2>🎤 RRPP (promotores) — solo para ti</h2>
+    <p class="hint">Sin sueldo fijo: cobran <strong>por semana</strong> (de lunes a domingo) según la <strong>primera consumición de cada cliente</strong> que traen. La comisión va por tramos y <strong>cada tramo lleva sus propias ventas</strong>, más un bono por cada noche que supere el umbral. Se pagan semanalmente. Tampoco sale en el informe de la gestoría.</p>
+    <button class="btn btn-secondary" id="rrpp-nuevo">➕ Añadir RRPP</button>
+
+    <div id="rrpp-form" class="prov-form hidden">
+      <div class="form-group">
+        <label for="rp-nombre">Nombre *</label>
+        <input type="text" id="rp-nombre" placeholder="Ej.: Marco">
+      </div>
+      <p class="hint" style="margin:0 0 6px">Tramos de la semana (cada tramo paga su % solo por lo vendido dentro de ese tramo):</p>
+      <div class="form-row">
+        <div class="form-group"><label for="rp-limite1">1er tramo: hasta (€)</label><input type="number" id="rp-limite1" step="1" min="1" value="200"></div>
+        <div class="form-group"><label for="rp-pct1">% de ese tramo</label><input type="number" id="rp-pct1" step="0.5" min="0" value="20"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label for="rp-limite2">2º tramo: hasta (€)</label><input type="number" id="rp-limite2" step="1" min="1" value="500"></div>
+        <div class="form-group"><label for="rp-pct2">% de ese tramo</label><input type="number" id="rp-pct2" step="0.5" min="0" value="25"></div>
+      </div>
+      <div class="form-group">
+        <label for="rp-pct3">% de todo lo que pase del 2º tramo</label>
+        <input type="number" id="rp-pct3" step="0.5" min="0" value="30">
+      </div>
+      <p class="hint" style="margin:0 0 6px">Bono por noche <strong>por defecto</strong> (al apuntar cada noche puedes cambiar el bono y la cifra de ese día):</p>
+      <div class="form-row">
+        <div class="form-group"><label for="rp-bonoumbral">Si la noche pasa de (€)</label><input type="number" id="rp-bonoumbral" step="1" min="0" value="150"></div>
+        <div class="form-group"><label for="rp-bonoimporte">Bono (€)</label><input type="number" id="rp-bonoimporte" step="1" min="0" value="20"></div>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-primary" id="rrpp-guardar">💾 Guardar RRPP</button>
+        <button class="btn btn-ghost" id="rrpp-cancelar">Cancelar</button>
+      </div>
+    </div>
+    <div id="rrpp-lista" style="margin-top:12px"></div>
+  </div>
 </section>
 
 <!-- ==================== INFORME ==================== -->

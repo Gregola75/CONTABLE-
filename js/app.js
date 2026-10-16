@@ -1437,13 +1437,16 @@
 
   /* Coste de personal devengado en un mes (todos los empleados), a partir de
      los trabajadores y los cierres ya cargados: así el panel de inicio calcula
-     seis meses con una sola lectura de la base de datos. */
+     seis meses con una sola lectura de la base de datos. Incluye a los RRPP:
+     sus semanas (por el mes de su lunes) son coste de personal igual. */
   function costePersonalDe(trabajadores, cierresMes, mes) {
+    const rrpps = trabajadores.filter(x => x.esRRPP);
     let total = 0;
-    for (const t of trabajadores) {
-      const ventasT = ventasParaTrabajador(t, cierresMes, mes);
+    for (const t of trabajadores.filter(x => !x.esRRPP)) {
+      const ventasT = ventasParaTrabajador(t, cierresMes, mes, false, rrpps);
       total += calcularMes(t, ventasT, [], mes).devengado;
     }
+    total += costeRRPPDe(rrpps, mes);
     return r2(total);
   }
 
@@ -1488,13 +1491,15 @@
     return datosMesDe(regs, trabajadores, mes);
   }
 
-  /* Lo que se debe al equipo hoy (solo los que siguen en activo). */
+  /* Lo que se debe al equipo hoy (solo trabajadores en activo; los RRPP llevan
+     su propia cuenta semanal en su apartado). */
   async function deudaConElEquipo(cierresDeMes) {
     const [trabajadores, pagos] = await Promise.all([DB.perTodos(), DB.pagoTodos()]);
+    const rrpps = trabajadores.filter(x => x.esRRPP);
     const filas = [];
     let total = 0;
-    for (const t of trabajadores.filter(x => !x.liquidado)) {
-      const deuda = await desgloseDeuda(t, pagos.filter(p => p.trabajadorSid === t.sid), cierresDeMes);
+    for (const t of trabajadores.filter(x => !x.liquidado && !x.esRRPP)) {
+      const deuda = await desgloseDeuda(t, pagos.filter(p => p.trabajadorSid === t.sid), cierresDeMes, false, rrpps);
       filas.push({ t, deuda: deuda.total });
       if (deuda.total > 0) total += deuda.total;
     }
@@ -1775,7 +1780,7 @@
       </div>`).join('');
 
     const equipoHTML = equipo.filas.map(({ t, deuda }) => {
-      const c = calcularMes(t, ventasParaTrabajador(t, regs.filter(r => r.tipo === 'cierre' && (r.fecha || '').startsWith(mes)), mes), [], mes);
+      const c = calcularMes(t, ventasParaTrabajador(t, regs.filter(r => r.tipo === 'cierre' && (r.fecha || '').startsWith(mes)), mes, false, trabajadores.filter(x => x.esRRPP)), [], mes);
       return `<div class="stat-linea"><span>${escapar(t.nombre)} <small class="txt-sec">· ${c.dias.length} día${c.dias.length === 1 ? '' : 's'} ${esMesActual ? 'este mes' : 'ese mes'}${c.tardes.length ? ` · ⏰ ${c.tardes.length}` : ''}</small></span>${deuda > 0 ? `<strong class="txt-bad">debes ${INFORME.eur(deuda)}</strong>` : (deuda < 0 ? `<strong class="txt-sec">adelantado ${INFORME.eur(-deuda)}</strong>` : '<strong class="txt-ok">✓ al día</strong>')}</div>`;
     }).join('');
 
@@ -2346,7 +2351,7 @@
      - Días libres o faltas: no cuentan nada.
      Un total mensual sin detalle por días se reparte por proporción.
      Con conDetalle=true devuelve también el desglose de los días con retraso. */
-  function ventasParaTrabajador(t, cierresMes, mes, conDetalle = false) {
+  function ventasParaTrabajador(t, cierresMes, mes, conDetalle = false, rrpps = null) {
     t = trabajadorEn(t, mes);
     const [a, m] = mes.split('-').map(Number);
     const diasDelMes = new Date(a, m, 0).getDate();
@@ -2361,6 +2366,19 @@
     for (const c of cierresMes) {
       if (c.mensual) mensual += (c.total || 0);
       else ventasDia.set(c.fecha, (ventasDia.get(c.fecha) || 0) + (c.total || 0));
+    }
+
+    // Lo facturado por los RRPP (las primeras consumiciones de sus clientes) se
+    // descuenta de la venta del día: esa parte ya paga su comisión al RRPP y
+    // contarla también para el objetivo del trabajador sería pagar comisión doble.
+    if (rrpps && rrpps.length) {
+      const rrppDia = new Map();
+      rrpps.forEach(r => (r.noches || []).forEach(n => {
+        if ((n.fecha || '').startsWith(mes)) rrppDia.set(n.fecha, (rrppDia.get(n.fecha) || 0) + (n.importe || 0));
+      }));
+      for (const [f, resta] of rrppDia) {
+        if (ventasDia.has(f)) ventasDia.set(f, Math.max(0, r2(ventasDia.get(f) - resta)));
+      }
     }
 
     let s = 0;
@@ -2390,10 +2408,13 @@
   /* Deuda completa con un trabajador, mes a mes: lo devengado desde que
      empezó (hasta su baja u hoy) menos todo lo entregado. Devuelve el total
      y el desglose por meses para poder verlo en detalle. */
-  async function desgloseDeuda(t, pagosT, cierresDeMes, conDetalle = false) {
+  async function desgloseDeuda(t, pagosT, cierresDeMes, conDetalle = false, rrpps = null) {
     const fechas = [t.inicio || '', ...(t.dias || []), ...fechasTardes(t), ...pagosT.map(p => p.fecha || '')]
       .filter(Boolean).sort();
     if (!fechas.length) return { total: 0, meses: [] };
+    // Las ventas de los RRPP se descuentan de la base de comisión del trabajador;
+    // si el que llama no las trae, se leen aquí una vez
+    if (!rrpps) rrpps = (await DB.perTodos()).filter(x => x.esRRPP);
     let mes = fechas[0].slice(0, 7);
     // Hasta el último mes con actividad: si se le paga el finiquito después
     // de la baja (lo normal), ese pago también tiene que descontarse
@@ -2406,7 +2427,7 @@
       // Siempre con detalle: el total sale idéntico (conDetalle solo cambia la
       // forma de devolverlo) y así no hay dos caminos que puedan dar números
       // distintos. Ojo: a calcularMes se le pasa .total, nunca el objeto.
-      const ventasDet = ventasParaTrabajador(t, cierresMes, mes, true);
+      const ventasDet = ventasParaTrabajador(t, cierresMes, mes, true, rrpps);
       const pagosMes = pagosT.filter(p => (p.fecha || '').startsWith(mes));
       const calc = calcularMes(t, ventasDet.total, pagosMes, mes);
       const devengado = calc.devengado;
@@ -2596,12 +2617,12 @@
 
   /* Rentabilidad de cada empleado activo: su coste del mes (fijo + comisión)
      frente a las ventas de sus días trabajados. */
-  function rentabilidadHTML(trabajadores, cierresMes, mes) {
+  function rentabilidadHTML(trabajadores, cierresMes, mes, rrpps = []) {
     const plantilla = trabajadores.filter(t => !t.liquidado && !t.fin);
     if (!plantilla.length) return '<p class="vacio">Sin empleados activos.</p>';
 
     const datos = plantilla.map(t => {
-      const ventas = ventasParaTrabajador(t, cierresMes, mes);
+      const ventas = ventasParaTrabajador(t, cierresMes, mes, false, rrpps);
       const c = calcularMes(t, ventas, [], mes);
       return { t, ventas, coste: c.devengado, dias: c.dias.length };
     });
@@ -3270,8 +3291,9 @@
     $('#per-ventas').innerHTML =
       `Ventas del negocio en ${mesEnLetras(mes + '-01')}: <strong class="ingreso">${INFORME.eur(ventasNegocio)}</strong> (según tus cierres)`;
 
-    const activos = trabajadores.filter(t => !t.liquidado || diasDesde(t.liquidado) < DIAS_EN_MEMORIA);
-    const historial = trabajadores.filter(t => t.liquidado && diasDesde(t.liquidado) >= DIAS_EN_MEMORIA)
+    const rrpps = trabajadores.filter(t => t.esRRPP);
+    const activos = trabajadores.filter(t => !t.esRRPP && (!t.liquidado || diasDesde(t.liquidado) < DIAS_EN_MEMORIA));
+    const historial = trabajadores.filter(t => !t.esRRPP && t.liquidado && diasDesde(t.liquidado) >= DIAS_EN_MEMORIA)
       .sort((a, b) => (b.liquidado || '').localeCompare(a.liquidado || ''));
 
     const cacheCierres = new Map([[mes, cierresMes]]);
@@ -3299,7 +3321,7 @@
         continue;
       }
 
-      const ventasDet = ventasParaTrabajador(t, cierresMes, mes, true);
+      const ventasDet = ventasParaTrabajador(t, cierresMes, mes, true, rrpps);
       const ventasT = ventasDet.total;
       const c = calcularMes(t, ventasT, pagosMes, mes);
       const abierta = perAbiertos.has(t.sid);
@@ -3470,7 +3492,8 @@
 
     // Gráfico del mes, rentabilidad e historial de antiguos
     $('#per-grafico').innerHTML = graficoPersonalHTML(trabajadores, cierresMes, mes);
-    $('#per-renta').innerHTML = rentabilidadHTML(trabajadores, cierresMes, mes);
+    $('#per-renta').innerHTML = rentabilidadHTML(trabajadores.filter(t => !t.esRRPP), cierresMes, mes, rrpps);
+    pintarRRPP(rrpps, pagos, mes);
     // Historial: la MISMA ficha completa, lo más reciente arriba
     const fichasHist = [];
     for (const t of historial) {
@@ -4219,7 +4242,340 @@
 
   // Para la verificación automática (pruebas/): poder lanzar a mano lo que la
   // app hace sola en segundo plano o al entrar.
+  /* ---------- RRPP (promotores): pago semanal por tramos + bono por noche ----------
+     Sin sueldo fijo. Cada semana (lunes a domingo): la primera consumición de cada
+     cliente que trae suma a sus ventas; la comisión va por tramos y cada tramo
+     lleva SUS propias ventas (20 % de los primeros 200, 25 % de los siguientes
+     300, 30 % de lo que pase de 500; configurable por persona), más un bono fijo
+     por cada noche que SUPERE el umbral (150 € justos no dan bono). Se les paga
+     semanalmente; las entregas van al mismo almacén de pagos (notas 'RRPP').
+     Viven en el almacén de personal con esRRPP: true — así la nube y la copia de
+     seguridad los llevan solos — y TODAS las vistas de trabajadores los filtran. */
+
+  const RRPP_DEFECTO = { limite1: 200, pct1: 20, limite2: 500, pct2: 25, pct3: 30, bonoUmbral: 150, bonoImporte: 20 };
+  let rrppEditando = null;
+
+  function condRRPP(r) {
+    const n = (v, d) => (typeof v === 'number' && !isNaN(v) ? v : d);
+    return {
+      limite1: n(r.limite1, RRPP_DEFECTO.limite1), pct1: n(r.pct1, RRPP_DEFECTO.pct1),
+      limite2: n(r.limite2, RRPP_DEFECTO.limite2), pct2: n(r.pct2, RRPP_DEFECTO.pct2),
+      pct3: n(r.pct3, RRPP_DEFECTO.pct3),
+      bonoUmbral: n(r.bonoUmbral, RRPP_DEFECTO.bonoUmbral), bonoImporte: n(r.bonoImporte, RRPP_DEFECTO.bonoImporte)
+    };
+  }
+
+  function lunesDe(fecha) {
+    const d = new Date(fecha + 'T00:00:00');
+    d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+
+  function sumarDiasISO(fecha, n) {
+    const d = new Date(fecha + 'T00:00:00');
+    d.setDate(d.getDate() + n);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+
+  /* La cuenta de una semana: ventas, comisión por tramos y bonos por noche.
+     El bono es DE CADA NOCHE: el dueño apunta, al marcar la noche, el importe
+     del bono (10, 20, 30…) y la cifra a superar; si no, valen los de la ficha.
+     Cada parte se redondea por separado para que cuadre con calculadora. */
+  function calcularSemanaRRPP(r, noches) {
+    const cfg = condRRPP(r);
+    const ventas = r2(noches.reduce((s, n) => s + (n.importe || 0), 0));
+    const partes = [
+      [cfg.pct1, Math.min(ventas, cfg.limite1)],
+      [cfg.pct2, Math.min(Math.max(ventas - cfg.limite1, 0), Math.max(cfg.limite2 - cfg.limite1, 0))],
+      [cfg.pct3, Math.max(ventas - cfg.limite2, 0)]
+    ];
+    const comisionTramos = [];
+    let comision = 0;
+    partes.forEach(([porcentaje, base]) => {
+      if (base <= 0) return;
+      const importe = Math.round(base * porcentaje) / 100;
+      comisionTramos.push({ porcentaje, base: r2(base), importe });
+      comision += importe;
+    });
+    comision = r2(comision);
+    const bonoDe = (n) => (n.importe || 0) > (typeof n.bonoUmbral === 'number' ? n.bonoUmbral : cfg.bonoUmbral)
+      ? (typeof n.bonoImporte === 'number' ? n.bonoImporte : cfg.bonoImporte) : 0;
+    const nochesBono = noches.map(n => ({ fecha: n.fecha, bono: r2(bonoDe(n)) }))
+      .filter(x => x.bono > 0).sort((a, b) => a.fecha.localeCompare(b.fecha));
+    const bonos = r2(nochesBono.reduce((s, x) => s + x.bono, 0));
+    return { ventas, comisionTramos, comision, nochesBono, bonos, total: r2(comision + bonos) };
+  }
+
+  /* Las semanas de un RRPP (la más reciente primero). Una semana es del mes de su lunes. */
+  function semanasRRPP(r) {
+    const por = new Map();
+    (r.noches || []).forEach(n => {
+      const l = lunesDe(n.fecha);
+      if (!por.has(l)) por.set(l, []);
+      por.get(l).push(n);
+    });
+    return [...por.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([lunes, noches]) => ({
+      lunes,
+      hasta: sumarDiasISO(lunes, 6),
+      noches: [...noches].sort((a, b) => a.fecha.localeCompare(b.fecha)),
+      ...calcularSemanaRRPP(r, noches)
+    }));
+  }
+
+  /* Coste de los RRPP en un mes: las semanas cuyo lunes cae en ese mes. */
+  function costeRRPPDe(rrpps, mes) {
+    let total = 0;
+    rrpps.forEach(r => semanasRRPP(r).forEach(w => { if (w.lunes.startsWith(mes)) total += w.total; }));
+    return r2(total);
+  }
+
+  /* El resumen de una semana para enviárselo, neutro y comprobable con calculadora. */
+  function textoSemanaRRPP(r, w) {
+    const lineas = [];
+    const bonoDeFecha = (f) => { const x = w.nochesBono.find(b => b.fecha === f); return x ? x.bono : 0; };
+    lineas.push(`RESUMEN SEMANA del ${fmtFecha(w.lunes)} al ${fmtFecha(w.hasta)} — ${r.nombre}`);
+    lineas.push('');
+    lineas.push('Primeras consumiciones de tus clientes:');
+    w.noches.forEach(n => lineas.push(`  · ${fmtFecha(n.fecha)}: ${INFORME.eur(n.importe)}${bonoDeFecha(n.fecha) > 0 ? ` (bono de la noche: ${INFORME.eur(bonoDeFecha(n.fecha))})` : ''}`));
+    lineas.push(`Ventas de la semana: ${INFORME.eur(w.ventas)}`);
+    if (w.comision > 0) lineas.push(`Comisión: ${w.comisionTramos.map(p => `${p.porcentaje} % de ${INFORME.eur(p.base)}`).join(' + ')} = ${INFORME.eur(w.comision)}`);
+    if (w.bonos > 0) lineas.push(`Bonos por noche: ${w.nochesBono.map(x => INFORME.eur(x.bono)).join(' + ')} = ${INFORME.eur(w.bonos)}`);
+    lineas.push('');
+    lineas.push(`TOTAL DE LA SEMANA: ${INFORME.eur(w.total)}`);
+    return lineas.join('\n');
+  }
+
+  function abrirFormRRPP(r) {
+    rrppEditando = r || null;
+    const cfg = condRRPP(r || {});
+    $('#rp-nombre').value = r ? r.nombre : '';
+    $('#rp-limite1').value = cfg.limite1; $('#rp-pct1').value = cfg.pct1;
+    $('#rp-limite2').value = cfg.limite2; $('#rp-pct2').value = cfg.pct2;
+    $('#rp-pct3').value = cfg.pct3;
+    $('#rp-bonoumbral').value = cfg.bonoUmbral; $('#rp-bonoimporte').value = cfg.bonoImporte;
+    $('#rrpp-form').classList.remove('hidden');
+    $('#rp-nombre').focus();
+  }
+
+  $('#rrpp-nuevo').addEventListener('click', () => abrirFormRRPP(null));
+  $('#rrpp-cancelar').addEventListener('click', () => { rrppEditando = null; $('#rrpp-form').classList.add('hidden'); });
+
+  $('#rrpp-guardar').addEventListener('click', guardarConAviso(async () => {
+    const nombre = $('#rp-nombre').value.trim();
+    if (!nombre) { toast('⚠️ El nombre es obligatorio.'); return; }
+    const num = (sel, d) => { const v = parseFloat(String($(sel).value).replace(',', '.')); return isNaN(v) ? d : v; };
+    const limite1 = num('#rp-limite1', RRPP_DEFECTO.limite1);
+    const limite2 = num('#rp-limite2', RRPP_DEFECTO.limite2);
+    if (limite2 <= limite1) { toast('⚠️ El 2º tramo tiene que terminar más arriba que el 1º.'); return; }
+    // Al editar se relee de la base de datos: las noches anotadas mientras tanto no se pierden
+    const base = rrppEditando
+      ? ((await DB.perTodos()).find(x => x.sid === rrppEditando.sid) || rrppEditando)
+      : { esRRPP: true, noches: [], creado: new Date().toISOString() };
+    await DB.perGuardar({
+      ...base, esRRPP: true, nombre,
+      limite1, pct1: num('#rp-pct1', RRPP_DEFECTO.pct1),
+      limite2, pct2: num('#rp-pct2', RRPP_DEFECTO.pct2),
+      pct3: num('#rp-pct3', RRPP_DEFECTO.pct3),
+      bonoUmbral: num('#rp-bonoumbral', RRPP_DEFECTO.bonoUmbral),
+      bonoImporte: num('#rp-bonoimporte', RRPP_DEFECTO.bonoImporte)
+    });
+    rrppEditando = null;
+    $('#rrpp-form').classList.add('hidden');
+    toast('💾 RRPP guardado.');
+    pintarPersonal();
+  }));
+
+  /* Calendario del RRPP, con el mismo aspecto que el de los trabajadores:
+     en claro las noches anotadas. Tocar un día abre el apunte de esa noche. */
+  function calendarioRRPPHTML(r, mes) {
+    const [a, m] = mes.split('-').map(Number);
+    const nDias = new Date(a, m, 0).getDate();
+    const primerDiaSemana = (new Date(a, m - 1, 1).getDay() + 6) % 7; // lunes = 0
+    const noches = new Map((r.noches || []).filter(n => (n.fecha || '').startsWith(mes)).map(n => [n.fecha, n]));
+    const cab = ['L', 'M', 'X', 'J', 'V', 'S', 'D'].map(d => `<span class="cal-cab">${d}</span>`).join('');
+    let celdas = '';
+    for (let i = 0; i < primerDiaSemana; i++) celdas += '<span></span>';
+    for (let d = 1; d <= nDias; d++) {
+      const fecha = `${mes}-${String(d).padStart(2, '0')}`;
+      const n = noches.get(fecha);
+      celdas += `<button type="button" class="dia rrpp-dia ${n ? 'on' : ''}" data-sid="${r.sid}" data-fecha="${fecha}"${n ? ` title="${INFORME.eur(n.importe)}"` : ''}>${d}</button>`;
+    }
+    return `<div class="cal">${cab}${celdas}</div>
+      <p class="hint" style="margin:0 0 8px">Toca un día y apunta lo facturado esa noche (sus primeras consumiciones), el bono del día y la cifra a superar. Con 0 se quita la noche.</p>`;
+  }
+
+  /* El bono es DEL DÍA, no de cada RRPP: el primero al que se le apunta la
+     noche lo fija, y a los demás que trabajen esa noche se les aplica solo. */
+  function bonoDelDia(rrpps, fecha) {
+    for (const r of rrpps) {
+      const n = (r.noches || []).find(x => x.fecha === fecha && typeof x.bonoImporte === 'number' && typeof x.bonoUmbral === 'number');
+      if (n) return { bonoImporte: n.bonoImporte, bonoUmbral: n.bonoUmbral };
+    }
+    return null;
+  }
+
+  /* Guarda la noche de un RRPP. Sin bono explícito, usa el bono ya fijado ese
+     día (o el por defecto de su ficha), y SIEMPRE deja a todos los RRPP de esa
+     noche con el mismo bono: es un bono del día. */
+  async function guardarNocheRRPP(sid, fecha, importe, bonoImporte = null, bonoUmbral = null) {
+    const todos = (await DB.perTodos()).filter(x => x.esRRPP);
+    const r = todos.find(x => x.sid === sid);
+    if (!r) return;
+    const cfg = condRRPP(r);
+    const dia = bonoDelDia(todos, fecha);
+    const bImp = r2(bonoImporte !== null ? bonoImporte : (dia ? dia.bonoImporte : cfg.bonoImporte));
+    const bUmb = r2(bonoUmbral !== null ? bonoUmbral : (dia ? dia.bonoUmbral : cfg.bonoUmbral));
+    const noches = (r.noches || []).filter(n => n.fecha !== fecha);
+    noches.push({ fecha, importe: r2(importe), bonoImporte: bImp, bonoUmbral: bUmb });
+    await DB.perGuardar({ ...r, noches });
+    for (const otro of todos.filter(x => x.sid !== sid)) {
+      let cambio = false;
+      const ns = (otro.noches || []).map(n => {
+        if (n.fecha === fecha && (n.bonoImporte !== bImp || n.bonoUmbral !== bUmb)) { cambio = true; return { ...n, bonoImporte: bImp, bonoUmbral: bUmb }; }
+        return n;
+      });
+      if (cambio) await DB.perGuardar({ ...otro, noches: ns });
+    }
+  }
+
+  /* El apunte de una noche: facturado y, si el bono del día aún no está fijado
+     (o se está corrigiendo la noche), el bono y la cifra a superar.
+     Cancelar cualquier pregunta no cambia nada. */
+  async function editarNocheRRPP(sid, fecha) {
+    const todos = (await DB.perTodos()).filter(x => x.esRRPP);
+    const r = todos.find(x => x.sid === sid);
+    if (!r) return;
+    const cfg = condRRPP(r);
+    const actual = (r.noches || []).find(n => n.fecha === fecha);
+    const num = (s) => { const v = parseFloat(String(s).replace(',', '.')); return isNaN(v) ? null : v; };
+    const resp = prompt(
+      `Noche del ${fmtFecha(fecha)} — ¿cuánto facturó en primeras consumiciones?\n(0 para quitar la noche)`,
+      actual ? String(actual.importe).replace('.', ',') : '');
+    if (resp === null || resp.trim() === '') return;
+    const importe = num(resp);
+    if (importe === null || importe < 0) { toast('⚠️ No he entendido el importe; no se cambió nada.'); return; }
+
+    if (importe === 0) {
+      if (!actual) return;
+      if (!confirm(`¿Quitar la noche del ${fmtFecha(fecha)} (${INFORME.eur(actual.importe)})?`)) return;
+      await DB.perGuardar({ ...r, noches: (r.noches || []).filter(n => n.fecha !== fecha) });
+      toast('🗑️ Noche quitada.');
+      pintarPersonal();
+      return;
+    }
+
+    const dia = bonoDelDia(todos, fecha);
+    if (!actual && dia) {
+      // El bono de esa noche ya está fijado: se aplica solo, sin preguntar
+      await guardarNocheRRPP(sid, fecha, importe);
+      toast(`💾 Noche guardada. Bono del día: ${INFORME.eur(dia.bonoImporte)} si pasa de ${INFORME.eur(dia.bonoUmbral)}.`);
+      pintarPersonal();
+      return;
+    }
+
+    const rb = prompt('Bono de ESA noche (€) — vale para todos los RRPP que trabajen esa noche:',
+      String(actual && typeof actual.bonoImporte === 'number' ? actual.bonoImporte : (dia ? dia.bonoImporte : cfg.bonoImporte)).replace('.', ','));
+    if (rb === null) return;
+    const bonoImporte = num(rb);
+    if (bonoImporte === null || bonoImporte < 0) { toast('⚠️ No he entendido el bono; no se cambió nada.'); return; }
+    const ru = prompt('¿A partir de cuánto gana ese bono? (lo gana si la noche PASA de esta cifra)',
+      String(actual && typeof actual.bonoUmbral === 'number' ? actual.bonoUmbral : (dia ? dia.bonoUmbral : cfg.bonoUmbral)).replace('.', ','));
+    if (ru === null) return;
+    const bonoUmbral = num(ru);
+    if (bonoUmbral === null || bonoUmbral < 0) { toast('⚠️ No he entendido la cifra a superar; no se cambió nada.'); return; }
+    await guardarNocheRRPP(sid, fecha, importe, bonoImporte, bonoUmbral);
+    toast('💾 Noche guardada. El bono queda fijado para todos los RRPP de esa noche.');
+    pintarPersonal();
+  }
+
+  function pintarRRPP(rrpps, pagos, mes) {
+    const div = $('#rrpp-lista');
+    if (!div) return;
+    if (!rrpps.length) {
+      div.innerHTML = '<p class="vacio">Aún no tienes RRPP dados de alta.</p>';
+      return;
+    }
+    const hoy = hoyISO();
+    const semanaActual = lunesDe(hoy);
+    div.innerHTML = rrpps.map(r => {
+      const cfg = condRRPP(r);
+      const semanas = semanasRRPP(r);
+      const pagosR = pagos.filter(p => p.trabajadorSid === r.sid).sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
+      const entregado = r2(pagosR.reduce((s, p) => s + (p.importe || 0), 0));
+      const devengado = r2(semanas.reduce((s, w) => s + w.total, 0));
+      const pendiente = r2(devengado - entregado);
+      const semanasHTML = semanas.slice(0, 8).map(w => `
+        <details class="ocr-details" ${w.lunes === semanaActual ? 'open' : ''}>
+          <summary>Semana del ${fmtFecha(w.lunes)} al ${fmtFecha(w.hasta)} · ventas ${INFORME.eur(w.ventas)} · <strong>${INFORME.eur(w.total)}</strong></summary>
+          ${w.noches.map(n => { const b = w.nochesBono.find(x => x.fecha === n.fecha); return `<div class="stat-linea"><span>${diaSemanaDe(n.fecha)} ${fmtFecha(n.fecha)}${b ? ` 🎉 bono ${INFORME.eur(b.bono)}` : ''}</span><strong>${INFORME.eur(n.importe)}</strong></div>`; }).join('')}
+          ${w.comision > 0 ? `<div class="stat-linea"><span>Comisión: ${w.comisionTramos.map(p => `${p.porcentaje} % de ${INFORME.eur(p.base)}`).join(' + ')}</span><strong class="txt-ok">${INFORME.eur(w.comision)}</strong></div>` : ''}
+          ${w.bonos > 0 ? `<div class="stat-linea"><span>Bonos por noche (${w.nochesBono.length})</span><strong class="txt-ok">${INFORME.eur(w.bonos)}</strong></div>` : ''}
+          <div class="stat-linea"><span>Total de la semana</span><strong>${INFORME.eur(w.total)}</strong></div>
+          <button class="btn btn-small rrpp-enviar" data-sid="${r.sid}" data-lunes="${w.lunes}">📤 Enviar el resumen de esta semana</button>
+        </details>`).join('');
+      return `
+        <div class="item" style="display:block" data-sid="${r.sid}">
+          <div class="stat-linea"><span><strong>🎤 ${escapar(r.nombre)}</strong></span></div>
+          <p class="hint" style="margin:0 0 6px">${cfg.pct1} % hasta ${INFORME.eur(cfg.limite1)} · ${cfg.pct2} % hasta ${INFORME.eur(cfg.limite2)} · ${cfg.pct3} % de lo que pase · bono por defecto ${INFORME.eur(cfg.bonoImporte)} si la noche pasa de ${INFORME.eur(cfg.bonoUmbral)}</p>
+          <div class="stat-linea per-pendiente ${pendiente > 0 ? '' : 'ok'}"><span>${pendiente >= 0 ? 'LE DEBES' : 'TE DEBE (adelantado de más)'}</span><strong>${INFORME.eur(Math.abs(pendiente))}</strong></div>
+          <div class="stat-linea"><span>Le corresponde en total ${INFORME.eur(devengado)} · entregado ${INFORME.eur(entregado)}</span></div>
+          <p class="per-seccion">📅 Noches de ${mesEnLetras(mes + '-01')}</p>
+          ${calendarioRRPPHTML(r, mes)}
+          <div class="form-actions" style="margin-top:0">
+            <button class="btn btn-secondary rrpp-pagar" data-sid="${r.sid}">💶 Apuntar entrega</button>
+          </div>
+          ${semanasHTML || '<p class="vacio">Aún sin noches anotadas.</p>'}
+          ${pagosR.length ? `<details class="ocr-details"><summary>Entregas (${pagosR.length}, ${INFORME.eur(entregado)})</summary>${pagosR.map(p => `<div class="stat-linea"><span>${fmtFecha(p.fecha)}${p.notas ? ` · ${escapar(p.notas)}` : ''}</span><strong>${INFORME.eur(p.importe)}</strong></div>`).join('')}</details>` : ''}
+          <div class="form-actions">
+            <button class="btn btn-ghost rrpp-editar" data-sid="${r.sid}">✏️ Editar condiciones</button>
+            ${(!r.noches || !r.noches.length) && !pagosR.length ? `<button class="btn btn-danger rrpp-borrar" data-id="${r.id}">🗑️ Eliminar</button>` : ''}
+          </div>
+        </div>`;
+    }).join('');
+    conectarRRPP(div);
+  }
+
+  function conectarRRPP(div) {
+    div.querySelectorAll('.rrpp-dia').forEach(btn => btn.addEventListener('click', guardarConAviso(
+      () => editarNocheRRPP(btn.dataset.sid, btn.dataset.fecha))));
+    div.querySelectorAll('.rrpp-pagar').forEach(btn => btn.addEventListener('click', guardarConAviso(async () => {
+      const r = (await DB.perTodos()).find(x => x.sid === btn.dataset.sid);
+      const resp = prompt(`¿Cuánto le entregas a ${r.nombre}?`);
+      if (resp === null) return;
+      const importe = parseFloat(resp.replace(',', '.'));
+      if (isNaN(importe) || importe <= 0) { toast('⚠️ No he entendido el importe; no se apuntó nada.'); return; }
+      await DB.pagoGuardar({ trabajadorSid: r.sid, fecha: hoyISO(), importe: r2(importe), notas: 'RRPP', creado: new Date().toISOString() });
+      toast('💶 Entrega apuntada.');
+      pintarPersonal();
+    })));
+    div.querySelectorAll('.rrpp-enviar').forEach(btn => btn.addEventListener('click', async () => {
+      const r = (await DB.perTodos()).find(x => x.sid === btn.dataset.sid);
+      const w = semanasRRPP(r).find(x => x.lunes === btn.dataset.lunes);
+      if (!w) return;
+      const texto = textoSemanaRRPP(r, w);
+      try { if (navigator.share) { await navigator.share({ text: texto }); return; } }
+      catch (e) { if (e && e.name === 'AbortError') return; }
+      try {
+        await navigator.clipboard.writeText(texto);
+        toast('📋 Resumen copiado. Pégalo en WhatsApp.');
+      } catch (e) {
+        alert(texto);
+      }
+    }));
+    div.querySelectorAll('.rrpp-editar').forEach(btn => btn.addEventListener('click', async () => {
+      const r = (await DB.perTodos()).find(x => x.sid === btn.dataset.sid);
+      if (r) abrirFormRRPP(r);
+    }));
+    div.querySelectorAll('.rrpp-borrar').forEach(btn => btn.addEventListener('click', guardarConAviso(async () => {
+      if (!confirm('¿Eliminar este RRPP? Solo se puede porque no tiene noches ni entregas apuntadas.')) return;
+      await DB.perBorrar(+btn.dataset.id);
+      toast('🗑️ RRPP eliminado.');
+      pintarPersonal();
+    })));
+  }
+
   window.APP = { inicio: pintarInicio, recientes: pintarRecientes, miniaturas: crearMiniaturasQueFaltan, semanas: semanasSinDescanso,
+    rrppSemana: calcularSemanaRRPP, rrppNoche: guardarNocheRRPP, datosMes,
     deudaDe: async (nombre, conDetalle = false) => {
       const t = (await DB.perTodos()).find(x => x.nombre === nombre);
       const pagos = (await DB.pagoTodos()).filter(p => p.trabajadorSid === t.sid);

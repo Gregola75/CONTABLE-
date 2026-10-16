@@ -318,6 +318,35 @@ restaurar). `window.APP` expone `inicio`, `recientes` y `miniaturas` para la ver
   allí se queda indefinidamente. Para que no se pierda la prueba por un toque, a un
   trabajador **liquidado no se le puede eliminar**: hay que reabrir su ficha primero.
 
+**RRPP / promotores** (apartado propio dentro de Personal; tampoco va a la gestoría)
+- Viven en el almacén de personal con `esRRPP: true` (así la nube y la copia de
+  seguridad los llevan solos) y **todas las vistas de trabajadores los filtran**
+  (`pintarPersonal`, `deudaConElEquipo`, rentabilidad, historial…). Sus entregas
+  van al almacén de pagos normal (notas `RRPP`).
+- **Sin sueldo fijo**: cobran **por semana** (lunes a domingo; la semana es del
+  mes de su lunes) sobre la **primera consumición de cada cliente** que traen.
+  Comisión por tramos "de la diferencia", cada tramo con SUS ventas (por defecto
+  20 % de los primeros 200, 25 % de los siguientes 300, 30 % de lo que pase de
+  500; configurable por persona en su ficha). Cada parte se redondea aparte
+  (`calcularSemanaRRPP`, expuesta como `APP.rrppSemana`).
+- **El bono es DEL DÍA, no de cada RRPP** (`bonoDelDia`, `guardarNocheRRPP` /
+  `APP.rrppNoche`): el primer RRPP al que se le apunta la noche fija el bono
+  (importe y cifra a SUPERAR; 150 justos no dan bono; por defecto 20 € si pasa
+  de 150, cambiable cada día: 10, 20, 30…), a los demás de esa noche se les
+  aplica solo sin preguntar, y corregirlo lo cambia para todos los de esa noche.
+- Tienen **calendario como los trabajadores** (`calendarioRRPPHTML`): se toca el
+  día, se apunta lo facturado esa noche (0 la quita; cancelar no cambia nada).
+- **Lo que factura un RRPP se descuenta de la venta del día en la base de
+  comisión de los trabajadores** (`ventasParaTrabajador` recibe `rrpps`;
+  `desgloseDeuda` los lee solo si no se los pasan): contarlo dos veces sería
+  pagar comisión doble. Y sus semanas entran como **coste de personal** del mes
+  de su lunes (`costeRRPPDe` dentro de `costePersonalDe`), así el Inicio y el
+  cuadro de mando cuentan ese dinero.
+- El resumen semanal para enviarle (`textoSemanaRRPP`) es neutro y cuadra con
+  calculadora: noches con su bono, ventas, comisión tramo a tramo y total.
+- Un RRPP solo se puede **eliminar si no tiene noches ni entregas**; con
+  historial, se conserva como prueba.
+
 ## Sincronización en la nube
 
 Firebase del propio usuario (proyecto `wandercontable`), con reglas que solo
@@ -343,7 +372,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 377 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 388 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.
 
