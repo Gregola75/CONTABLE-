@@ -2128,6 +2128,31 @@ TARJETA 450,00`)]);
   chk('personal', 'La ficha explica el reparto y marca lo viejo como ✓ todo pagado',
     fichaImpu.includes('cubren primero lo más antiguo') && fichaImpu.includes('✓ todo pagado'), fichaImpu.slice(0, 300));
 
+  // ══════════════ 9l. COMISIÓN POR TRAMOS "DE LA DIFERENCIA" ══════════════
+  console.log('\n═══ 9l. COMISIÓN POR TRAMOS (el % solo sobre su tramo) ═══');
+  await limpiar();
+  const tramosChk = await page.evaluate(async () => {
+    // Tramos pactados: 10.000 → 2 % y 15.000 → 3 %
+    const alta = (nombre, dias) => DB.perGuardar({ nombre, sueldoMensual: 900, diasMes: 26, horasJornada: 7.5, tramos: [{ objetivo: 10000, porcentaje: 2 }, { objetivo: 15000, porcentaje: 3 }], dias, tardes: [], faltas: [], descansos: [], notasDias: [], creado: new Date().toISOString() });
+    await alta('Tramos Justo', ['2026-09-01', '2026-09-02']);      // venderá 15.100
+    await alta('Tramos Primero', ['2026-09-03']);                  // venderá 10.000 justos
+    await alta('Tramos Corto', ['2026-09-04']);                    // venderá 9.999
+    const g = (fecha, total) => DB.guardar({ tipo: 'cierre', fecha, total, proveedor: '', creado: new Date().toISOString() });
+    await g('2026-09-01', 15000); await g('2026-09-02', 100);
+    await g('2026-09-03', 10000);
+    await g('2026-09-04', 9999);
+    const calcDe = async (nombre) => (await APP.deudaDe(nombre, true)).meses.find(m => m.mes === '2026-09').calc;
+    return { justo: await calcDe('Tramos Justo'), primero: await calcDe('Tramos Primero'), corto: await calcDe('Tramos Corto') };
+  });
+  chk('personal', 'Con 15.100 vendidos: 2 % de 15.000 + 3 % de la diferencia (100) = 303,00',
+    cerca(tramosChk.justo.comision, 303), 'obtenido ' + tramosChk.justo.comision);
+  chk('personal', 'El desglose por tramos cuadra al céntimo (300,00 + 3,00)',
+    tramosChk.justo.comisionTramos.length === 2 && cerca(tramosChk.justo.comisionTramos[0].importe, 300) && cerca(tramosChk.justo.comisionTramos[0].base, 15000) && cerca(tramosChk.justo.comisionTramos[1].importe, 3) && cerca(tramosChk.justo.comisionTramos[1].base, 100), JSON.stringify(tramosChk.justo.comisionTramos));
+  chk('personal', 'Llegar justo al primer objetivo (10.000 al 2 %) son 200,00',
+    cerca(tramosChk.primero.comision, 200) && tramosChk.primero.comisionTramos.length === 1, 'obtenido ' + tramosChk.primero.comision);
+  chk('personal', 'Sin llegar al primer objetivo (9.999): sin comisión, solo el fijo',
+    cerca(tramosChk.corto.comision, 0), 'obtenido ' + tramosChk.corto.comision);
+
   // ══════════════ 10. ERRORES DE JAVASCRIPT ══════════════
   console.log('\n═══ 10. ESTABILIDAD ═══');
   chk('estabilidad', 'Ningún error de JavaScript durante toda la verificación',

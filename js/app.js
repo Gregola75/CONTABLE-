@@ -2003,7 +2003,28 @@
       if (ventas >= tr.objetivo) tramoActual = tr;
       else if (!siguiente) siguiente = tr;
     }
-    const comision = tramoActual ? Math.round(ventas * tramoActual.porcentaje) / 100 : 0;
+    // Comisión por tramos "de la diferencia" (acordado con el dueño): el % de
+    // cada tramo se aplica solo a la parte de las ventas que cae en su tramo.
+    // El primero, al alcanzarlo, paga sobre toda la base (llegar a 10.000 al
+    // 2 % son 200,00 €); lo que pasa del objetivo del siguiente va al % del
+    // siguiente: con 10.000→2 % y 15.000→3 %, hacer 15.100 son 2 % de 15.000
+    // + 3 % de 100 = 303,00 €. Así subir de tramo nunca multiplica la comisión
+    // entera. Cada parte se redondea por separado para que el desglose que se
+    // le enseña cuadre al céntimo con el total.
+    const comisionTramos = [];
+    let comision = 0;
+    if (tramoActual) {
+      for (let i = 0; i < tramos.length && ventas >= tramos[i].objetivo; i++) {
+        const desde = i === 0 ? 0 : tramos[i].objetivo;
+        const hasta = i + 1 < tramos.length ? Math.min(ventas, tramos[i + 1].objetivo) : ventas;
+        const base = Math.round((hasta - desde) * 100) / 100;
+        if (base <= 0) continue;
+        const importe = Math.round(base * tramos[i].porcentaje) / 100;
+        comisionTramos.push({ porcentaje: tramos[i].porcentaje, base, importe });
+        comision += importe;
+      }
+      comision = Math.round(comision * 100) / 100;
+    }
 
     // Bonos: un extra que el dueño decide darle ese mes (con su motivo). Se suma a
     // lo que le corresponde, como el fijo y la comisión, y arrastra igual.
@@ -2015,7 +2036,7 @@
     return {
       cond: { sueldoMensual: t.sueldoMensual || 0, diasMes: t.diasMes || 26, horasJornada: t.horasJornada || 7.5, tramos: t.tramos || [] },
       dias, tardes, faltas, descansos, descanso, fueraDePeriodo, horasTarde, descuentoTardes, descuentoTopado, fijoBruto,
-      fijo, comision, tramoActual, siguiente, bonos, bono,
+      fijo, comision, comisionTramos, tramoActual, siguiente, bonos, bono,
       devengado, entregado,
       pendiente: Math.round((devengado - entregado) * 100) / 100
     };
@@ -2893,6 +2914,12 @@
             <div class="stat-linea"><span><strong>FIJO DEL MES</strong> <small class="txt-sec">(sale a ${INFORME.eur(precioDeUnDia(t))} el día)</small></span><strong>${INFORME.eur(c.fijo)}</strong></div>`;
   }
 
+  /* La comisión escrita como se calcula, tramo a tramo:
+     "2 % de 15.000,00 € + 3 % de 100,00 €" (con un tramo, "2 % de 10.000,00 €"). */
+  function comisionEscrita(c) {
+    return (c.comisionTramos || []).map(p => `${p.porcentaje} % de ${INFORME.eur(p.base)}`).join(' + ');
+  }
+
   /* El objetivo pactado, lo que se facturó en SUS días y lo que faltó para llegar.
      Solo sus cifras: nunca la facturación del local, porque esto se le envía a él.
      Sale del mismo cálculo que la comisión, así que la pantalla y el mensaje que
@@ -2907,8 +2934,8 @@
     lineas.push(`Facturado en sus días: ${INFORME.eur(ventasT)}`);
     if (c.tramoActual) {
       lineas.push(c.tramoActual.objetivo === tramos[0].objetivo
-        ? `✅ Objetivo alcanzado → ${c.tramoActual.porcentaje} % = ${INFORME.eur(c.comision)}`
-        : `✅ Alcanzado el objetivo de ${INFORME.eur(c.tramoActual.objetivo)} → ${c.tramoActual.porcentaje} % = ${INFORME.eur(c.comision)}`);
+        ? `✅ Objetivo alcanzado → ${comisionEscrita(c)} = ${INFORME.eur(c.comision)}`
+        : `✅ Alcanzado el objetivo de ${INFORME.eur(c.tramoActual.objetivo)} → ${comisionEscrita(c)} = ${INFORME.eur(c.comision)}`);
       if (c.siguiente) {
         lineas.push(`Para el siguiente (${INFORME.eur(c.siguiente.objetivo)} → ${c.siguiente.porcentaje} %) le ${pasado ? 'faltaron' : 'faltan'} ${INFORME.eur(falta(c.siguiente.objetivo))}`);
       }
@@ -2933,7 +2960,7 @@
       `<div class="stat-linea"><span>Facturado en sus días <small class="txt-sec">(solo sus días; los de retraso, en proporción a sus horas)</small></span><strong>${INFORME.eur(ventasT)}</strong></div>`
     ];
     if (c.tramoActual) {
-      filas.push(`<div class="stat-linea"><span>${c.tramoActual.objetivo === tramos[0].objetivo ? '✅ Objetivo alcanzado' : `✅ Alcanzado el objetivo de ${INFORME.eur(c.tramoActual.objetivo)}`} → ${c.tramoActual.porcentaje} %</span><strong class="txt-ok">${INFORME.eur(c.comision)}</strong></div>`);
+      filas.push(`<div class="stat-linea"><span>${c.tramoActual.objetivo === tramos[0].objetivo ? '✅ Objetivo alcanzado' : `✅ Alcanzado el objetivo de ${INFORME.eur(c.tramoActual.objetivo)}`} → ${comisionEscrita(c)}</span><strong class="txt-ok">${INFORME.eur(c.comision)}</strong></div>`);
       if (c.siguiente) {
         filas.push(`<div class="per-siguiente">Para el siguiente objetivo (${INFORME.eur(c.siguiente.objetivo)} → ${c.siguiente.porcentaje} %) le ${pasado ? 'faltaron' : 'faltan'} <strong>${INFORME.eur(Math.round(Math.max(0, c.siguiente.objetivo - ventasT) * 100) / 100)}</strong></div>`);
       }
@@ -2967,7 +2994,7 @@
     if (tramosDe(t).length) {
       ex.push(`Ventas que cuentan para su objetivo: <strong>${INFORME.eur(ventasT)}</strong> (solo sus días; los de retraso, en proporción)`);
       ex.push(c.tramoActual
-        ? `Objetivo de ${INFORME.eur(c.tramoActual.objetivo)} alcanzado → ${c.tramoActual.porcentaje} % de ${INFORME.eur(ventasT)} = <strong>${INFORME.eur(c.comision)}</strong>`
+        ? `Objetivo de ${INFORME.eur(c.tramoActual.objetivo)} alcanzado → ${comisionEscrita(c)} = <strong>${INFORME.eur(c.comision)}</strong>`
         : `No llegó al objetivo${c.siguiente ? ` de ${INFORME.eur(c.siguiente.objetivo)}` : ''} → sin comisión: cobra solo el fijo pactado`);
     }
     if (c.descuentoTardes > 0) {
@@ -4183,9 +4210,9 @@
   // Para la verificación automática (pruebas/): poder lanzar a mano lo que la
   // app hace sola en segundo plano o al entrar.
   window.APP = { inicio: pintarInicio, recientes: pintarRecientes, miniaturas: crearMiniaturasQueFaltan, semanas: semanasSinDescanso,
-    deudaDe: async (nombre) => {
+    deudaDe: async (nombre, conDetalle = false) => {
       const t = (await DB.perTodos()).find(x => x.nombre === nombre);
       const pagos = (await DB.pagoTodos()).filter(p => p.trabajadorSid === t.sid);
-      return desgloseDeuda(t, pagos, async (m) => DB.buscar({ tipo: 'cierre', desde: m + '-01', hasta: m + '-31' }));
+      return desgloseDeuda(t, pagos, async (m) => DB.buscar({ tipo: 'cierre', desde: m + '-01', hasta: m + '-31' }), conDetalle);
     } };
 })();

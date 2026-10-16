@@ -191,9 +191,19 @@ restaurar). `window.APP` expone `inicio`, `recientes` y `miniaturas` para la ver
   en total. En la ficha de un liquidado sale **arriba, junto al cuadre**, sin tener que
   desplegar ningún mes, y en el texto de toda su etapa va en un apartado propio con
   todos los días. Antes la ficha se leía como "esto era, se te dio, ya está pagado".
-- **Comisiones por objetivos**: tramos de ventas; se aplica el % del tramo más
-  alto alcanzado. Si no llega al primer objetivo, cobra **solo el fijo**.
-  Los objetivos son la cifra pactada y no se prorratean nunca.
+- **Comisiones por objetivos, por tramos "de la diferencia"** (acordado con el
+  dueño; antes se aplicaba el % del tramo más alto a toda la base): el % de cada
+  tramo se aplica **solo a la parte de las ventas que cae en su tramo**. El
+  primero, al alcanzarlo, paga sobre toda la base (10.000 al 2 % → 200,00 €);
+  lo que pasa del objetivo del siguiente va al % del siguiente: con 10.000→2 %
+  y 15.000→3 %, hacer 15.100 son 2 % de 15.000 + 3 % de 100 = 303,00 €. Así
+  subir de tramo nunca multiplica la comisión entera. Si no llega al primer
+  objetivo, cobra **solo el fijo**. Los objetivos no se prorratean nunca. Cada
+  parte se redondea por separado (`c.comisionTramos`) y la ficha, la cuenta
+  explicada y los mensajes escriben el desglose (`comisionEscrita`:
+  "2 % de 15.000,00 € + 3 % de 100,00 €"), para que cuadre con calculadora.
+  Ojo: con solo el primer tramo alcanzado el resultado es idéntico al de antes,
+  así que los meses pasados solo cambian si alguien superó un tramo superior.
 - El apartado **"🎯 Su objetivo"** sale en la ficha del activo, en cada mes de la
   del liquidado y en los dos textos que se le envían: el objetivo pactado (el primer
   tramo), lo **facturado en sus días** y lo que faltó para llegar. Si alcanza un tramo
@@ -330,7 +340,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 372 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 376 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.
 
