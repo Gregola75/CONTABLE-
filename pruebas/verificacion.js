@@ -1408,10 +1408,10 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
   chk('personal', 'Septiembre entero: fijo 900 y en la cabecera "Le debes 918,62" (900 + los 18,62 de agosto)',
     septJ.includes('900,00 € ÷ 26 × 26') && /Le debes 918,62/.test(septJ), septJ.slice(0, 400));
   let vistaJ = await aLaVista();
-  chk('personal', 'Sin desplegar nada se ve que 18,62 vienen de agosto: le correspondió 34,62 y le diste 16,00',
-    /Agosto 2026: le correspondió 34,62 € y le diste 16,00 €\s*\+18,62 €/.test(vistaJ), vistaJ.slice(0, 900));
-  chk('personal', 'Y la línea de este mes: le corresponde 900,00 y le has dado 0,00',
-    /Septiembre 2026 \(este mes\): le corresponde 900,00 € y le has dado 0,00 €\s*\+900,00 €/.test(vistaJ), vistaJ.slice(0, 900));
+  chk('personal', 'Sin desplegar nada se ve que 18,62 vienen de agosto y siguen sin cubrir',
+    /Agosto 2026: le correspondió 34,62 € y aún queda sin cubrir\s*\+18,62 €/.test(vistaJ), vistaJ.slice(0, 900));
+  chk('personal', 'Y la línea de este mes: le corresponde 900,00 y queda +900,00',
+    /Septiembre 2026 \(este mes\): le corresponde 900,00 €\s*\+900,00 €/.test(vistaJ), vistaJ.slice(0, 900));
   chk('personal', 'El "÷ 26 × 26" se explica: 26 días pactados al mes × 26 que vino',
     /los 26 días de trabajo pactados al mes × los 26 días que vino/.test(vistaJ), vistaJ.slice(0, 900));
   chk('personal', 'Se dice cómo corregirlo si el mes no debería estar (la fecha de alta o el día del calendario)',
@@ -1429,8 +1429,8 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
   chk('personal', 'Con el alta el 1 de septiembre, el 31 de agosto ya no se paga: le debes 884,00 (900 − los 16 entregados)',
     /Le debes 884,00/.test(septJ) && !/918,62/.test(septJ), septJ.slice(0, 400));
   vistaJ = await aLaVista();
-  chk('personal', 'Y agosto sigue a la vista, pero como 16,00 entregados de más',
-    /Agosto 2026: le correspondió 0,00 € y le diste 16,00 €\s*−16,00 €/.test(vistaJ), vistaJ.slice(0, 900));
+  chk('personal', 'Y el reparto queda claro: nada viejo pendiente (✓) y los 16 cubren parte de este mes (+884,00)',
+    /Meses anteriores\s*✓ todo pagado/.test(vistaJ) && /\(este mes\): le corresponde 900,00 €\s*\+884,00 €/.test(vistaJ), vistaJ.slice(0, 900));
   const agoJ = await verMes('2026-08');
   chk('personal', 'En agosto la ficha avisa del día marcado fuera del periodo',
     /1 día\(s\) marcados fuera del periodo/.test(agoJ), agoJ.slice(0, 500));
@@ -2077,6 +2077,56 @@ TARJETA 450,00`)]);
   chk('facturacion', 'Y desglosa el trimestre por formas de pago (SumUp 900,50 · efectivo 1.500,00)',
     /900,50/.test(triTxt) && /1\.?500,00/.test(triTxt) && triTxt.includes('SumUp'), triTxt.slice(0, 300));
   chk('facturacion', 'Con el reparto por mes del trimestre', /Jul/.test(triTxt) && /Ago/.test(triTxt) && /Sep/.test(triTxt), triTxt.slice(0, 300));
+
+  // ══════════════ 9k. LO PENDIENTE SE IMPUTA A LO MÁS ANTIGUO ══════════════
+  console.log('\n═══ 9k. DEUDA: LO VIEJO PRIMERO (imputación de entregas) ═══');
+  await limpiar();
+  // El caso real del dueño: septiembre entero (900) pagado el 3 de octubre.
+  // Al día salvo el mes en curso → nada "viejo" pendiente.
+  const impu = await page.evaluate(async () => {
+    const dias = (mes, n) => Array.from({ length: n }, (_, i) => `${mes}-${String(i + 1).padStart(2, '0')}`);
+    await DB.perGuardar({ nombre: 'Prueba Imputación', sueldoMensual: 900, diasMes: 26, horasJornada: 7.5, dias: [...dias('2026-09', 26), ...dias('2026-10', 10)], tardes: [], faltas: [], descansos: [], notasDias: [], creado: new Date().toISOString() });
+    const t = (await DB.perTodos()).find(x => x.nombre === 'Prueba Imputación');
+    await DB.pagoGuardar({ trabajadorSid: t.sid, fecha: '2026-10-03', importe: 900, notas: 'sueldo septiembre', creado: new Date().toISOString() });
+    const d = await APP.deudaDe('Prueba Imputación');
+    const sep = d.meses.find(m => m.mes === '2026-09');
+    const oct = d.meses.find(m => m.mes === '2026-10');
+    return { total: d.total, sep, oct };
+  });
+  chk('personal', 'Sueldo de septiembre pagado en octubre: septiembre queda CUBIERTO (pendiente 0)', impu.sep && cerca(impu.sep.pendiente, 0), JSON.stringify(impu.sep));
+  chk('personal', 'Lo pendiente es solo lo del mes en curso (346,15 de octubre)', impu.oct && cerca(impu.oct.pendiente, 346.15) && cerca(impu.total, 346.15), JSON.stringify({ oct: impu.oct && impu.oct.pendiente, total: impu.total }));
+  chk('personal', 'El hecho contable del mes no se toca: septiembre sigue diciendo 900 devengados y 0 dados ese mes', impu.sep && cerca(impu.sep.saldo, 900) && cerca(impu.sep.entregado, 0), JSON.stringify(impu.sep));
+
+  // Si de verdad quedó corto, lo viejo sale con su mes y su importe
+  const impu2 = await page.evaluate(async () => {
+    const dias = (mes, n) => Array.from({ length: n }, (_, i) => `${mes}-${String(i + 1).padStart(2, '0')}`);
+    await DB.perGuardar({ nombre: 'Prueba Arrastre', sueldoMensual: 900, diasMes: 26, horasJornada: 7.5, dias: [...dias('2026-09', 26), ...dias('2026-10', 10)], tardes: [], faltas: [], descansos: [], notasDias: [], creado: new Date().toISOString() });
+    const t = (await DB.perTodos()).find(x => x.nombre === 'Prueba Arrastre');
+    await DB.pagoGuardar({ trabajadorSid: t.sid, fecha: '2026-10-03', importe: 400, notas: 'a cuenta', creado: new Date().toISOString() });
+    const d = await APP.deudaDe('Prueba Arrastre');
+    return { total: d.total, sep: d.meses.find(m => m.mes === '2026-09'), oct: d.meses.find(m => m.mes === '2026-10') };
+  });
+  chk('personal', 'Si quedó corto de verdad, lo viejo sale: de septiembre quedan 500 sin cubrir', impu2.sep && cerca(impu2.sep.pendiente, 500) && cerca(impu2.oct.pendiente, 346.15) && cerca(impu2.total, 846.15), JSON.stringify({ sep: impu2.sep && impu2.sep.pendiente, total: impu2.total }));
+
+  // La ficha lo explica con el ✓ cuando lo viejo está cubierto (mes real de hoy)
+  await limpiar();
+  await page.evaluate(async () => {
+    const hoy = new Date();
+    const p2 = (n) => String(n).padStart(2, '0');
+    const mesActual = `${hoy.getFullYear()}-${p2(hoy.getMonth() + 1)}`;
+    const ant = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
+    const mesAnt = `${ant.getFullYear()}-${p2(ant.getMonth() + 1)}`;
+    const dias = (mes, n) => Array.from({ length: n }, (_, i) => `${mes}-${p2(i + 1)}`);
+    await DB.perGuardar({ nombre: 'Prueba Ficha', sueldoMensual: 900, diasMes: 26, horasJornada: 7.5, dias: [...dias(mesAnt, 26), ...dias(mesActual, 5)], tardes: [], faltas: [], descansos: [], notasDias: [], creado: new Date().toISOString() });
+    const t = (await DB.perTodos()).find(x => x.nombre === 'Prueba Ficha');
+    await DB.pagoGuardar({ trabajadorSid: t.sid, fecha: `${mesActual}-03`, importe: 900, notas: 'sueldo del mes pasado', creado: new Date().toISOString() });
+  });
+  await page.click('.tab[data-tab="inicio"]');
+  await page.click('.tab[data-tab="personal"]');
+  await page.waitForTimeout(700);
+  const fichaImpu = (await page.textContent('#per-lista .per-body')).replace(/\s+/g, ' ');
+  chk('personal', 'La ficha explica el reparto y marca lo viejo como ✓ todo pagado',
+    fichaImpu.includes('cubren primero lo más antiguo') && fichaImpu.includes('✓ todo pagado'), fichaImpu.slice(0, 300));
 
   // ══════════════ 10. ERRORES DE JAVASCRIPT ══════════════
   console.log('\n═══ 10. ESTABILIDAD ═══');

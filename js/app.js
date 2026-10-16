@@ -2393,6 +2393,17 @@
       total += devengado - entregado;
       mes = mesSiguiente(mes);
     }
+    // Imputación a lo más antiguo: todas las entregas juntas, en orden, van
+    // cubriendo primero los meses más viejos. Así "lo pendiente" dice de verdad
+    // de qué mes viene: el sueldo de septiembre pagado a primeros de octubre
+    // deja septiembre cubierto, aunque la entrega tenga fecha de octubre.
+    // (m.saldo sigue siendo el hecho contable del mes: lo dado ESE mes.)
+    let bolsa = Math.round(pagosT.reduce((s, p) => s + (p.importe || 0), 0) * 100) / 100;
+    for (const m of meses) {
+      const cubre = Math.min(bolsa, m.devengado);
+      m.pendiente = Math.round((m.devengado - cubre) * 100) / 100;
+      bolsa = Math.round((bolsa - cubre) * 100) / 100;
+    }
     return { total: Math.round(total * 100) / 100, meses };
   }
 
@@ -2671,19 +2682,27 @@
     return (deuda.meses || []).filter(m => m.mes !== mes && Math.abs(m.saldo) >= 0.01);
   }
 
-  /* De dónde sale el total de la cabecera cuando no es solo lo de este mes.
-     Va a la vista, no plegado: "Le debes 918,62 €" con un fijo de 900,00 € tiene
-     que poder explicarse sin desplegar nada. El caso real: un trabajador dado de
-     alta el 31 de agosto con ese día marcado, y el dueño viendo septiembre. */
+  /* De dónde sale el total de la cabecera. Va a la vista, no plegado:
+     "Le debes 918,62 €" con un fijo de 900,00 € tiene que poder explicarse sin
+     desplegar nada (caso real: alta el 31 de agosto con ese día marcado).
+     Reparte lo pendiente con la imputación a lo más antiguo (m.pendiente), no
+     por la fecha de las entregas: el caso que lo pedía era un trabajador al día
+     salvo el mes en curso al que la ficha le enseñaba "deuda vieja" solo porque
+     el sueldo de septiembre se pagó a primeros de octubre. Si lo viejo está
+     cubierto, se dice con un ✓. */
   function origenDelTotalHTML(c, deuda, mes) {
-    const otros = otrosMesesConSaldo(deuda, mes);
-    if (!otros.length) return '';
-    const signo = (n) => `${n > 0 ? '+' : '−'}${INFORME.eur(Math.abs(n))}`;
-    const filas = otros.map(m => `
-            <div class="stat-linea"><span>· ${mesEnLetras(m.mes + '-01')}: le correspondió ${INFORME.eur(m.devengado)} y le diste ${INFORME.eur(m.entregado)}</span><strong class="${m.saldo > 0 ? 'txt-bad' : 'txt-sec'}">${signo(m.saldo)}</strong></div>`).join('');
+    if (deuda.total < 0.01) return '';
+    const viejos = (deuda.meses || []).filter(m => m.mes !== mes && (m.pendiente || 0) >= 0.01);
+    const esteMes = Math.round((deuda.total - viejos.reduce((s, m) => s + m.pendiente, 0)) * 100) / 100;
+    // Sin meses viejos pendientes y sin desfases que expliquen: nada que añadir
+    if (!viejos.length && !otrosMesesConSaldo(deuda, mes).length) return '';
+    const filas = viejos.map(m => `
+            <div class="stat-linea"><span>· ${mesEnLetras(m.mes + '-01')}: le correspondió ${INFORME.eur(m.devengado)} y aún queda sin cubrir</span><strong class="txt-bad">+${INFORME.eur(m.pendiente)}</strong></div>`).join('');
     return `
-            <div class="stat-linea"><span>· ${mesEnLetras(mes + '-01')} (este mes): le corresponde ${INFORME.eur(c.devengado)} y le has dado ${INFORME.eur(c.entregado)}</span><strong class="${c.pendiente > 0 ? 'txt-bad' : 'txt-sec'}">${signo(c.pendiente)}</strong></div>${filas}
-            <p class="hint" style="margin:4px 0 0">El total suma todos los meses. Si un mes no debería estar (por ejemplo, un día marcado antes de que empezara de verdad), corrige en su ficha la fecha «Comenzó a trabajar el» o ese día en el calendario de ese mes.</p>`;
+            <p class="hint" style="margin:6px 0 2px">📌 De dónde viene el total (las entregas cubren primero lo más antiguo):</p>
+            ${viejos.length ? filas : '<div class="stat-linea"><span>· Meses anteriores</span><strong class="txt-ok">✓ todo pagado</strong></div>'}
+            <div class="stat-linea"><span>· ${mesEnLetras(mes + '-01')} (este mes): le corresponde ${INFORME.eur(c.devengado)}</span><strong class="${esteMes > 0 ? 'txt-bad' : 'txt-sec'}">${esteMes > 0 ? '+' : ''}${INFORME.eur(esteMes)}</strong></div>
+            ${viejos.length ? '<p class="hint" style="margin:4px 0 0">Si un mes no debería deber nada (por ejemplo, un día marcado antes de que empezara de verdad), corrige en su ficha la fecha «Comenzó a trabajar el» o ese día en el calendario de ese mes.</p>' : ''}`;
   }
 
   /* La regla del retraso explicada con palabras, para que la entienda el propio
@@ -4163,5 +4182,10 @@
 
   // Para la verificación automática (pruebas/): poder lanzar a mano lo que la
   // app hace sola en segundo plano o al entrar.
-  window.APP = { inicio: pintarInicio, recientes: pintarRecientes, miniaturas: crearMiniaturasQueFaltan, semanas: semanasSinDescanso };
+  window.APP = { inicio: pintarInicio, recientes: pintarRecientes, miniaturas: crearMiniaturasQueFaltan, semanas: semanasSinDescanso,
+    deudaDe: async (nombre) => {
+      const t = (await DB.perTodos()).find(x => x.nombre === nombre);
+      const pagos = (await DB.pagoTodos()).filter(p => p.trabajadorSid === t.sid);
+      return desgloseDeuda(t, pagos, async (m) => DB.buscar({ tipo: 'cierre', desde: m + '-01', hasta: m + '-31' }));
+    } };
 })();

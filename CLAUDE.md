@@ -260,6 +260,16 @@ restaurar). `window.APP` expone `inicio`, `recientes` y `miniaturas` para la ver
   el 31 de agosto con ese día marcado y 16 € entregados; viendo septiembre la cabecera
   decía "Le debes 918,62 €" con un fijo de 900,00 € y nada a la vista explicaba los
   18,62 €. El mensaje que se le envía reparte igual el pendiente de otros meses.
+- **El reparto de lo pendiente se imputa a lo más antiguo** (`m.pendiente` en
+  `desgloseDeuda`): todas las entregas juntas, en orden, cubren primero los meses
+  más viejos. Caso real: un trabajador al día salvo el mes en curso salía
+  "debiendo viejo" solo porque el sueldo de septiembre se pagó a primeros de
+  octubre. Con la imputación, septiembre queda cubierto y la ficha dice
+  "Meses anteriores ✓ todo pagado · este mes +X". `m.saldo` (lo devengado y lo
+  dado DENTRO de ese mes) no se toca: es el hecho contable del detalle plegado, y
+  **el mensaje al trabajador tampoco cambia** (sus líneas cuadran con
+  calculadora: este mes ± arrastre = total). Solo cambia la explicación del
+  dueño en la ficha.
 - En la línea del fijo se dice qué es cada número (`sueldo ÷ los 26 días pactados al mes
   × los 26 días que vino`), porque cuando coinciden "÷ 26 × 26" no se entiende.
 - **Bonos** (`t.bonos = [{ fecha, importe, motivo }]`): un extra que el dueño decide darle
@@ -320,7 +330,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 367 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 372 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.
 
