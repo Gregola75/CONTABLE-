@@ -4488,6 +4488,44 @@
     pintarPersonal();
   }
 
+  /* La cuenta completa de un RRPP, para enviársela al pagarle: cada semana con
+     su desglose, todo lo recibido y lo pendiente. Neutra y comprobable. */
+  function textoCuentaRRPP(r, pagosR) {
+    const semanas = semanasRRPP(r);
+    const devengado = r2(semanas.reduce((s, w) => s + w.total, 0));
+    const entregado = r2(pagosR.reduce((s, p) => s + (p.importe || 0), 0));
+    const pendiente = r2(devengado - entregado);
+    const L = [];
+    L.push(`CUENTA — ${r.nombre} (a ${fmtFecha(hoyISO())})`);
+    L.push('');
+    [...semanas].reverse().forEach(w => { // de la más antigua a la más nueva
+      L.push(`Semana del ${fmtFecha(w.lunes)} al ${fmtFecha(w.hasta)}: ventas ${INFORME.eur(w.ventas)}`);
+      if (w.comision > 0) L.push(`  Comisión: ${w.comisionTramos.map(p => `${p.porcentaje} % de ${INFORME.eur(p.base)}`).join(' + ')} = ${INFORME.eur(w.comision)}`);
+      if (w.bonos > 0) L.push(`  Bonos por noche: ${w.nochesBono.map(x => INFORME.eur(x.bono)).join(' + ')} = ${INFORME.eur(w.bonos)}`);
+      L.push(`  Total de la semana: ${INFORME.eur(w.total)}`);
+    });
+    L.push('');
+    L.push(`Corresponde en total: ${INFORME.eur(devengado)}`);
+    L.push(`Recibido: ${INFORME.eur(entregado)}`);
+    [...pagosR].sort((a, b) => (a.fecha || '').localeCompare(b.fecha || '')).forEach(p => L.push(`  · ${fmtFecha(p.fecha)}: ${INFORME.eur(p.importe)}`));
+    L.push('');
+    L.push(pendiente > 0
+      ? `PENDIENTE A DÍA DE HOY: ${INFORME.eur(pendiente)}`
+      : (pendiente < 0 ? `RECIBIDO DE MÁS (a descontar): ${INFORME.eur(-pendiente)}` : 'CUENTA AL DÍA: 0,00 €'));
+    return L.join('\n');
+  }
+
+  async function compartirTextoRRPP(texto) {
+    try { if (navigator.share) { await navigator.share({ text: texto }); return; } }
+    catch (e) { if (e && e.name === 'AbortError') return; }
+    try {
+      await navigator.clipboard.writeText(texto);
+      toast('📋 Copiado. Pégalo en WhatsApp.');
+    } catch (e) {
+      alert(texto);
+    }
+  }
+
   function pintarRRPP(rrpps, pagos, mes) {
     const div = $('#rrpp-lista');
     if (!div) return;
@@ -4523,6 +4561,7 @@
           ${calendarioRRPPHTML(r, mes)}
           <div class="form-actions" style="margin-top:0">
             <button class="btn btn-secondary rrpp-pagar" data-sid="${r.sid}">💶 Apuntar entrega</button>
+            <button class="btn btn-small rrpp-cuenta" data-sid="${r.sid}">📤 Enviar la cuenta completa</button>
           </div>
           ${semanasHTML || '<p class="vacio">Aún sin noches anotadas.</p>'}
           ${pagosR.length ? `<details class="ocr-details"><summary>Entregas (${pagosR.length}, ${INFORME.eur(entregado)})</summary>${pagosR.map(p => `<div class="stat-linea"><span>${fmtFecha(p.fecha)}${p.notas ? ` · ${escapar(p.notas)}` : ''}</span><strong>${INFORME.eur(p.importe)}</strong></div>`).join('')}</details>` : ''}
@@ -4546,21 +4585,23 @@
       if (isNaN(importe) || importe <= 0) { toast('⚠️ No he entendido el importe; no se apuntó nada.'); return; }
       await DB.pagoGuardar({ trabajadorSid: r.sid, fecha: hoyISO(), importe: r2(importe), notas: 'RRPP', creado: new Date().toISOString() });
       toast('💶 Entrega apuntada.');
+      // Al pagar es cuando se le explica la cuenta: semanas, bonos y pendiente
+      if (confirm('¿Le envías la cuenta explicada (semanas, bonos y lo pendiente)?')) {
+        const pagosR = (await DB.pagoTodos()).filter(p => p.trabajadorSid === r.sid);
+        await compartirTextoRRPP(textoCuentaRRPP(r, pagosR));
+      }
       pintarPersonal();
     })));
+    div.querySelectorAll('.rrpp-cuenta').forEach(btn => btn.addEventListener('click', async () => {
+      const r = (await DB.perTodos()).find(x => x.sid === btn.dataset.sid);
+      const pagosR = (await DB.pagoTodos()).filter(p => p.trabajadorSid === r.sid);
+      await compartirTextoRRPP(textoCuentaRRPP(r, pagosR));
+    }));
     div.querySelectorAll('.rrpp-enviar').forEach(btn => btn.addEventListener('click', async () => {
       const r = (await DB.perTodos()).find(x => x.sid === btn.dataset.sid);
       const w = semanasRRPP(r).find(x => x.lunes === btn.dataset.lunes);
       if (!w) return;
-      const texto = textoSemanaRRPP(r, w);
-      try { if (navigator.share) { await navigator.share({ text: texto }); return; } }
-      catch (e) { if (e && e.name === 'AbortError') return; }
-      try {
-        await navigator.clipboard.writeText(texto);
-        toast('📋 Resumen copiado. Pégalo en WhatsApp.');
-      } catch (e) {
-        alert(texto);
-      }
+      await compartirTextoRRPP(textoSemanaRRPP(r, w));
     }));
     div.querySelectorAll('.rrpp-editar').forEach(btn => btn.addEventListener('click', async () => {
       const r = (await DB.perTodos()).find(x => x.sid === btn.dataset.sid);
@@ -4576,6 +4617,11 @@
 
   window.APP = { inicio: pintarInicio, recientes: pintarRecientes, miniaturas: crearMiniaturasQueFaltan, semanas: semanasSinDescanso,
     rrppSemana: calcularSemanaRRPP, rrppNoche: guardarNocheRRPP, datosMes,
+    rrppCuenta: async (nombre) => {
+      const r = (await DB.perTodos()).find(x => x.nombre === nombre);
+      const pagosR = (await DB.pagoTodos()).filter(p => p.trabajadorSid === r.sid);
+      return textoCuentaRRPP(r, pagosR);
+    },
     deudaDe: async (nombre, conDetalle = false) => {
       const t = (await DB.perTodos()).find(x => x.nombre === nombre);
       const pagos = (await DB.pagoTodos()).filter(p => p.trabajadorSid === t.sid);

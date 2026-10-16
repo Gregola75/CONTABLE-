@@ -2239,6 +2239,14 @@ TARJETA 450,00`)]);
   chk('personal', 'Corregir el bono de la noche lo cambia para todos los RRPP de esa noche (25 si pasa de 250)',
     bonoDia.leoDespues && bonoDia.leoDespues.bonoImporte === 25 && bonoDia.leoDespues.bonoUmbral === 250, JSON.stringify(bonoDia.leoDespues));
 
+  // Al pagar se le explica la cuenta: semanas con su desglose, recibido y pendiente
+  const cuentaRRPP = await page.evaluate(() => APP.rrppCuenta('Marco RRPP'));
+  chk('personal', 'La cuenta explicada lleva la semana con su comisión tramo a tramo y los bonos',
+    cuentaRRPP.includes('Semana del 07/09/2026 al 13/09/2026') && cuentaRRPP.includes('20 % de 200,00 €') &&
+    cuentaRRPP.includes('Bonos por noche: 20,00 € + 25,00 € = 45,00 €') && cuentaRRPP.includes('Total de la semana: 205,00 €'), cuentaRRPP.slice(0, 400));
+  chk('personal', 'Y cierra con lo recibido y lo pendiente (205 − 120 = 85,00)',
+    cuentaRRPP.includes('Recibido: 120,00 €') && cuentaRRPP.includes('PENDIENTE A DÍA DE HOY: 85,00 €'), cuentaRRPP.slice(-200));
+
   // ══════════════ 10. ERRORES DE JAVASCRIPT ══════════════
   console.log('\n═══ 10. ESTABILIDAD ═══');
   chk('estabilidad', 'Ningún error de JavaScript durante toda la verificación',

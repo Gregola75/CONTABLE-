@@ -344,6 +344,11 @@ restaurar). `window.APP` expone `inicio`, `recientes` y `miniaturas` para la ver
   cuadro de mando cuentan ese dinero.
 - El resumen semanal para enviarle (`textoSemanaRRPP`) es neutro y cuadra con
   calculadora: noches con su bono, ventas, comisión tramo a tramo y total.
+- **Al pagar se le explica la cuenta** (`textoCuentaRRPP`, expuesta como
+  `APP.rrppCuenta`): al apuntar una entrega la app ofrece enviarle la cuenta
+  completa — cada semana con su comisión tramo a tramo y sus bonos, todo lo
+  recibido con fechas y el pendiente a día de hoy — y hay botón para enviarla
+  en cualquier momento ("Enviar la cuenta completa").
 - Un RRPP solo se puede **eliminar si no tiene noches ni entregas**; con
   historial, se conserva como prueba.
 
@@ -372,7 +377,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 388 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 390 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.
 
