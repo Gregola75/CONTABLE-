@@ -410,7 +410,12 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
   await page.waitForTimeout(900);
 
   // Abre la ficha (activa o liquidada): el cuerpo puede no existir o estar plegado
+  const destaparHistorial = () => page.evaluate(() => {
+    const d = document.querySelector('#per-historial-plegado');
+    if (d) d.open = true; // el historial va plegado: destaparlo para poder tocar dentro
+  });
   const abrirFicha = async (caja) => {
+    await destaparHistorial();
     const yaAbierta = await page.evaluate(c => {
       const b = document.querySelector(c + ' .per-body');
       return !!b && !b.classList.contains('hidden');
@@ -691,6 +696,7 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
   });
   const cajaLiq = await page.evaluate(() =>
     document.querySelector('#per-historial .per-toggle') ? '#per-historial' : '#per-lista');
+  await destaparHistorial();
   const yaAbierta = await page.evaluate(c => {
     const b = document.querySelector(c + ' .per-body');
     return !!b && !b.classList.contains('hidden');
@@ -700,7 +706,8 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
   chk('retrasos', 'La ficha de un liquidado enseña dónde se le descontó por llegar tarde',
     /Dónde se le descontó por llegar tarde/i.test(txtLiqR) && txtLiqR.includes('18,46'), txtLiqR.slice(0, 500));
   chk('retrasos', 'Y ahí el desglose no va metido en otro plegable dentro del mes',
-    await page.evaluate(c => !document.querySelector(c + ' details details'), cajaLiq));
+    // (se mira dentro de la ficha: el plegable exterior del historial no cuenta)
+    await page.evaluate(c => !document.querySelector(c + ' .per-body details details'), cajaLiq));
 
   // ══════════════ 6e. POR QUÉ SE LE DESCONTÓ (explicado) ══════════════
   // No basta con enseñar el resultado: el trabajador tiene que entender la regla.
@@ -738,6 +745,7 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
     const b = document.querySelector(c + ' .per-body');
     return !!b && !b.classList.contains('hidden');
   }, cajaExp);
+  await destaparHistorial();
   if (!abiertaExp) { await page.click(cajaExp + ' .per-toggle'); await page.waitForTimeout(900); }
   const arriba = await page.evaluate(c => {
     const out = [];
@@ -798,6 +806,7 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
     const b = document.querySelector(c + ' .per-body');
     return !!b && !b.classList.contains('hidden');
   }, cajaExp);
+  await destaparHistorial();
   if (!abiertaSin) { await page.click(cajaExp + ' .per-toggle'); await page.waitForTimeout(900); }
   const txtSinTarde = (await page.textContent(cajaExp + ' .per-body')).replace(/\s+/g, ' ');
   chk('retrasos', 'Sin retrasos no aparece la línea de arriba ni la explicación',
@@ -894,6 +903,7 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
     const b = document.querySelector(c + ' .per-body');
     return !!b && !b.classList.contains('hidden');
   }, cajaObj);
+  await destaparHistorial();
   if (!abiertaObj) { await page.click(cajaObj + ' .per-toggle'); await page.waitForTimeout(900); }
   const txtLiqObj = (await page.textContent(cajaObj + ' .per-body')).replace(/\s+/g, ' ');
   chk('objetivos', 'La ficha de un liquidado enseña su objetivo mes a mes',
@@ -988,6 +998,7 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
     const b = document.querySelector(c + ' .per-body');
     return !!b && !b.classList.contains('hidden');
   }, cajaB);
+  await destaparHistorial();
   if (!abiertaB) { await page.click(cajaB + ' .per-toggle'); await page.waitForTimeout(900); }
   const txtB = (await page.textContent(cajaB + ' .per-body')).replace(/\s+/g, ' ');
   chk('baja', 'El mes posterior a la baja ya NO sale en la lista mes a mes',
@@ -2193,16 +2204,17 @@ TARJETA 450,00`)]);
     const r = (await DB.perTodos()).find(x => x.nombre === 'Marco RRPP');
     await DB.pagoGuardar({ trabajadorSid: r.sid, fecha: '2026-09-14', importe: 120, notas: 'RRPP', creado: new Date().toISOString() });
   });
-  await page.click('.tab[data-tab="inicio"]');
   await page.click('.tab[data-tab="personal"]');
-  await page.fill('#per-mes', '2026-09');
+  await page.waitForTimeout(500);
+  await page.click('.tab[data-tab="rrpp"]');
+  await page.fill('#rrpp-mes', '2026-09');
   await page.waitForTimeout(800);
   const rrppUI = await page.evaluate(() => ({
     lista: document.querySelector('#rrpp-lista').textContent.replace(/\s+/g, ' '),
     dias: document.querySelectorAll('#rrpp-lista .rrpp-dia.on').length,
     trabajadores: (document.querySelector('#per-lista') || { textContent: '' }).textContent
   }));
-  chk('personal', 'La ficha del RRPP enseña la semana con su desglose y lo pendiente (210 − 120 = 90,00)',
+  chk('personal', 'La pestaña RRPP enseña la semana con su desglose y lo pendiente (210 − 120 = 90,00)',
     rrppUI.lista.includes('Marco RRPP') && rrppUI.lista.includes('20 % de 200,00') && /LE DEBES\s*90,00/.test(rrppUI.lista), rrppUI.lista.slice(0, 300));
   chk('personal', 'Su calendario marca las 3 noches anotadas', rrppUI.dias === 3, 'marcadas ' + rrppUI.dias);
   chk('personal', 'Un RRPP no se cuela en la lista de trabajadores', !rrppUI.trabajadores.includes('Marco RRPP'));
@@ -2258,8 +2270,8 @@ TARJETA 450,00`)]);
   chk('personal', 'A un RRPP no se le pueden apuntar noches de antes de su fecha de inicio',
     inicioRRPP.length === 1 && inicioRRPP[0] === '2026-09-11', JSON.stringify(inicioRRPP));
   await page.click('.tab[data-tab="inicio"]');
-  await page.click('.tab[data-tab="personal"]');
-  await page.fill('#per-mes', '2026-09');
+  await page.click('.tab[data-tab="rrpp"]');
+  await page.fill('#rrpp-mes', '2026-09');
   await page.waitForTimeout(800);
   const calInicio = await page.evaluate(() => {
     const tarjeta = [...document.querySelectorAll('#rrpp-lista [data-sid]')].find(el => el.textContent.includes('Nuevo RRPP'));

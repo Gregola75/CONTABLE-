@@ -49,6 +49,7 @@
   <button class="tab" data-tab="cierres">💰 Facturación</button>
   <button class="tab" data-tab="consultar">🔍 Consultar</button>
   <button class="tab" data-tab="personal">👥 Personal</button>
+  <button class="tab" data-tab="rrpp">🎤 RRPP</button>
   <button class="tab" data-tab="informe">📊 Informes</button>
   <button class="tab" data-tab="ajustes">⚙️</button>
 </nav>
@@ -564,10 +565,19 @@
     <p class="hint">Antiguos trabajadores ya abonados y liquidados. <strong>Toca cualquiera</strong> para ver todo lo que le pagaste y cómo se calculó: es tu prueba de que le pagaste bien.</p>
     <div id="per-historial"></div>
   </div>
+</section>
 
+<!-- ==================== RRPP (PROMOTORES) ==================== -->
+<section id="tab-rrpp" class="tab-panel">
   <div class="card">
     <h2>🎤 RRPP (promotores) — solo para ti</h2>
     <p class="hint">Sin sueldo fijo: cobran <strong>por semana</strong> (de lunes a domingo) según la <strong>primera consumición de cada cliente</strong> que traen. La comisión va por tramos y <strong>cada tramo lleva sus propias ventas</strong>, más un bono por cada noche que supere el umbral. Se pagan semanalmente. Tampoco sale en el informe de la gestoría.</p>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="rrpp-mes">Mes del calendario</label>
+        <input type="month" id="rrpp-mes">
+      </div>
+    </div>
     <button class="btn btn-secondary" id="rrpp-nuevo">➕ Añadir RRPP</button>
 
     <div id="rrpp-form" class="prov-form hidden">

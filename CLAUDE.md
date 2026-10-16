@@ -13,7 +13,7 @@ desde la rama por defecto del repositorio.
 
 | Archivo | Qué hace |
 |---|---|
-| `index.html` | Toda la interfaz, en pestañas (Inicio, Facturas, Facturación, Consultar, Personal, Informes, Ajustes) |
+| `index.html` | Toda la interfaz, en pestañas (Inicio, Facturas, Facturación, Consultar, Personal, RRPP, Informes, Ajustes) |
 | `js/db.js` | Almacenamiento local (IndexedDB): registros, proveedores, personal, pagos |
 | `js/nube.js` | Sincronización con Firebase (Firestore) del proyecto del propio usuario |
 | `js/ocr.js` | Lectura de fotos con Tesseract y detección de proveedor, fechas, totales, IVA y retenciones |
@@ -314,11 +314,17 @@ restaurar). `window.APP` expone `inicio`, `recientes` y `miniaturas` para la ver
   datos en ese momento y del formulario solo salen los campos del formulario. El
   calendario sigue a la vista con el formulario abierto, y los días que se marquen
   mientras tanto no se pierden.
+- **El historial va plegado** (`#per-historial-plegado`): un toque lo abre o lo
+  cierra (crece con los años) y se recuerda si estaba abierto para que un
+  repintado no lo cierre. Las pruebas lo destapan con `destaparHistorial()`
+  antes de tocar dentro.
 - **Nada se borra por antigüedad**: los 10 días solo deciden cuándo baja al historial, y
   allí se queda indefinidamente. Para que no se pierda la prueba por un toque, a un
   trabajador **liquidado no se le puede eliminar**: hay que reabrir su ficha primero.
 
-**RRPP / promotores** (apartado propio dentro de Personal; tampoco va a la gestoría)
+**RRPP / promotores** (pestaña propia, separada de Personal; tampoco va a la gestoría)
+- Tienen **su pestaña** con su selector de mes (`#rrpp-mes`, `pintarRRPPTab`):
+  todo lo del bloque RRPP repinta esa pestaña, no la de Personal.
 - Viven en el almacén de personal con `esRRPP: true` (así la nube y la copia de
   seguridad los llevan solos) y **todas las vistas de trabajadores los filtran**
   (`pintarPersonal`, `deudaConElEquipo`, rentabilidad, historial…). Sus entregas

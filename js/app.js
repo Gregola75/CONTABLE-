@@ -158,6 +158,7 @@
       if (btn.dataset.tab === 'ajustes') { pintarStats(); pintarSeguridad(); pintarNube(); }
       if (btn.dataset.tab === 'consultar') buscar();
       if (btn.dataset.tab === 'personal') pintarPersonal();
+      if (btn.dataset.tab === 'rrpp') pintarRRPPTab();
       if (btn.dataset.tab === 'cierres') { pintarFacturacion(); pintarFacturacionTrimestre(); }
       if (btn.dataset.tab === 'informe') pintarResumen();
     });
@@ -1566,6 +1567,7 @@
       toast('📦 Trimestre marcado como guardado.');
       pintarInicio();
       if (document.querySelector('.tab[data-tab="informe"]').classList.contains('active')) pintarResumen();
+    if (document.querySelector('.tab[data-tab="rrpp"]').classList.contains('active')) pintarRRPPTab();
     }));
   }
 
@@ -1959,6 +1961,7 @@
 
   let perEditando = null; // trabajador en edición
   const perAbiertos = new Set(); // fichas de empleado desplegadas
+  let historialAbierto = false;  // el historial va plegado; se recuerda si se abre
 
   function mesPersonal() {
     return $('#per-mes').value || hoyISO().slice(0, 7);
@@ -3493,7 +3496,6 @@
     // Gráfico del mes, rentabilidad e historial de antiguos
     $('#per-grafico').innerHTML = graficoPersonalHTML(trabajadores, cierresMes, mes);
     $('#per-renta').innerHTML = rentabilidadHTML(trabajadores.filter(t => !t.esRRPP), cierresMes, mes, rrpps);
-    pintarRRPP(rrpps, pagos, mes);
     // Historial: la MISMA ficha completa, lo más reciente arriba
     const fichasHist = [];
     for (const t of historial) {
@@ -3503,9 +3505,13 @@
       if (ficha.texto) resumenes.set(t.sid, ficha.texto);
       fichasHist.push(ficha.html);
     }
+    // El historial crece con los años: va plegado y un toque lo abre o cierra.
+    // Se recuerda si estaba abierto para que un repintado no lo cierre.
     $('#per-historial').innerHTML = fichasHist.length
-      ? fichasHist.join('')
+      ? `<details id="per-historial-plegado" class="ocr-details"${historialAbierto ? ' open' : ''}><summary>📁 ${fichasHist.length === 1 ? 'Ver 1 trabajador antiguo' : `Ver los ${fichasHist.length} trabajadores antiguos`} (toca para abrir o cerrar)</summary>${fichasHist.join('')}</details>`
       : '<p class="vacio">Sin trabajadores antiguos todavía.</p>';
+    const plegado = $('#per-historial-plegado');
+    if (plegado) plegado.addEventListener('toggle', () => { historialAbierto = plegado.open; });
 
     // Los mismos botones tienen que funcionar en las fichas de arriba y en las
     // del historial. OJO: esto va DESPUÉS de pintar los dos contenedores.
@@ -4237,6 +4243,7 @@
     if (document.querySelector('.tab[data-tab="personal"]').classList.contains('active')) pintarPersonal();
     if (document.querySelector('.tab[data-tab="cierres"]').classList.contains('active')) { pintarFacturacion(); pintarFacturacionTrimestre(); }
     if (document.querySelector('.tab[data-tab="informe"]').classList.contains('active')) pintarResumen();
+    if (document.querySelector('.tab[data-tab="rrpp"]').classList.contains('active')) pintarRRPPTab();
   }), 1200);
   pintarNube();
 
@@ -4384,7 +4391,7 @@
     rrppEditando = null;
     $('#rrpp-form').classList.add('hidden');
     toast('💾 RRPP guardado.');
-    pintarPersonal();
+    pintarRRPPTab();
   }));
 
   /* Calendario del RRPP, con el mismo aspecto que el de los trabajadores:
@@ -4466,7 +4473,7 @@
       if (!confirm(`¿Quitar la noche del ${fmtFecha(fecha)} (${INFORME.eur(actual.importe)})?`)) return;
       await DB.perGuardar({ ...r, noches: (r.noches || []).filter(n => n.fecha !== fecha) });
       toast('🗑️ Noche quitada.');
-      pintarPersonal();
+      pintarRRPPTab();
       return;
     }
 
@@ -4475,7 +4482,7 @@
       // El bono de esa noche ya está fijado: se aplica solo, sin preguntar
       await guardarNocheRRPP(sid, fecha, importe);
       toast(`💾 Noche guardada. Bono del día: ${INFORME.eur(dia.bonoImporte)} si pasa de ${INFORME.eur(dia.bonoUmbral)}.`);
-      pintarPersonal();
+      pintarRRPPTab();
       return;
     }
 
@@ -4491,7 +4498,7 @@
     if (bonoUmbral === null || bonoUmbral < 0) { toast('⚠️ No he entendido la cifra a superar; no se cambió nada.'); return; }
     await guardarNocheRRPP(sid, fecha, importe, bonoImporte, bonoUmbral);
     toast('💾 Noche guardada. El bono queda fijado para todos los RRPP de esa noche.');
-    pintarPersonal();
+    pintarRRPPTab();
   }
 
   /* La cuenta completa de un RRPP, para enviársela al pagarle: cada semana con
@@ -4531,6 +4538,14 @@
       alert(texto);
     }
   }
+
+  /* La pestaña RRPP: lee sus datos y pinta con el mes de su propio selector. */
+  async function pintarRRPPTab() {
+    if (!$('#rrpp-mes').value) $('#rrpp-mes').value = hoyISO().slice(0, 7);
+    const [personal, pagos] = await Promise.all([DB.perTodos(), DB.pagoTodos()]);
+    pintarRRPP(personal.filter(t => t.esRRPP), pagos, $('#rrpp-mes').value);
+  }
+  $('#rrpp-mes').addEventListener('change', pintarRRPPTab);
 
   function pintarRRPP(rrpps, pagos, mes) {
     const div = $('#rrpp-lista');
@@ -4596,7 +4611,7 @@
         const pagosR = (await DB.pagoTodos()).filter(p => p.trabajadorSid === r.sid);
         await compartirTextoRRPP(textoCuentaRRPP(r, pagosR));
       }
-      pintarPersonal();
+      pintarRRPPTab();
     })));
     div.querySelectorAll('.rrpp-cuenta').forEach(btn => btn.addEventListener('click', async () => {
       const r = (await DB.perTodos()).find(x => x.sid === btn.dataset.sid);
@@ -4617,7 +4632,7 @@
       if (!confirm('¿Eliminar este RRPP? Solo se puede porque no tiene noches ni entregas apuntadas.')) return;
       await DB.perBorrar(+btn.dataset.id);
       toast('🗑️ RRPP eliminado.');
-      pintarPersonal();
+      pintarRRPPTab();
     })));
   }
 
