@@ -1964,6 +1964,10 @@
       .sort((a, b) => a.objetivo - b.objetivo);
   }
 
+  /* Desde qué mes vale la comisión por tramos "de la diferencia". Los meses
+     anteriores se pagaron con la fórmula antigua y no se reescriben. */
+  const MES_COMISION_POR_TRAMOS = '2026-10';
+
   /* Cálculo del mes de un trabajador: fijo por días + comisión por tramo */
   function calcularMes(t, ventas, pagosMes, mes) {
     t = trabajadorEn(t, mes);   // con el sueldo y los objetivos que tenía ESE mes
@@ -2011,9 +2015,15 @@
     // + 3 % de 100 = 303,00 €. Así subir de tramo nunca multiplica la comisión
     // entera. Cada parte se redondea por separado para que el desglose que se
     // le enseña cuadre al céntimo con el total.
+    // La fórmula nueva vale DESDE octubre de 2026: los meses anteriores ya se
+    // pagaron con la antigua (el % del tramo más alto sobre toda la base) y no
+    // se reescriben, igual que un cambio de sueldo no toca lo ya pagado.
     const comisionTramos = [];
     let comision = 0;
-    if (tramoActual) {
+    if (tramoActual && mes < MES_COMISION_POR_TRAMOS) {
+      comision = Math.round(ventas * tramoActual.porcentaje) / 100;
+      comisionTramos.push({ porcentaje: tramoActual.porcentaje, base: Math.round(ventas * 100) / 100, importe: comision });
+    } else if (tramoActual) {
       for (let i = 0; i < tramos.length && ventas >= tramos[i].objetivo; i++) {
         const desde = i === 0 ? 0 : tramos[i].objetivo;
         const hasta = i + 1 < tramos.length ? Math.min(ventas, tramos[i + 1].objetivo) : ventas;

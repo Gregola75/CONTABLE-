@@ -202,8 +202,11 @@ restaurar). `window.APP` expone `inicio`, `recientes` y `miniaturas` para la ver
   parte se redondea por separado (`c.comisionTramos`) y la ficha, la cuenta
   explicada y los mensajes escriben el desglose (`comisionEscrita`:
   "2 % de 15.000,00 € + 3 % de 100,00 €"), para que cuadre con calculadora.
-  Ojo: con solo el primer tramo alcanzado el resultado es idéntico al de antes,
-  así que los meses pasados solo cambian si alguien superó un tramo superior.
+  **La fórmula nueva vale desde octubre de 2026** (`MES_COMISION_POR_TRAMOS`):
+  los meses anteriores se pagaron con la antigua y no se reescriben, igual que
+  un cambio de sueldo no toca lo ya pagado; en esos meses `comisionTramos`
+  lleva un único tramo con toda la base, así que la explicación antigua sigue
+  siendo verdad ("3 % de 15.100,00 €").
 - El apartado **"🎯 Su objetivo"** sale en la ficha del activo, en cada mes de la
   del liquidado y en los dos textos que se le envían: el objetivo pactado (el primer
   tramo), lo **facturado en sus días** y lo que faltó para llegar. Si alcanza un tramo
@@ -340,7 +343,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 376 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 377 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.
 

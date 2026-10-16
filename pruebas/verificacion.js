@@ -2134,15 +2134,22 @@ TARJETA 450,00`)]);
   const tramosChk = await page.evaluate(async () => {
     // Tramos pactados: 10.000 → 2 % y 15.000 → 3 %
     const alta = (nombre, dias) => DB.perGuardar({ nombre, sueldoMensual: 900, diasMes: 26, horasJornada: 7.5, tramos: [{ objetivo: 10000, porcentaje: 2 }, { objetivo: 15000, porcentaje: 3 }], dias, tardes: [], faltas: [], descansos: [], notasDias: [], creado: new Date().toISOString() });
-    await alta('Tramos Justo', ['2026-09-01', '2026-09-02']);      // venderá 15.100
-    await alta('Tramos Primero', ['2026-09-03']);                  // venderá 10.000 justos
-    await alta('Tramos Corto', ['2026-09-04']);                    // venderá 9.999
+    await alta('Tramos Justo', ['2026-10-01', '2026-10-02']);      // venderá 15.100 (fórmula nueva)
+    await alta('Tramos Primero', ['2026-10-03']);                  // venderá 10.000 justos
+    await alta('Tramos Corto', ['2026-10-04']);                    // venderá 9.999
+    await alta('Tramos Antes', ['2026-09-01', '2026-09-02']);      // 15.100 en septiembre (fórmula antigua)
     const g = (fecha, total) => DB.guardar({ tipo: 'cierre', fecha, total, proveedor: '', creado: new Date().toISOString() });
+    await g('2026-10-01', 15000); await g('2026-10-02', 100);
+    await g('2026-10-03', 10000);
+    await g('2026-10-04', 9999);
     await g('2026-09-01', 15000); await g('2026-09-02', 100);
-    await g('2026-09-03', 10000);
-    await g('2026-09-04', 9999);
-    const calcDe = async (nombre) => (await APP.deudaDe(nombre, true)).meses.find(m => m.mes === '2026-09').calc;
-    return { justo: await calcDe('Tramos Justo'), primero: await calcDe('Tramos Primero'), corto: await calcDe('Tramos Corto') };
+    const calcDe = async (nombre, mes) => (await APP.deudaDe(nombre, true)).meses.find(m => m.mes === mes).calc;
+    return {
+      justo: await calcDe('Tramos Justo', '2026-10'),
+      primero: await calcDe('Tramos Primero', '2026-10'),
+      corto: await calcDe('Tramos Corto', '2026-10'),
+      antes: await calcDe('Tramos Antes', '2026-09')
+    };
   });
   chk('personal', 'Con 15.100 vendidos: 2 % de 15.000 + 3 % de la diferencia (100) = 303,00',
     cerca(tramosChk.justo.comision, 303), 'obtenido ' + tramosChk.justo.comision);
@@ -2152,6 +2159,8 @@ TARJETA 450,00`)]);
     cerca(tramosChk.primero.comision, 200) && tramosChk.primero.comisionTramos.length === 1, 'obtenido ' + tramosChk.primero.comision);
   chk('personal', 'Sin llegar al primer objetivo (9.999): sin comisión, solo el fijo',
     cerca(tramosChk.corto.comision, 0), 'obtenido ' + tramosChk.corto.comision);
+  chk('personal', 'Los meses ya pagados no se reescriben: septiembre mantiene la fórmula antigua (3 % de 15.100 = 453,00)',
+    cerca(tramosChk.antes.comision, 453) && tramosChk.antes.comisionTramos.length === 1 && cerca(tramosChk.antes.comisionTramos[0].base, 15100), 'obtenido ' + tramosChk.antes.comision);
 
   // ══════════════ 10. ERRORES DE JAVASCRIPT ══════════════
   console.log('\n═══ 10. ESTABILIDAD ═══');
