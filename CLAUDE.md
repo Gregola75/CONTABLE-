@@ -269,7 +269,12 @@ restaurar). `window.APP` expone `inicio`, `recientes` y `miniaturas` para la ver
 - **La deuda es general, no mensual**: se arrastra de un mes a otro. La vista
   principal muestra el total pendiente; el detalle por meses va plegado. **Pero si el
   total no es solo lo de este mes, el reparto sale a la vista** (`origenDelTotalHTML`):
-  una línea por cada mes que deja saldo, y una pista de cómo corregirlo. Caso real: alta
+  una línea por cada mes que deja saldo, **con la cuenta de ese mes a la vista**
+  (sueldo de entonces ÷ días pactados × días que vino, retrasos, comisión, bono, y lo
+  que le llegó de las entregas — lo pidió el dueño para poder "verificar el coste del
+  día" de un mes viejo sin cambiar de mes; necesita `desgloseDeuda` con detalle), y una
+  pista de cómo corregirlo (la fecha de alta, un día del calendario o el sueldo con su
+  «valen desde»). Caso real: alta
   el 31 de agosto con ese día marcado y 16 € entregados; viendo septiembre la cabecera
   decía "Le debes 918,62 €" con un fijo de 900,00 € y nada a la vista explicaba los
   18,62 €. El mensaje que se le envía reparte igual el pendiente de otros meses.
@@ -386,7 +391,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 392 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 394 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.
 

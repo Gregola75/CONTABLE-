@@ -1420,7 +1420,11 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
     septJ.includes('900,00 € ÷ 26 × 26') && /Le debes 918,62/.test(septJ), septJ.slice(0, 400));
   let vistaJ = await aLaVista();
   chk('personal', 'Sin desplegar nada se ve que 18,62 vienen de agosto y siguen sin cubrir',
-    /Agosto 2026: le correspondió 34,62 € y aún queda sin cubrir\s*\+18,62 €/.test(vistaJ), vistaJ.slice(0, 900));
+    /Agosto 2026: le correspondió 34,62 € y aún queda sin cubrir/.test(vistaJ) && /sin cubrir.*\+18,62 €/.test(vistaJ), vistaJ.slice(0, 900));
+  chk('personal', 'Y la cuenta de ese mes viejo está a la vista: el coste del día de entonces (900 ÷ 26 × 1 día) y lo que le llegó de las entregas',
+    /La cuenta: 900,00 € ÷ 26 × 1 día que vino = 34,62 €/.test(vistaJ) && /de las entregas le llegaron 16,00 €/.test(vistaJ), vistaJ.slice(0, 1200));
+  chk('personal', 'La pista dice cómo comprobarlo: elegir ese mes, revisar el calendario y el precio del día, y corregir el sueldo con «valen desde» si hace falta',
+    /revisa el calendario/.test(vistaJ) && /«valen desde»/.test(vistaJ), vistaJ.slice(0, 1400));
   chk('personal', 'Y la línea de este mes: le corresponde 900,00 y queda +900,00',
     /Septiembre 2026 \(este mes\): le corresponde 900,00 €\s*\+900,00 €/.test(vistaJ), vistaJ.slice(0, 900));
   chk('personal', 'El "÷ 26 × 26" se explica: 26 días pactados al mes × 26 que vino',

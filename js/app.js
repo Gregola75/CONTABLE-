@@ -2751,13 +2751,28 @@
     const esteMes = Math.round((deuda.total - viejos.reduce((s, m) => s + m.pendiente, 0)) * 100) / 100;
     // Sin meses viejos pendientes y sin desfases que expliquen: nada que añadir
     if (!viejos.length && !otrosMesesConSaldo(deuda, mes).length) return '';
+    // La cuenta de cada mes pendiente, a la vista: los días que vino, el sueldo
+    // de entonces y lo que le llegó de las entregas. Lo pidió el dueño ("hay que
+    // verificar el coste del día"): sin esto no podía comprobar de dónde salía
+    // el número de un mes viejo sin ponerse a cambiar de mes.
+    const cuentaDe = (m) => {
+      if (!m.calc) return '';
+      const cond = m.calc.cond || {};
+      const n = (m.calc.dias || []).length;
+      const partes = [`${INFORME.eur(cond.sueldoMensual || 0)} ÷ ${cond.diasMes || 26} × ${n} día${n === 1 ? '' : 's'} que vino = ${INFORME.eur(m.calc.fijoBruto)}`];
+      if (m.calc.descuentoTardes > 0) partes.push(`− ${INFORME.eur(m.calc.descuentoTardes)} por llegar tarde`);
+      if (m.calc.comision > 0) partes.push(`+ comisión ${INFORME.eur(m.calc.comision)}`);
+      if (m.calc.bono > 0) partes.push(`+ bono ${INFORME.eur(m.calc.bono)}`);
+      const llego = Math.round((m.devengado - m.pendiente) * 100) / 100;
+      return `<br><small class="txt-sec">La cuenta: ${partes.join(' ')} · de las entregas le llegaron ${INFORME.eur(llego)}</small>`;
+    };
     const filas = viejos.map(m => `
-            <div class="stat-linea"><span>· ${mesEnLetras(m.mes + '-01')}: le correspondió ${INFORME.eur(m.devengado)} y aún queda sin cubrir</span><strong class="txt-bad">+${INFORME.eur(m.pendiente)}</strong></div>`).join('');
+            <div class="stat-linea"><span>· ${mesEnLetras(m.mes + '-01')}: le correspondió ${INFORME.eur(m.devengado)} y aún queda sin cubrir${cuentaDe(m)}</span><strong class="txt-bad">+${INFORME.eur(m.pendiente)}</strong></div>`).join('');
     return `
             <p class="hint" style="margin:6px 0 2px">📌 De dónde viene el total (las entregas cubren primero lo más antiguo):</p>
             ${viejos.length ? filas : '<div class="stat-linea"><span>· Meses anteriores</span><strong class="txt-ok">✓ todo pagado</strong></div>'}
             <div class="stat-linea"><span>· ${mesEnLetras(mes + '-01')} (este mes): le corresponde ${INFORME.eur(c.devengado)}</span><strong class="${esteMes > 0 ? 'txt-bad' : 'txt-sec'}">${esteMes > 0 ? '+' : ''}${INFORME.eur(esteMes)}</strong></div>
-            ${viejos.length ? '<p class="hint" style="margin:4px 0 0">Si un mes no debería deber nada (por ejemplo, un día marcado antes de que empezara de verdad), corrige en su ficha la fecha «Comenzó a trabajar el» o ese día en el calendario de ese mes.</p>' : ''}`;
+            ${viejos.length ? '<p class="hint" style="margin:4px 0 0">Comprueba esa cuenta: elige ese mes arriba y revisa el calendario (un día marcado de más se paga de más) y el precio del día. Si el mes no debería deber nada, corrige en su ficha la fecha «Comenzó a trabajar el», ese día del calendario, o el sueldo con su «valen desde» (los meses ya pagados no se reescriben).</p>' : ''}`;
   }
 
   /* La regla del retraso explicada con palabras, para que la entienda el propio
@@ -3332,8 +3347,10 @@
       // 📖 La cuenta bien explicada, paso a paso (para enseñársela al empleado)
       const explicaHTML = explicacionPlegada(t, c, ventasDet);
 
-      // Deuda TOTAL con él (este mes + lo arrastrado de meses anteriores)
-      const deuda = await desgloseDeuda(t, pagosT, cierresDeMes);
+      // Deuda TOTAL con él (este mes + lo arrastrado de meses anteriores).
+      // Con detalle: el reparto de la cabecera enseña la cuenta de cada mes
+      // viejo pendiente (días × sueldo de entonces) y necesita m.calc.
+      const deuda = await desgloseDeuda(t, pagosT, cierresDeMes, true);
       const arrastre = Math.round((deuda.total - c.pendiente) * 100) / 100;
 
       // Dado de baja pero aún sin abonar: finiquito total pendiente
