@@ -274,7 +274,12 @@ restaurar). `window.APP` expone `inicio`, `recientes` y `miniaturas` para la ver
   que le llegó de las entregas — lo pidió el dueño para poder "verificar el coste del
   día" de un mes viejo sin cambiar de mes; necesita `desgloseDeuda` con detalle), y una
   pista de cómo corregirlo (la fecha de alta, un día del calendario o el sueldo con su
-  «valen desde»). Caso real: alta
+  «valen desde»). Y el botón **"✓ Lo de antes ya se lo pagué: apuntarlo"**
+  (`.per-saldar-viejo`): si el dinero se dio en mano y no se apuntó, un toque apunta una
+  entrega por lo que queda sin cubrir de cada mes **ya terminado** (nunca el mes en
+  curso ni el que se está viendo), con fecha de ese mes y la nota "Ya estaba pagado",
+  tras una pregunta que dice mes a mes lo que se va a apuntar (cancelar no apunta
+  nada). Se recalcula al pulsar. Caso real: alta
   el 31 de agosto con ese día marcado y 16 € entregados; viendo septiembre la cabecera
   decía "Le debes 918,62 €" con un fijo de 900,00 € y nada a la vista explicaba los
   18,62 €. El mensaje que se le envía reparte igual el pendiente de otros meses.
@@ -391,7 +396,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 394 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 399 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.
 

@@ -2745,9 +2745,13 @@
      salvo el mes en curso al que la ficha le enseñaba "deuda vieja" solo porque
      el sueldo de septiembre se pagó a primeros de octubre. Si lo viejo está
      cubierto, se dice con un ✓. */
-  function origenDelTotalHTML(c, deuda, mes) {
+  function origenDelTotalHTML(t, c, deuda, mes) {
     if (deuda.total < 0.01) return '';
     const viejos = (deuda.meses || []).filter(m => m.mes !== mes && (m.pendiente || 0) >= 0.01);
+    // Lo que se puede dar por pagado de un toque: solo meses YA TERMINADOS
+    // (anteriores al mes de hoy). Lo del mes en curso se debe de verdad.
+    const saldables = viejos.filter(m => m.mes < hoyISO().slice(0, 7));
+    const totalSaldable = Math.round(saldables.reduce((s, m) => s + m.pendiente, 0) * 100) / 100;
     const esteMes = Math.round((deuda.total - viejos.reduce((s, m) => s + m.pendiente, 0)) * 100) / 100;
     // Sin meses viejos pendientes y sin desfases que expliquen: nada que añadir
     if (!viejos.length && !otrosMesesConSaldo(deuda, mes).length) return '';
@@ -2772,6 +2776,7 @@
             <p class="hint" style="margin:6px 0 2px">📌 De dónde viene el total (las entregas cubren primero lo más antiguo):</p>
             ${viejos.length ? filas : '<div class="stat-linea"><span>· Meses anteriores</span><strong class="txt-ok">✓ todo pagado</strong></div>'}
             <div class="stat-linea"><span>· ${mesEnLetras(mes + '-01')} (este mes): le corresponde ${INFORME.eur(c.devengado)}</span><strong class="${esteMes > 0 ? 'txt-bad' : 'txt-sec'}">${esteMes > 0 ? '+' : ''}${INFORME.eur(esteMes)}</strong></div>
+            ${saldables.length ? `<button class="btn btn-small per-saldar-viejo" data-sid="${t.sid}" style="margin:6px 0 0">✓ Lo de antes ya se lo pagué: apuntarlo (${INFORME.eur(totalSaldable)})</button>` : ''}
             ${viejos.length ? '<p class="hint" style="margin:4px 0 0">Comprueba esa cuenta: elige ese mes arriba y revisa el calendario (un día marcado de más se paga de más) y el precio del día. Si el mes no debería deber nada, corrige en su ficha la fecha «Comenzó a trabajar el», ese día del calendario, o el sueldo con su «valen desde» (los meses ya pagados no se reescriben).</p>' : ''}`;
   }
 
@@ -3431,7 +3436,7 @@
             ${objetivoHTML(t, c, ventasT)}
             ${bonoHTML(t, c, true)}
             <div class="stat-linea per-pendiente ${deuda.total > 0 ? '' : 'ok'}"><span>${deuda.total >= 0 ? 'LE DEBES EN TOTAL' : 'TE DEBE (adelantado de más)'}</span><strong>${INFORME.eur(Math.abs(deuda.total))}</strong></div>
-            ${origenDelTotalHTML(c, deuda, mes)}
+            ${origenDelTotalHTML(t, c, deuda, mes)}
             <div class="stat-linea"><span>Entregado en total (todos los adelantos y pagas)</span><strong>${INFORME.eur(entregadoTotal)}</strong></div>
             <details class="ocr-details" style="margin:6px 0 0">
               <summary>Ver el detalle (este mes y mes a mes)</summary>
@@ -3725,6 +3730,47 @@
           creado: new Date().toISOString()
         });
         toast('💾 Entrega apuntada.');
+        pintarPersonal();
+      }));
+    });
+
+    // "Lo de antes ya se lo pagué": un toque apunta una entrega por lo que queda
+    // sin cubrir de cada mes YA TERMINADO, con su nota y con fecha de ese mes,
+    // para que el total pase a deber solo lo del mes en curso. Lo pidió el dueño
+    // (caso Jeferson): el dinero ya se dio en mano, solo faltaba apuntarlo.
+    // Cancelar la pregunta no apunta nada. Se recalcula al pulsar, por si algo
+    // cambió desde que se pintó la ficha.
+    enCajas('.per-saldar-viejo', btn => {
+      btn.addEventListener('click', guardarConAviso(async () => {
+        const sid = btn.dataset.sid;
+        const t = (await DB.perTodos()).find(x => x.sid === sid);
+        if (!t) return;
+        const pagosT = (await DB.pagoTodos()).filter(p => p.trabajadorSid === sid);
+        const cache = new Map();
+        const cierresDeMes = async (m) => {
+          if (!cache.has(m)) cache.set(m, await DB.buscar({ tipo: 'cierre', desde: m + '-01', hasta: m + '-31' }));
+          return cache.get(m);
+        };
+        const deuda = await desgloseDeuda(t, pagosT, cierresDeMes);
+        const mesHoy = hoyISO().slice(0, 7);
+        const saldables = deuda.meses.filter(m => m.mes < mesHoy && m.mes !== mesPersonal() && (m.pendiente || 0) >= 0.01);
+        if (!saldables.length) { toast('No queda nada de meses anteriores sin cubrir.'); pintarPersonal(); return; }
+        const totalViejo = Math.round(saldables.reduce((s, m) => s + m.pendiente, 0) * 100) / 100;
+        const lineas = saldables.map(m => `· ${mesEnLetras(m.mes + '-01')}: ${INFORME.eur(m.pendiente)}`).join('\n');
+        if (!confirm(`${t.nombre}: vas a dejar apuntado que esto ya se le pagó:\n\n${lineas}\n\nSe apunta como entrega en su mes (${INFORME.eur(totalViejo)} en total) y esos meses quedarán cubiertos. ¿Lo apunto?`)) return;
+        for (const m of saldables) {
+          const [a, mm] = m.mes.split('-').map(Number);
+          let fecha = `${m.mes}-${String(new Date(a, mm, 0).getDate()).padStart(2, '0')}`;
+          if (t.inicio && fecha < t.inicio) fecha = t.inicio;
+          await DB.pagoGuardar({
+            trabajadorSid: sid,
+            fecha,
+            importe: m.pendiente,
+            notas: `Ya estaba pagado (apuntado el ${fmtFecha(hoyISO())})`,
+            creado: new Date().toISOString()
+          });
+        }
+        toast(`💾 Apuntado: ${INFORME.eur(totalViejo)} de meses anteriores.`);
         pintarPersonal();
       }));
     });

@@ -1455,6 +1455,35 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
       return true;
     }) && !/Agosto 2026: le correspondió/.test(await (async () => { await verMes('2026-09'); return aLaVista(); })()));
 
+  // --- "Lo de antes ya se lo pagué": un toque apunta lo viejo pendiente ---
+  // El dueño ya pagó en mano pero no lo apuntó: el botón deja la entrega
+  // apuntada en su mes y el total pasa a deber solo lo del mes en curso.
+  await page.click('#per-lista .per-editar');
+  await page.waitForTimeout(400);
+  await page.fill('#pe-inicio', '2026-08-31');
+  await page.click('#per-guardar');
+  await page.waitForTimeout(900);
+  septJ = await verMes('2026-09');
+  chk('personal', 'Con el alta otra vez el 31 de agosto y sin pagos: debe 934,62 y sale el botón de apuntar lo viejo',
+    /Le debes 934,62/.test(septJ) && /Lo de antes ya se lo pagué: apuntarlo \(34,62 €\)/.test(septJ), septJ.slice(0, 500));
+  aceptarDialogos = false;
+  await page.click('#per-lista .per-saldar-viejo');
+  await page.waitForTimeout(700);
+  septJ = await verMes('2026-09');
+  chk('personal', 'Cancelar la pregunta no apunta nada: sigue debiendo 934,62',
+    /Le debes 934,62/.test(septJ), septJ.slice(0, 400));
+  aceptarDialogos = true;
+  await page.click('#per-lista .per-saldar-viejo');
+  await page.waitForTimeout(900);
+  chk('personal', 'La pregunta dice qué se va a apuntar (Agosto 2026: 34,62 €) antes de tocar nada',
+    /Agosto 2026: 34,62 €/.test(ultimoDialogo) && /ya se le pagó/.test(ultimoDialogo), ultimoDialogo);
+  septJ = await verMes('2026-09');
+  chk('personal', 'Tras el toque queda solo lo de este mes: Le debes 900,00 y agosto ya no sale pendiente',
+    /Le debes 900,00/.test(septJ) && !/934,62/.test(septJ) && !/aún queda sin cubrir/.test(septJ), septJ.slice(0, 500));
+  const agoSaldado = await verMes('2026-08');
+  chk('personal', 'La entrega quedó apuntada en agosto, con su nota "Ya estaba pagado" (34,62)',
+    /Ya estaba pagado/.test(agoSaldado) && /34,62/.test(agoSaldado), agoSaldado.slice(0, 700));
+
   // ══════════════ 6n. BONOS: UN EXTRA QUE SE LE DA SI SE QUIERE ══════════════
   console.log('\n═══ 6n. BONOS ═══');
   await page.evaluate(async () => {
