@@ -1976,6 +1976,35 @@
      anteriores se pagaron con la fórmula antigua y no se reescriben. */
   const MES_COMISION_POR_TRAMOS = '2026-10';
 
+  /* Desde qué mes el sueldo se cuenta POR MES: el día vale sueldo ÷ los días que
+     tiene ese mes natural, y se pagan los días trabajados y los de descanso. */
+  const MES_SUELDO_POR_MES = '2026-10';
+  function diasDelMesNatural(mes) {
+    const [a, m] = mes.split('-').map(Number);
+    return new Date(a, m, 0).getDate();
+  }
+  const NOMBRES_MES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+  const nombreMes = (mes) => NOMBRES_MES[+mes.slice(5, 7) - 1];
+
+  /* El fijo escrito como se calcula, para que cuadre con calculadora:
+     "900,00 € ÷ 31 × 31". Con el sueldo por mes, el divisor son los días que
+     tiene el mes y el multiplicador los días que se le pagan (trabajados +
+     descanso); en los meses antiguos, los días pactados y los trabajados. */
+  function fijoCuenta(c) {
+    return `${INFORME.eur((c.cond && c.cond.sueldoMensual) || 0)} ÷ ${c.divisor || (c.cond && c.cond.diasMes) || 26} × ${c.diasPagados != null ? c.diasPagados : c.dias.length}`;
+  }
+  /* Qué es cada número de esa cuenta, con palabras. */
+  function fijoQueEs(c, mes = c.mes) {
+    const n = c.dias.length;
+    if (c.porMes) {
+      const p = c.diasPagados;
+      const desc = p - n;
+      return `Sueldo ÷ los ${c.divisor} días que tiene ${nombreMes(mes)} × los ${p} día${p === 1 ? '' : 's'} que se le pagan (${n} trabajado${n === 1 ? '' : 's'}${desc ? ` + ${desc} de descanso` : ''})${p === c.divisor ? ': está el mes entero, cobra el sueldo completo' : ''}.`;
+    }
+    const diasMes = (c.cond && c.cond.diasMes) || 26;
+    return `Sueldo ÷ los ${diasMes} días de trabajo pactados al mes × los ${n} día${n === 1 ? '' : 's'} que vino${n === diasMes ? ' (este mes vino todos los pactados: cobra el sueldo entero)' : ''}.`;
+  }
+
   /* Cálculo del mes de un trabajador: fijo por días + comisión por tramo */
   function calcularMes(t, ventas, pagosMes, mes) {
     t = trabajadorEn(t, mes);   // con el sueldo y los objetivos que tenía ESE mes
@@ -1994,11 +2023,30 @@
     const descanso = descansos.length;
     const fueraDePeriodo = [...new Set([...(t.dias || []), ...fechasTardes(t), ...(t.faltas || []), ...(t.descansos || [])])]
       .filter(d => delMes(d) && !dentroDelPeriodo(d)).length;
-    const fijoDia = (t.sueldoMensual || 0) / (t.diasMes || 26);
+    // Sueldo POR MES (acordado con el dueño, desde MES_SUELDO_POR_MES): el día
+    // vale sueldo ÷ los días que tiene ESE mes (31 → vale menos, 30 → más,
+    // febrero → más todavía) y se pagan los días que trabajó y los de descanso,
+    // así un mes completo es el sueldo justo. Los meses anteriores se pagaron con
+    // la cuenta antigua (sueldo ÷ días pactados × días trabajados) y no se reescriben.
+    const porMes = mes >= MES_SUELDO_POR_MES;
+    const divisor = porMes ? diasDelMesNatural(mes) : (t.diasMes || 26);
+    const diasPagados = porMes ? new Set([...dias, ...descansos]).size : dias.length;
+    // Días ya pasados sin marcar: con el sueldo por mes no se pagan, así que se
+    // avisan en la ficha para que no se queden sin pagar por un olvido.
+    const sinMarcar = [];
+    if (porMes) {
+      const marcados = new Set([...dias, ...descansos, ...faltas]);
+      const hoy = hoyISO();
+      for (let d = 1; d <= divisor; d++) {
+        const f = `${mes}-${String(d).padStart(2, '0')}`;
+        if (f < hoy && dentroDelPeriodo(f) && !marcados.has(f)) sinMarcar.push(f);
+      }
+    }
+    const fijoDia = (t.sueldoMensual || 0) / divisor;
     const jornada = t.horasJornada || 7.5;
     const horasTarde = Math.round(tardes.reduce((s, x) => s + (x.horas || 0), 0) * 10) / 10;
     const precioDia = Math.round(fijoDia * 100) / 100;
-    const fijoBruto = Math.round(fijoDia * dias.length * 100) / 100;
+    const fijoBruto = Math.round(fijoDia * diasPagados * 100) / 100;
     // Al redondear día a día, si TODOS los días llevaran un retraso de la jornada
     // entera la suma podría pasarse unos céntimos del bruto y dejar el fijo en
     // negativo. Se topa: por llegar tarde como mucho se pierde el fijo, nunca más.
@@ -2053,6 +2101,7 @@
     const devengado = Math.round((fijo + comision + bono) * 100) / 100;
     return {
       cond: { sueldoMensual: t.sueldoMensual || 0, diasMes: t.diasMes || 26, horasJornada: t.horasJornada || 7.5, tramos: t.tramos || [] },
+      mes, porMes, divisor, diasPagados, precioDia, sinMarcar,
       dias, tardes, faltas, descansos, descanso, fueraDePeriodo, horasTarde, descuentoTardes, descuentoTopado, fijoBruto,
       fijo, comision, comisionTramos, tramoActual, siguiente, bonos, bono,
       devengado, entregado,
@@ -2675,7 +2724,7 @@
     if (retrasos.length) {
       lineas.push('');
       lineas.push('POR QUÉ SE LE DESCONTÓ DINERO ALGUNOS DÍAS');
-      reglaRetrasoLineas(t, false).forEach(l => lineas.push(l));
+      reglaRetrasoLineas(t, false, c).forEach(l => lineas.push(l));
       retrasos.forEach(r => {
         lineas.push('');
         lineas.push(`${fmtFecha(r.fecha)} — llegó ${numH(r.horas)} h tarde`);
@@ -2687,9 +2736,15 @@
       lineas.push(`Total descontado por llegar tarde: −${INFORME.eur(c.descuentoTardes)}`);
     }
     lineas.push('');
+    // Con el sueldo por mes se dice qué es cada número (los días que tiene el mes y
+    // los que se le pagan); los meses antiguos siguen escritos como se pagaron.
+    const fijoTxt = c.porMes
+      ? `Fijo: ${fijoCuenta(c)} días = ${INFORME.eur(c.fijoBruto)}`
+      : `Fijo: ${INFORME.eur(t.sueldoMensual || 0)} ÷ ${t.diasMes || 26} × ${c.dias.length} días = ${INFORME.eur(c.fijoBruto)}`;
     lineas.push(c.descuentoTardes > 0
-      ? `Fijo: ${INFORME.eur(t.sueldoMensual || 0)} ÷ ${t.diasMes || 26} × ${c.dias.length} días = ${INFORME.eur(c.fijoBruto)} − ${INFORME.eur(c.descuentoTardes)} = ${INFORME.eur(c.fijo)}`
-      : `Fijo: ${INFORME.eur(t.sueldoMensual || 0)} ÷ ${t.diasMes || 26} × ${c.dias.length} días = ${INFORME.eur(c.fijo)}`);
+      ? `${fijoTxt} − ${INFORME.eur(c.descuentoTardes)} = ${INFORME.eur(c.fijo)}`
+      : fijoTxt);
+    if (c.porMes) lineas.push(`   (${fijoQueEs(c).replace(/\.$/, '')})`);
     const objetivo = objetivoLineas(t, c, (ventasDet && ventasDet.total) || 0);
     if (objetivo.length) {
       lineas.push('');
@@ -2761,9 +2816,11 @@
     // el número de un mes viejo sin ponerse a cambiar de mes.
     const cuentaDe = (m) => {
       if (!m.calc) return '';
-      const cond = m.calc.cond || {};
       const n = (m.calc.dias || []).length;
-      const partes = [`${INFORME.eur(cond.sueldoMensual || 0)} ÷ ${cond.diasMes || 26} × ${n} día${n === 1 ? '' : 's'} que vino = ${INFORME.eur(m.calc.fijoBruto)}`];
+      const p = m.calc.diasPagados != null ? m.calc.diasPagados : n;
+      const partes = [m.calc.porMes
+        ? `${fijoCuenta(m.calc)} (${m.calc.divisor} días que tiene ${nombreMes(m.mes)}; ${p} pagados: ${n} trabajado${n === 1 ? '' : 's'}${p - n ? ` + ${p - n} de descanso` : ''}) = ${INFORME.eur(m.calc.fijoBruto)}`
+        : `${fijoCuenta(m.calc)} día${n === 1 ? '' : 's'} que vino = ${INFORME.eur(m.calc.fijoBruto)}`];
       if (m.calc.descuentoTardes > 0) partes.push(`− ${INFORME.eur(m.calc.descuentoTardes)} por llegar tarde`);
       if (m.calc.comision > 0) partes.push(`+ comisión ${INFORME.eur(m.calc.comision)}`);
       if (m.calc.bono > 0) partes.push(`+ bono ${INFORME.eur(m.calc.bono)}`);
@@ -2783,8 +2840,19 @@
   /* La regla del retraso explicada con palabras, para que la entienda el propio
      trabajador. Hasta ahora solo estaba escrita en el formulario donde se le da de
      alta, o sea donde él no la ve nunca. */
-  function reglaRetrasoLineas(t, conJornada = true) {
-    const precio = `Se cobra por día trabajado${conJornada ? `. La jornada es de ${numH(t.horasJornada || 7.5)} h y` : ' y'} el día sale a ${INFORME.eur(precioDeUnDia(t))} (${INFORME.eur(t.sueldoMensual || 0)} ÷ ${t.diasMes || 26} días).`;
+  /* c: el mes del que se habla. Sin c (el resumen de toda la etapa) y con el
+     sueldo por mes en algún mes, el precio cambia de un mes a otro: se explica
+     la regla sin un importe fijo (cada día lleva escrito el suyo). */
+  function reglaRetrasoLineas(t, conJornada = true, c = null, variosMeses = false) {
+    const jornadaTxt = conJornada ? `. La jornada es de ${numH(t.horasJornada || 7.5)} h y` : ' y';
+    let precio;
+    if (c && c.porMes) {
+      precio = `Se cobra el sueldo del mes${jornadaTxt} el día sale a ${INFORME.eur(c.precioDia)} (${INFORME.eur(c.cond.sueldoMensual || 0)} ÷ los ${c.divisor} días que tiene ${nombreMes(c.mes)}).`;
+    } else if (!c && variosMeses) {
+      precio = `Se cobra el sueldo del mes${jornadaTxt} el día sale a sueldo ÷ los días que tiene ese mes (en cada día va escrito lo que valía).`;
+    } else {
+      precio = `Se cobra por día trabajado${jornadaTxt} el día sale a ${INFORME.eur(precioDeUnDia(t))} (${INFORME.eur(t.sueldoMensual || 0)} ÷ ${t.diasMes || 26} días).`;
+    }
     return [
       precio,
       'El día que se llega tarde se paga solo la parte del día que se estuvo, no el día entero.'
@@ -2817,7 +2885,7 @@
      objetivo (viene de ventasParaTrabajador). */
   function detalleRetrasos(t, c, ventasDet) {
     t = condDe(t, c);
-    const precioDia = precioDeUnDia(t);
+    const precioDia = c.precioDia != null ? c.precioDia : precioDeUnDia(t);
     const jornada = t.horasJornada || 7.5;
     const porFecha = new Map(((ventasDet && ventasDet.detalleTardes) || []).map(l => [l.fecha, l]));
     return c.tardes.slice().sort((a, b) => (a.fecha || '').localeCompare(b.fecha || '')).map(x => {
@@ -2904,7 +2972,7 @@
       : `Días que llegó tarde`;
 
     const regla = huboDescuento
-      ? `<p class="hint" style="margin:0 0 8px">${reglaRetrasoLineas(t).join(' ')}</p>`
+      ? `<p class="hint" style="margin:0 0 8px">${reglaRetrasoLineas(t, true, c).join(' ')}</p>`
       : '';
 
     if (plegado) {
@@ -2950,22 +3018,29 @@
      lo multiplica a mano: 900 ÷ 26 son 34,615…, no 34,62 justos. */
   function fijoLineasHTML(t, c) {
     t = condDe(t, c);
-    const sueldo = t.sueldoMensual || 0;
-    const diasMes = t.diasMes || 26;
     const n = c.dias.length;
-    const cuenta = `<small class="txt-sec">(${INFORME.eur(sueldo)} ÷ ${diasMes} × ${n})</small>`;
-    // Los dos números pueden coincidir (26 días pactados y 26 que vino) y entonces
-    // "÷ 26 × 26" no se entiende: se dice qué es cada uno.
-    const queEs = `<br><small class="txt-sec">Sueldo ÷ los ${diasMes} días de trabajo pactados al mes × los ${n} día${n === 1 ? '' : 's'} que vino${n === diasMes ? ' (este mes vino todos los pactados: cobra el sueldo entero)' : ''}.</small>`;
+    const p = c.diasPagados != null ? c.diasPagados : n;
+    const cuenta = `<small class="txt-sec">(${fijoCuenta(c)})</small>`;
+    // Los dos números pueden coincidir (26 días pactados y 26 que vino, o 31 y 31)
+    // y entonces "÷ 26 × 26" no se entiende: se dice qué es cada uno.
+    const queEs = `<br><small class="txt-sec">${fijoQueEs(c)}</small>`;
+    // Con el sueldo por mes, un día ya pasado sin marcar NO se paga: se avisa con
+    // sus fechas para que no se quede sin pagar por un olvido.
+    const nS = (c.sinMarcar || []).length;
+    const avisoSinMarcar = nS ? `
+            <p class="hint txt-bad" style="margin:6px 0 0">⚠️ ${nS === 1 ? 'Hay 1 día ya pasado sin marcar' : `Hay ${nS} días ya pasados sin marcar`} (${c.sinMarcar.map(f => +f.slice(8)).join(', ')}). No se le paga${nS === 1 ? '' : 'n'} hasta que lo${nS === 1 ? '' : 's'} marques en el calendario como trabajado o descanso (o faltó, si no vino).</p>` : '';
+    const queDias = c.porMes
+      ? `${p} día${p === 1 ? '' : 's'} pagado${p === 1 ? '' : 's'}`
+      : `${n} día${n === 1 ? '' : 's'} trabajado${n === 1 ? '' : 's'}`;
     if (!(c.descuentoTardes > 0)) {
       return `
-            <div class="stat-linea"><span>Fijo: ${n} día${n === 1 ? '' : 's'} trabajado${n === 1 ? '' : 's'} ${cuenta}${queEs}</span><strong>${INFORME.eur(c.fijo)}</strong></div>`;
+            <div class="stat-linea"><span>Fijo: ${queDias} ${cuenta}${queEs}</span><strong>${INFORME.eur(c.fijo)}</strong></div>${avisoSinMarcar}`;
     }
     const nT = c.tardes.length;
     return `
-            <div class="stat-linea"><span>Fijo por los ${n} días que trabajó ${cuenta}<br><small class="txt-sec">${nT === 1 ? 'El día que llegó tarde también cuenta' : 'Los días que llegó tarde también cuentan'} como día trabajado; las horas que faltó se le quitan en la línea de abajo.</small></span><strong>${INFORME.eur(c.fijoBruto)}</strong></div>
+            <div class="stat-linea"><span>Fijo por ${c.porMes ? `los ${queDias}` : `los ${n} días que trabajó`} ${cuenta}${queEs}<br><small class="txt-sec">${nT === 1 ? 'El día que llegó tarde también cuenta' : 'Los días que llegó tarde también cuentan'} como día trabajado; las horas que faltó se le quitan en la línea de abajo.</small></span><strong>${INFORME.eur(c.fijoBruto)}</strong></div>
             <div class="stat-linea"><span>Descontado por llegar tarde <small class="txt-sec">(${nT} día${nT === 1 ? '' : 's'}, ${numH(c.horasTarde)} h)</small></span><strong class="txt-bad">−${INFORME.eur(c.descuentoTardes)}</strong></div>
-            <div class="stat-linea"><span><strong>FIJO DEL MES</strong> <small class="txt-sec">(sale a ${INFORME.eur(precioDeUnDia(t))} el día)</small></span><strong>${INFORME.eur(c.fijo)}</strong></div>`;
+            <div class="stat-linea"><span><strong>FIJO DEL MES</strong> <small class="txt-sec">(sale a ${INFORME.eur(c.precioDia != null ? c.precioDia : precioDeUnDia(t))} el día)</small></span><strong>${INFORME.eur(c.fijo)}</strong></div>${avisoSinMarcar}`;
   }
 
   /* La comisión escrita como se calcula, tramo a tramo:
@@ -3032,13 +3107,18 @@
      y en la de uno ya liquidado, para que digan exactamente lo mismo. */
   function explicacionLineas(t, c, ventasDet, pasado = false) {
     t = condDe(t, c);
-    const fijoDia = (t.sueldoMensual || 0) / (t.diasMes || 26);
     const jornada = t.horasJornada || 7.5;
     const ventasT = ventasDet.total;
     const ex = [];
-    ex.push(`Precio del día: ${INFORME.eur(t.sueldoMensual || 0)} ÷ ${t.diasMes || 26} días = <strong>${INFORME.eur(fijoDia)}</strong>`);
-    ex.push(`La cuenta del mes se hace con la cifra exacta: ${INFORME.eur(t.sueldoMensual || 0)} ÷ ${t.diasMes || 26} × ${c.dias.length} día${c.dias.length === 1 ? '' : 's'} = <strong>${INFORME.eur(c.fijoBruto)}</strong>`);
-    ex.push(`<small>Si multiplicas ${INFORME.eur(precioDeUnDia(t))} × ${c.dias.length} te pueden salir unos céntimos de diferencia, porque ${INFORME.eur(precioDeUnDia(t))} es el precio del día ya redondeado.</small>`);
+    const divisor = c.divisor || t.diasMes || 26;
+    const precio = c.precioDia != null ? c.precioDia : precioDeUnDia(t);
+    const p = c.diasPagados != null ? c.diasPagados : c.dias.length;
+    ex.push(c.porMes
+      ? `Precio del día: ${INFORME.eur(t.sueldoMensual || 0)} ÷ ${divisor} días que tiene ${nombreMes(c.mes)} = <strong>${INFORME.eur(precio)}</strong> <small>(el sueldo es por mes: en un mes de 31 días el día vale menos que en uno de 30)</small>`
+      : `Precio del día: ${INFORME.eur(t.sueldoMensual || 0)} ÷ ${divisor} días = <strong>${INFORME.eur(precio)}</strong>`);
+    ex.push(`La cuenta del mes se hace con la cifra exacta: ${fijoCuenta(c)} día${p === 1 ? '' : 's'} = <strong>${INFORME.eur(c.fijoBruto)}</strong>`);
+    if (c.porMes) ex.push(`<small>${fijoQueEs(c)}</small>`);
+    ex.push(`<small>Si multiplicas ${INFORME.eur(precio)} × ${p} te pueden salir unos céntimos de diferencia, porque ${INFORME.eur(precio)} es el precio del día ya redondeado.</small>`);
     detalleRetrasos(t, c, ventasDet).filter(r => r.horas > 0).forEach(r => {
       ex.push(`⏰ ${fmtFecha(r.fecha)}: llegó ${numH(r.horas)} h tarde → ese día cobró ${INFORME.eur(r.cobra)} en vez de ${INFORME.eur(r.precioDia)}, se le descuentan <strong>${INFORME.eur(r.descuento)}</strong> del fijo`);
     });
@@ -3092,7 +3172,13 @@
       const detalle = c ? `${sumaDelMes(c).replace(/ = [^=]*$/, '')} = ` : '';
       lineas.push(`${mesEnLetras(m.mes + '-01')}: ${dias}${detalle}${INFORME.eur(m.devengado)}`);
       if (c && c.descuentoTardes > 0) {
-        lineas.push(`   (fijo: ${INFORME.eur(c.cond.sueldoMensual)} ÷ ${c.cond.diasMes} × ${c.dias.length} = ${INFORME.eur(c.fijoBruto)} − ${INFORME.eur(c.descuentoTardes)} = ${INFORME.eur(c.fijo)}, por los retrasos de abajo)`);
+        lineas.push(`   (fijo: ${fijoCuenta(c)} = ${INFORME.eur(c.fijoBruto)} − ${INFORME.eur(c.descuentoTardes)} = ${INFORME.eur(c.fijo)}, por los retrasos de abajo)`);
+      }
+      if (c && c.porMes) {
+        const queEs = fijoQueEs(c, m.mes).replace(/\.$/, '');
+        lineas.push(c.descuentoTardes > 0
+          ? `   (${queEs})`
+          : `   (fijo: ${fijoCuenta(c)} = ${INFORME.eur(c.fijoBruto)}; ${queEs})`);
       }
       if (c) bonoLineas(c).forEach(l => lineas.push(`   ${l}`));
       if (c) {
@@ -3118,7 +3204,7 @@
     if (tarde.dias) {
       lineas.push('');
       lineas.push('POR QUÉ SE LE DESCONTÓ DINERO ALGUNOS DÍAS');
-      reglaRetrasoLineas(t, false).forEach(l => lineas.push(l));
+      reglaRetrasoLineas(t, false, null, deuda.meses.some(m => m.calc && m.calc.porMes)).forEach(l => lineas.push(l));
       tarde.filas.forEach(r => {
         lineas.push('');
         lineas.push(`${fmtFecha(r.fecha)} — llegó ${numH(r.horas)} h tarde`);
@@ -3272,7 +3358,7 @@
             <div class="stat-linea"><span>⏰ Llegó tarde ${tarde.dias} día${tarde.dias === 1 ? '' : 's'} en toda su etapa <small class="txt-sec">(${numH(tarde.horas)} h)</small></span><strong class="txt-bad">se le descontaron ${INFORME.eur(tarde.descuento)}</strong></div>
             <details class="ocr-details" style="margin:6px 0 0">
               <summary>⏰ Por qué se le descontó dinero algunos días</summary>
-              <p class="hint" style="margin:0 0 8px">${reglaRetrasoLineas(t).join(' ')}</p>
+              <p class="hint" style="margin:0 0 8px">${reglaRetrasoLineas(t, true, null, deuda.meses.some(m => m.calc && m.calc.porMes)).join(' ')}</p>
               ${tarde.filas.map(r => `
               <div class="per-pago">
                 <span style="min-width:0">⏰ ${fmtFecha(r.fecha)} — llegó ${numH(r.horas)} h tarde<br>

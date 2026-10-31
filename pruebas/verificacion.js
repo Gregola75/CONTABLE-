@@ -1751,27 +1751,34 @@ TARJETA 450,00`)]);
     await DB.guardar({ tipo: 'factura', fecha: `${mes}-01`, proveedor: 'Bebidas Pepe', total: 700, categoria: 'Mercancía', creado: new Date().toISOString() });
     await DB.guardar({ tipo: 'factura', fecha: `${mes}-02`, proveedor: 'Endesa', total: 200, categoria: 'Luz', creado: new Date().toISOString() });
     await DB.guardar({ tipo: 'factura', fecha: `${mes}-02`, proveedor: 'Alquiler casa', total: 100, categoria: 'Alquiler', personal: true, creado: new Date().toISOString() });
-    // Empleado: 2 días a 900/26 = 69,23 devengado
+    // Empleado: 2 días a 900 ÷ los días que tiene este mes (sueldo por mes)
     await DB.perGuardar({ nombre: 'Juan', sueldoMensual: 900, diasMes: 26, horasJornada: 7.5, tramos: [], dias: [`${mes}-01`, `${mes}-02`], tardes: [], faltas: [], notasDias: [], creado: new Date().toISOString() });
   });
+  // Lo que devenga Juan depende de los días del mes en que se ejecute la prueba
+  const diasEsteMes = (() => { const h = new Date(); return new Date(h.getFullYear(), h.getMonth() + 1, 0).getDate(); })();
+  const persJ = Math.round(900 / diasEsteMes * 2 * 100) / 100;
+  const coma = (n) => n.toFixed(2).replace('.', ',');
+  const PJ = coma(persJ);                          // 58,06 en un mes de 31 días
+  const CJ = coma(900 + persJ);                    // todos los costes
+  const QJ = coma(2100 - persJ).replace(/^(\d)(\d{3})/, '$1\\.?$2');   // lo que queda (regex)
   await page.click('.tab[data-tab="informe"]');
   await page.waitForTimeout(900);
   let res = (await page.textContent('#res-contenido')).replace(/\s+/g, ' ');
   let al = (await page.textContent('#res-alertas')).replace(/\s+/g, ' ');
   chk('cuadro', 'Ingresos del mes 3.000,00', /3\.?000,00/.test(res), res.slice(0, 120));
   chk('cuadro', 'Gastos del negocio 900,00 (el de casa no se resta)', res.includes('−900,00'));
-  chk('cuadro', 'Personal devengado 69,23', res.includes('69,23'));
-  chk('cuadro', 'TE QUEDA 2.030,77 (3000 − 900 − 69,23)', /2\.?030,77/.test(res) && res.includes('TE QUEDA'));
+  chk('cuadro', `Personal devengado ${PJ} (900 ÷ ${diasEsteMes} × 2)`, res.includes(PJ));
+  chk('cuadro', `TE QUEDA 3000 − 900 − ${PJ}`, new RegExp(QJ).test(res) && res.includes('TE QUEDA'));
   chk('cuadro', 'Margen 68 %', res.includes('margen 68 %'));
   chk('cuadro', 'Gasto de casa aparte (100,00)', res.includes('Gastos de casa') && res.includes('100,00'));
   chk('cuadro', 'Mercancía con su % sobre ventas (23%)', res.includes('Mercancía') && res.includes('23%'));
-  chk('cuadro', 'Todos los costes juntos: 969,23 = 32 % de las ventas',
-    /Todos los costes \(gastos \+ personal\) \(32 % de las ventas\)\s*−969,23 €/.test(res), res.slice(0, 700));
+  chk('cuadro', `Todos los costes juntos: ${CJ} = 32 % de las ventas`,
+    new RegExp(`Todos los costes \\(gastos \\+ personal\\) \\(32 % de las ventas\\)\\s*−${CJ} €`).test(res), res.slice(0, 700));
   chk('cuadro', 'Por proveedor: Bebidas Pepe 700,00 = 23 % y Endesa 200,00 = 7 % de la facturación',
     /Bebidas Pepe\s*Mercancía\s*700,00 € 23%/.test(res) && /Endesa\s*Luz\s*200,00 € 7%/.test(res), res.slice(-900));
   chk('cuadro', 'El alquiler de casa NO entra entre los proveedores del negocio', !/Alquiler casa/.test(res));
-  chk('cuadro', 'Personal también en la lista (69,23 = 2 %) y el total "todo junto" 32 %',
-    /Personal\s*sueldos \+ comisiones\s*69,23 € 2%/.test(res) && /Todo junto \(proveedores \+ personal\)\s*969,23 € 32 % de la facturación/.test(res), res.slice(-900));
+  chk('cuadro', `Personal también en la lista (${PJ} = 2 %) y el total "todo junto" 32 %`,
+    new RegExp(`Personal\\s*sueldos \\+ comisiones\\s*${PJ} € 2%`).test(res) && new RegExp(`Todo junto \\(proveedores \\+ personal\\)\\s*${CJ} € 32 % de la facturación`).test(res), res.slice(-900));
   chk('cuadro', 'Alerta de trimestre cerrado sin guardar', al.includes('trimestre'));
   chk('cuadro', 'Alerta de facturas sin desglose de IVA (2)', al.includes('2 facturas sin desglose de IVA'));
   await page.click('#res-alertas .tri-hecho');
@@ -1797,7 +1804,7 @@ TARJETA 450,00`)]);
     arranque.seguridad && arranque.db && arranque.app);
 
   // ══════════════ 9f. INICIO: EL PANEL VISUAL DEL NEGOCIO ══════════════
-  // Con los datos del cuadro de mando (3.000 de ventas, 900 de gastos, Juan 69,23)
+  // Con los datos del cuadro de mando (3.000 de ventas, 900 de gastos, Juan 2 días)
   console.log('\n═══ 9f. INICIO (panel visual) ═══');
   await page.click('.tab[data-tab="inicio"]');
   await page.waitForTimeout(1000);
@@ -1805,8 +1812,8 @@ TARJETA 450,00`)]);
   chk('inicio', 'Es la primera pestaña y sale al abrir', await page.evaluate(() => document.querySelector('.tab').dataset.tab === 'inicio'));
   chk('inicio', 'Ventas del mes 3.000,00 y gastos 900,00 (30 % de las ventas)',
     /Ventas\s*3\.?000,00 €/.test(ini) && /Gastos\s*900,00 €\s*30 % de las ventas/.test(ini), ini.slice(0, 400));
-  chk('inicio', 'Personal 69,23 (2 % de las ventas)', /Personal\s*69,23 €\s*2 % de las ventas/.test(ini), ini.slice(0, 400));
-  chk('inicio', 'Te queda 2.030,77 con margen 68 %', /Te queda\s*2\.?030,77 €\s*margen 68 %/.test(ini), ini.slice(0, 500));
+  chk('inicio', `Personal ${PJ} (2 % de las ventas)`, new RegExp(`Personal\\s*${PJ} €\\s*2 % de las ventas`).test(ini), ini.slice(0, 400));
+  chk('inicio', 'Te queda lo mismo que el cuadro de mando, con margen 68 %', new RegExp(`Te queda\\s*${QJ} €\\s*margen 68 %`).test(ini), ini.slice(0, 500));
   chk('inicio', 'Media por día con cierre: 1.500,00', /Media por día con cierre: 1\.?500,00 €/.test(ini), ini.slice(0, 600));
   const graficos = await page.evaluate(() => ({
     svgs: document.querySelectorAll('#ini-contenido svg').length,
@@ -1818,11 +1825,11 @@ TARJETA 450,00`)]);
   chk('inicio', 'Dos gráficos dibujados: ventas por día y últimos 6 meses', graficos.svgs === 2 && graficos.barrasDia >= 2 && graficos.meses >= 6, JSON.stringify(graficos));
   chk('inicio', 'La barra de "en qué se va cada euro" tiene mercancía, luz, personal y lo que queda', graficos.apilada === 4, JSON.stringify(graficos));
   chk('inicio', 'Reparto con su %: Mercancía 23 %, Luz 7 %, Personal 2 %, Te queda 68 %',
-    /Mercancía\s*700,00 €\s*23 %/.test(ini) && /Luz\s*200,00 €\s*7 %/.test(ini) && /Personal\s*69,23 €\s*2 %/.test(ini) && /Te queda\s*2\.?030,77 €\s*68 %/.test(ini), ini.slice(600, 1400));
+    /Mercancía\s*700,00 €\s*23 %/.test(ini) && /Luz\s*200,00 €\s*7 %/.test(ini) && new RegExp(`Personal\\s*${PJ} €\\s*2 %`).test(ini) && new RegExp(`Te queda\\s*${QJ} €\\s*68 %`).test(ini), ini.slice(600, 1400));
   chk('inicio', 'Los proveedores que más pesan: Bebidas Pepe 700,00 (23%) y Endesa 200,00 (7%)',
     /Bebidas Pepe\s*700,00 € 23%/.test(ini) && /Endesa\s*200,00 € 7%/.test(ini), ini.slice(-900));
   chk('inicio', 'El alquiler de casa no aparece entre los proveedores', !/Alquiler casa/.test(ini));
-  chk('inicio', 'El equipo: Juan con 2 días este mes y lo que se le debe (69,23)', /Juan · 2 días este mes\s*debes 69,23 €/.test(ini), ini.slice(-500));
+  chk('inicio', `El equipo: Juan con 2 días este mes y lo que se le debe (${PJ})`, new RegExp(`Juan · 2 días este mes\\s*debes ${PJ} €`).test(ini), ini.slice(-500));
   chk('inicio', 'Los avisos también salen aquí (trimestre y facturas sin IVA)', graficos.alertas >= 2 && /sin desglose de IVA/.test(ini) && /trimestre/.test(ini));
   // Navegar por meses
   await page.click('#ini-contenido .ini-mes[data-ir="-1"]');
@@ -2138,7 +2145,7 @@ TARJETA 450,00`)]);
     return { total: d.total, sep, oct };
   });
   chk('personal', 'Sueldo de septiembre pagado en octubre: septiembre queda CUBIERTO (pendiente 0)', impu.sep && cerca(impu.sep.pendiente, 0), JSON.stringify(impu.sep));
-  chk('personal', 'Lo pendiente es solo lo del mes en curso (346,15 de octubre)', impu.oct && cerca(impu.oct.pendiente, 346.15) && cerca(impu.total, 346.15), JSON.stringify({ oct: impu.oct && impu.oct.pendiente, total: impu.total }));
+  chk('personal', 'Lo pendiente es solo lo del mes en curso (290,32 de octubre: 900 ÷ 31 × 10)', impu.oct && cerca(impu.oct.pendiente, 290.32) && cerca(impu.total, 290.32), JSON.stringify({ oct: impu.oct && impu.oct.pendiente, total: impu.total }));
   chk('personal', 'El hecho contable del mes no se toca: septiembre sigue diciendo 900 devengados y 0 dados ese mes', impu.sep && cerca(impu.sep.saldo, 900) && cerca(impu.sep.entregado, 0), JSON.stringify(impu.sep));
 
   // Si de verdad quedó corto, lo viejo sale con su mes y su importe
@@ -2150,7 +2157,7 @@ TARJETA 450,00`)]);
     const d = await APP.deudaDe('Prueba Arrastre');
     return { total: d.total, sep: d.meses.find(m => m.mes === '2026-09'), oct: d.meses.find(m => m.mes === '2026-10') };
   });
-  chk('personal', 'Si quedó corto de verdad, lo viejo sale: de septiembre quedan 500 sin cubrir', impu2.sep && cerca(impu2.sep.pendiente, 500) && cerca(impu2.oct.pendiente, 346.15) && cerca(impu2.total, 846.15), JSON.stringify({ sep: impu2.sep && impu2.sep.pendiente, total: impu2.total }));
+  chk('personal', 'Si quedó corto de verdad, lo viejo sale: de septiembre quedan 500 sin cubrir', impu2.sep && cerca(impu2.sep.pendiente, 500) && cerca(impu2.oct.pendiente, 290.32) && cerca(impu2.total, 790.32), JSON.stringify({ sep: impu2.sep && impu2.sep.pendiente, total: impu2.total }));
 
   // La ficha lo explica con el ✓ cuando lo viejo está cubierto (mes real de hoy)
   await limpiar();
@@ -2315,6 +2322,115 @@ TARJETA 450,00`)]);
   });
   chk('personal', 'Su ficha dice cuándo comenzó y el calendario bloquea los 9 días anteriores',
     calInicio.comenzo && calInicio.bloqueados === 9, JSON.stringify(calInicio));
+
+  // ══════════════ 9o. SUELDO POR MES: EL DÍA VALE SEGÚN LOS DÍAS DEL MES ══════════════
+  // Acordado con el dueño: el pago es por mes. En un mes de 31 días el día vale
+  // menos (900 ÷ 31) y en uno de 30 vale más (900 ÷ 30); se pagan los días
+  // trabajados y los de descanso, así el mes completo es el sueldo justo. Desde
+  // octubre de 2026; septiembre y antes no se reescriben. Las entregas se restan
+  // de lo pendiente, como siempre.
+  console.log('\n═══ 9o. SUELDO POR MES (el día según los días del mes) ═══');
+  await limpiar();
+  const porMes = await page.evaluate(async () => {
+    const f = (mes, d) => `${mes}-${String(d).padStart(2, '0')}`;
+    const rango = (mes, n) => Array.from({ length: n }, (_, i) => f(mes, i + 1));
+    // Octubre (31 días): 26 trabajados + 5 descansos marcados = el mes entero
+    const descOct = [5, 12, 19, 26, 31].map(d => f('2026-10', d));
+    const trabOct = rango('2026-10', 31).filter(x => !descOct.includes(x));
+    // Noviembre (30 días): 25 trabajados + 4 descansos + 1 falta
+    const descNov = [2, 9, 16, 23].map(d => f('2026-11', d));
+    const faltaNov = [f('2026-11', 20)];
+    const trabNov = rango('2026-11', 30).filter(x => !descNov.includes(x) && !faltaNov.includes(x));
+    // Septiembre (cuenta antigua): 27 días trabajados con 26 pactados
+    const trabSep = rango('2026-09', 27);
+    await DB.perGuardar({ nombre: 'Mensual', sueldoMensual: 900, diasMes: 26, horasJornada: 7.5, tramos: [],
+      dias: [...trabSep, ...trabOct, ...trabNov], tardes: [], faltas: faltaNov, descansos: [...descOct, ...descNov],
+      notasDias: [], inicio: '2026-09-01', creado: new Date().toISOString() });
+    const t = (await DB.perTodos()).find(x => x.nombre === 'Mensual');
+    await DB.pagoGuardar({ trabajadorSid: t.sid, fecha: '2026-10-02', importe: 934.62, notas: 'septiembre', creado: new Date().toISOString() });
+    await DB.pagoGuardar({ trabajadorSid: t.sid, fecha: '2026-10-20', importe: 500, notas: 'adelanto', creado: new Date().toISOString() });
+    // Febrero (28 días) para ver el precio del día más alto
+    await DB.perGuardar({ nombre: 'Febrero', sueldoMensual: 900, diasMes: 26, horasJornada: 7.5, tramos: [],
+      dias: [f('2027-02', 1)], tardes: [{ fecha: f('2027-02', 2), horas: 2 }], faltas: [], descansos: [],
+      notasDias: [], inicio: '2027-02-01', creado: new Date().toISOString() });
+    const d = await APP.deudaDe('Mensual', true);
+    const df = await APP.deudaDe('Febrero', true);
+    const m = (mes) => d.meses.find(x => x.mes === mes);
+    const feb = df.meses.find(x => x.mes === '2027-02');
+    return {
+      sep: m('2026-09') && { fijo: m('2026-09').calc.fijo, pend: m('2026-09').pendiente },
+      oct: m('2026-10') && { fijo: m('2026-10').calc.fijo, precio: m('2026-10').calc.precioDia, pagados: m('2026-10').calc.diasPagados, pend: m('2026-10').pendiente },
+      nov: m('2026-11') && { fijo: m('2026-11').calc.fijo, precio: m('2026-11').calc.precioDia, pagados: m('2026-11').calc.diasPagados },
+      feb: feb && { precio: feb.calc.precioDia, desc: feb.calc.descuentoTardes, fijo: feb.calc.fijo },
+      total: d.total
+    };
+  });
+  chk('personal', 'Septiembre no se reescribe: 27 días con 26 pactados siguen siendo 934,62 (la cuenta con la que se pagó)',
+    porMes.sep && cerca(porMes.sep.fijo, 934.62) && cerca(porMes.sep.pend, 0), JSON.stringify(porMes.sep));
+  chk('personal', 'Octubre (31 días): el día vale 900 ÷ 31 = 29,03 y con 26 trabajados + 5 descansos cobra el sueldo justo, 900,00',
+    porMes.oct && cerca(porMes.oct.precio, 29.03) && porMes.oct.pagados === 31 && cerca(porMes.oct.fijo, 900), JSON.stringify(porMes.oct));
+  chk('personal', 'Noviembre (30 días): el día vale 30,00; una falta deja 29 días pagados = 870,00',
+    porMes.nov && cerca(porMes.nov.precio, 30) && porMes.nov.pagados === 29 && cerca(porMes.nov.fijo, 870), JSON.stringify(porMes.nov));
+  chk('personal', 'Febrero (28 días): el día vale más, 32,14, y un retraso de 2 h descuenta 2 ÷ 7,5 × 32,14 = 8,57',
+    porMes.feb && cerca(porMes.feb.precio, 32.14) && cerca(porMes.feb.desc, 8.57) && cerca(porMes.feb.fijo, 55.72), JSON.stringify(porMes.feb));
+  chk('personal', 'Las entregas se restan de lo pendiente: 934,62 + 900 + 870 − 934,62 − 500 = 1.270,00',
+    cerca(porMes.total, 1270) && porMes.oct && cerca(porMes.oct.pend, 400), JSON.stringify(porMes));
+
+  // En la ficha y en el mensaje se ve la cuenta con los días del mes
+  await page.click('.tab[data-tab="inicio"]');
+  await page.click('.tab[data-tab="personal"]');
+  await page.fill('#per-mes', '2026-10');
+  await page.dispatchEvent('#per-mes', 'change');
+  await page.waitForTimeout(900);
+  const fichaMes = await page.evaluate(() => {
+    const cards = [...document.querySelectorAll('#per-lista .per-card')];
+    const c = cards.find(x => x.textContent.includes('Mensual'));
+    if (!c) return '';
+    const b = c.querySelector('.per-body');
+    if (b && b.classList.contains('hidden')) c.querySelector('.per-toggle').click();
+    return c.textContent.replace(/\s+/g, ' ');
+  });
+  await page.waitForTimeout(500);
+  const fichaMes2 = (await page.evaluate(() => {
+    const c = [...document.querySelectorAll('#per-lista .per-card')].find(x => x.textContent.includes('Mensual'));
+    return c ? c.textContent : '';
+  })).replace(/\s+/g, ' ');
+  chk('personal', 'La ficha de octubre escribe la cuenta: 900,00 € ÷ 31 × 31 y explica los 31 días que tiene octubre (26 trabajados + 5 de descanso)',
+    fichaMes2.includes('900,00 € ÷ 31 × 31') && /los 31 días que tiene octubre × los 31 días que se le pagan \(26 trabajados \+ 5 de descanso\)/.test(fichaMes2), (fichaMes || fichaMes2).slice(0, 900));
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'share', { value: undefined, configurable: true });
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: () => Promise.reject(new Error('sin portapapeles')) }, configurable: true
+    });
+  });
+  await page.locator('#per-lista .per-card', { hasText: 'Mensual' }).locator('.per-compartir').click();
+  await page.waitForTimeout(700);
+  const msgMes = (await page.textContent('#modal-body pre')) || '';
+  await page.click('#modal-cerrar');
+  await page.waitForTimeout(300);
+  chk('personal', 'El mensaje que se le envía cuadra con calculadora: "Fijo: 900,00 € ÷ 31 × 31 días = 900,00 €"',
+    /Fijo: 900,00 € ÷ 31 × 31 días = 900,00 €/.test(msgMes) && /31 días que tiene octubre/.test(msgMes), msgMes.slice(0, 700));
+  chk('personal', 'Y no menciona las horas de jornada ni dice que los días no trabajados no se pagan',
+    !/jornada/i.test(msgMes) && !/no se paga/i.test(msgMes), msgMes.slice(0, 700));
+
+  // Un día ya pasado sin marcar no se paga, y la ficha lo avisa con su fecha
+  await page.evaluate(async () => {
+    const t = (await DB.perTodos()).find(x => x.nombre === 'Mensual');
+    t.dias = t.dias.filter(d => d !== '2026-10-15');
+    await DB.perGuardar(t);
+  });
+  await page.fill('#per-mes', '2026-11');
+  await page.dispatchEvent('#per-mes', 'change');
+  await page.waitForTimeout(500);
+  await page.fill('#per-mes', '2026-10');
+  await page.dispatchEvent('#per-mes', 'change');
+  await page.waitForTimeout(900);
+  const fichaSinMarcar = (await page.evaluate(() => {
+    const c = [...document.querySelectorAll('#per-lista .per-card')].find(x => x.textContent.includes('Mensual'));
+    return c ? c.textContent : '';
+  })).replace(/\s+/g, ' ');
+  chk('personal', 'Un día pasado sin marcar no se paga (30 de 31 → 870,97) y la ficha lo avisa: "Hay 1 día ya pasado sin marcar (15)"',
+    /Hay 1 día ya pasado sin marcar \(15\)/.test(fichaSinMarcar) && fichaSinMarcar.includes('870,97'), fichaSinMarcar.slice(0, 900));
 
   // ══════════════ 10. ERRORES DE JAVASCRIPT ══════════════
   console.log('\n═══ 10. ESTABILIDAD ═══');

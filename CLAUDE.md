@@ -140,9 +140,21 @@ restaurar). `window.APP` expone `inicio`, `recientes` y `miniaturas` para la ver
   sin desglose de IVA y deuda total con el equipo.
 
 **Personal** (pestaña privada, tampoco sale en el informe de la gestoría)
-- Sueldo mensual pactado con ~1 día libre a la semana → **precio del día =
-  sueldo ÷ días de trabajo al mes** (26 por defecto, configurable por persona).
-  Se paga por día trabajado; el día que no viene, no se paga.
+- **El sueldo es POR MES** (acordado con el dueño, desde octubre de 2026,
+  `MES_SUELDO_POR_MES`): **precio del día = sueldo ÷ los días que tiene ese mes
+  natural** (31 → el día vale menos, 30 → más, febrero → más todavía) y se pagan
+  los días **trabajados + los de descanso** (`c.diasPagados`), así el mes completo
+  es el sueldo justo. Una falta o un día sin marcar no se paga. `calcularMes`
+  devuelve `porMes`, `divisor`, `diasPagados`, `precioDia` y `sinMarcar` (días ya
+  pasados sin marcar: la ficha los avisa con su fecha para que no se queden sin
+  pagar por un olvido). Todo lo que escribe el fijo usa `fijoCuenta(c)`
+  ("900,00 € ÷ 31 × 31") y `fijoQueEs(c)` ("los 31 días que tiene octubre × los 31
+  que se le pagan (26 trabajados + 5 de descanso)"), y el precio del día sale de
+  `c.precioDia`, no de `precioDeUnDia(t)`.
+- **Los meses anteriores a octubre de 2026 no se reescriben**: se pagaron con la
+  cuenta antigua, **sueldo ÷ días de trabajo pactados** (`diasMes`, 26 por defecto)
+  **× días trabajados**, y siguen así (igual que la comisión por tramos). El campo
+  "Días que trabaja al mes" del formulario solo cuenta para esos meses.
 - Estados de cada día en el calendario: trabajó · 🛌 descansó · ⏰ llegó tarde (pregunta
   cuántas horas) · 🚫 faltó (pregunta el motivo) · sin marcar. **Un toque abre un menú**
   (`abrirMenuDia`, en el modal de la app) y se elige el estado directamente: nada de dar
@@ -396,7 +408,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 399 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 408 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.
 
