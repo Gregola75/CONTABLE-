@@ -484,6 +484,12 @@
         </div>
       </div>
       <p class="hint" style="margin:0 0 10px">Desde octubre de 2026 el sueldo es <strong>por mes</strong>: el día vale sueldo ÷ los días que tiene cada mes (900 ÷ 31 = 29,03 € en un mes de 31; 900 ÷ 30 = 30,00 € en uno de 30) y se pagan los días que trabaja y los de descanso: el mes completo es el sueldo justo. Estos "días que trabaja al mes" solo cuentan para los meses de antes de octubre.</p>
+      <div class="form-group" id="pe-desde-wrap">
+        <div id="pe-sueldo-actual" class="hint" style="margin:0 0 8px"></div>
+        <label for="pe-desde">📅 Si le cambias el sueldo (o los objetivos), el nuevo vale desde el mes</label>
+        <input type="month" id="pe-desde">
+        <p class="hint" style="margin:6px 0 0">Ese mes y los siguientes se calculan solos con el sueldo nuevo; los meses de antes se quedan con el de antes, aunque ya estén pagados. Al guardar te lo confirmo con las cuentas hechas. Déjalo en blanco solo si es una corrección de todo su historial.</p>
+      </div>
       <div class="form-group">
         <label for="pe-jornada">Horas de una jornada <small>para descontar retrasos</small></label>
         <input type="number" id="pe-jornada" step="0.5" min="1" max="16" value="7.5">
@@ -527,11 +533,6 @@
       <div class="form-group">
         <label for="pe-notas">Notas <small>opcional</small></label>
         <input type="text" id="pe-notas" placeholder="Ej.: los lunes no viene">
-      </div>
-      <div class="form-group" id="pe-desde-wrap">
-        <label for="pe-desde">Si cambias el sueldo, los días, la jornada o los objetivos, valen desde</label>
-        <input type="month" id="pe-desde">
-        <p class="hint" style="margin:6px 0 0">Los meses anteriores se quedan como estaban, aunque ya estén pagados. Déjalo en blanco solo si es una corrección de todo su historial.</p>
       </div>
       <div class="form-group">
         <label for="pe-fin">Dejó de trabajar el <small>solo al darle de baja</small></label>

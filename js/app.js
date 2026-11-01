@@ -2319,6 +2319,48 @@
     if (!c) return t;
     return { ...t, sueldoMensual: c.sueldoMensual, diasMes: c.diasMes, horasJornada: c.horasJornada, tramos: c.tramos || [] };
   }
+  /* Los periodos de sueldo de un trabajador, del más antiguo al más nuevo:
+     [{ desde: 'AAAA-MM' | '', hasta: 'AAAA-MM' | '', sueldo, objetivosCambian }].
+     Sin cambios guardados, un solo periodo con el sueldo de siempre. */
+  function periodosSueldo(t) {
+    const lista = (t.condiciones || []).filter(Boolean).slice()
+      .sort((a, b) => (a.desde || '').localeCompare(b.desde || ''));
+    if (!lista.length) return [{ desde: '', hasta: '', sueldo: t.sueldoMensual || 0, objetivosCambian: false }];
+    const firmaTramos = (c) => JSON.stringify((c.tramos || []).map(x => [+x.objetivo, +x.porcentaje]));
+    return lista.map((c, i) => ({
+      desde: c.desde || '',
+      hasta: lista[i + 1] ? mesAnteriorDe(lista[i + 1].desde) : '',
+      sueldo: c.sueldoMensual || 0,
+      objetivosCambian: i > 0 && firmaTramos(c) !== firmaTramos(lista[i - 1])
+    }));
+  }
+
+  /* "💶 Su sueldo": cuánto cobra, desde cuándo vale y lo que cobraba antes. Lo pidió
+     el dueño al subirle el sueldo a un chico: tiene que ver de un vistazo desde
+     cuándo está vigente, y que la app ya lo calcula sola en cada mes. */
+  function sueldoVigenteHTML(t, mes) {
+    const periodos = periodosSueldo(t);
+    const hoyMes = hoyISO().slice(0, 7);
+    const mesLetras = (m) => mesEnLetras(m + '-01').toLowerCase();
+    const filas = periodos.map(p => {
+      const desdeTxt = p.desde ? `desde ${mesLetras(p.desde)}` : (t.inicio ? `desde que empezó (${fmtFecha(t.inicio)})` : 'desde que empezó');
+      const hastaTxt = p.hasta ? ` hasta ${mesLetras(p.hasta)}` : '';
+      const vigenteHoy = (p.desde || '') <= hoyMes && (!p.hasta || p.hasta >= hoyMes);
+      const deEsteMes = (p.desde || '') <= mes && (!p.hasta || p.hasta >= mes);
+      const futuro = p.desde && p.desde > hoyMes;
+      const etiqueta = vigenteHoy ? ' <strong class="txt-ok">✓ vigente ahora</strong>' : (futuro ? ' <strong class="txt-oro">empieza a contar más adelante</strong>' : '');
+      return `<div class="stat-linea"><span>${INFORME.eur(p.sueldo)} al mes · ${desdeTxt}${hastaTxt}${p.objetivosCambian ? ' <small class="txt-sec">(con objetivos nuevos)</small>' : ''}${etiqueta}${deEsteMes && periodos.length > 1 ? ' <small class="txt-sec">← el de este mes</small>' : ''}</span></div>`;
+    }).join('');
+    const delMes = periodos.find(p => (p.desde || '') <= mes && (!p.hasta || p.hasta >= mes)) || periodos[periodos.length - 1];
+    const nDias = diasDelMesNatural(mes);
+    const calculo = mes >= MES_SUELDO_POR_MES
+      ? `<p class="hint" style="margin:4px 0 0">En ${mesLetras(mes)} (${nDias} días) el día sale a ${INFORME.eur(Math.round(delMes.sueldo / nDias * 100) / 100)}; el mes completo, ${INFORME.eur(delMes.sueldo)}. La app lo calcula sola cada mes con el sueldo que valía entonces.</p>`
+      : '';
+    return `
+            <p class="per-seccion">💶 Su sueldo</p>
+            ${filas}${calculo}`;
+  }
+
   /* Para pintar: el trabajador con las condiciones con las que se calculó ese mes (c.cond),
      y así lo que se enseña cuadra con lo que se calculó aunque el sueldo haya cambiado. */
   const condDe = (t, c) => (c && c.cond) ? { ...t, ...c.cond } : t;
@@ -3512,6 +3554,7 @@
           </div>
           <div class="per-body ${abierta ? '' : 'hidden'}">
             ${bajaHTML}
+            ${sueldoVigenteHTML(t, mes)}
             <p class="per-seccion">📅 Días del mes</p>
             ${calendarioHTML(t, mes)}
             ${c.fueraDePeriodo ? `<p class="hint txt-bad" style="margin:6px 0 0">⚠️ Hay ${c.fueraDePeriodo} día(s) marcados fuera del periodo que trabajó (antes de empezar o después de la baja). No se le pagan. Revísalos en el calendario.</p>` : ''}
@@ -3887,9 +3930,15 @@
     $('#pe-notas').value = t ? (t.notas || '') : '';
     $('#pe-desde').value = t ? hoyISO().slice(0, 7) : '';
     $('#pe-desde-wrap').classList.toggle('hidden', !t);
+    $('#pe-sueldo-actual').innerHTML = t
+      ? 'Ahora mismo: ' + periodosSueldo(t).map(p =>
+          `<strong>${INFORME.eur(p.sueldo)}</strong> ${p.desde ? `desde ${mesEnLetras(p.desde + '-01').toLowerCase()}` : 'desde que empezó'}${p.hasta ? ` hasta ${mesEnLetras(p.hasta + '-01').toLowerCase()}` : ''}`).join(' · ')
+      : '';
     $('#per-borrar').classList.toggle('hidden', !t);
     $('#per-form').classList.remove('hidden');
-    $('#pe-nombre').focus();
+    // La ficha se edita desde abajo y el formulario está arriba: se trae a la vista
+    try { $('#per-form').scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) { /* sin desplazamiento */ }
+    $('#pe-nombre').focus({ preventScroll: true });
   }
 
   $('#per-nuevo').addEventListener('click', () => abrirFormPersonal());
@@ -3933,6 +3982,27 @@
       const viejas = { sueldoMensual: actual.sueldoMensual, diasMes: actual.diasMes, horasJornada: actual.horasJornada, tramos: actual.tramos || [] };
       if (firmaCond(viejas) !== firmaCond(nuevas)) {
         const desde = $('#pe-desde').value || '';
+        // Antes de guardar se dice qué cambia, desde cuándo vale y cómo queda la
+        // cuenta, para que no haya sorpresas en meses ya pagados. Cancelar no
+        // guarda nada y deja el formulario abierto para cambiar el mes.
+        const cambios = [];
+        if (+viejas.sueldoMensual !== nuevas.sueldoMensual) cambios.push(`Sueldo: ${INFORME.eur(viejas.sueldoMensual || 0)} → ${INFORME.eur(nuevas.sueldoMensual)} al mes`);
+        if ((+viejas.diasMes || 26) !== nuevas.diasMes) cambios.push(`Días pactados (solo meses antes de octubre de 2026): ${+viejas.diasMes || 26} → ${nuevas.diasMes}`);
+        if ((+viejas.horasJornada || 7.5) !== nuevas.horasJornada) cambios.push(`Jornada: ${numH(+viejas.horasJornada || 7.5)} h → ${numH(nuevas.horasJornada)} h`);
+        if (JSON.stringify((viejas.tramos || []).map(x => [+x.objetivo, +x.porcentaje])) !== JSON.stringify(nuevas.tramos.map(x => [x.objetivo, x.porcentaje]))) cambios.push('Objetivos / comisiones cambiados');
+        let cuando;
+        if (desde) {
+          const n = diasDelMesNatural(desde);
+          const mesTxt = mesEnLetras(desde + '-01').toUpperCase();
+          const antes = mesEnLetras(mesAnteriorDe(desde) + '-01').toLowerCase();
+          cuando = `Vale DESDE ${mesTxt} (incluido) y los meses siguientes.\n${antes.charAt(0).toUpperCase() + antes.slice(1)} y los de antes se quedan como estaban (${INFORME.eur(viejas.sueldoMensual || 0)}).`;
+          if (desde >= MES_SUELDO_POR_MES && +viejas.sueldoMensual !== nuevas.sueldoMensual) {
+            cuando += `\n\nLa app lo calcula sola: en ${mesEnLetras(desde + '-01').toLowerCase()} (${n} días) el día sale a ${INFORME.eur(Math.round(nuevas.sueldoMensual / n * 100) / 100)} y el mes completo son ${INFORME.eur(nuevas.sueldoMensual)}.`;
+          }
+        } else {
+          cuando = 'Sin mes en «valen desde»: se cambia TODO su historial, también los meses ya pagados (puede salir que le debes o te debe dinero de meses viejos).';
+        }
+        if (!confirm(`${nombre}:\n${cambios.join('\n')}\n\n${cuando}\n\n¿Lo guardo así? Si quieres que valga desde otro mes, pulsa Cancelar y cambia «valen desde».`)) return;
         if (!desde) {
           condiciones = [];                                   // corrección de todo su historial
           avisoDesde = ' Se ha corregido TODO su historial con las condiciones nuevas.';

@@ -273,6 +273,16 @@ restaurar). `window.APP` expone `inicio`, `recientes` y `miniaturas` para la ver
   (se borra `condiciones`): es lo que la app hacía siempre antes, ahora explícito. Antes,
   subir el sueldo a alguien que estaba al día lo dejaba "debiéndole" la diferencia de todos
   los meses ya pagados.
+- **Desde cuándo vale el sueldo, a la vista** (lo pidió el dueño al subirle el sueldo a un
+  chico): la ficha abre con **"💶 Su sueldo"** (`sueldoVigenteHTML`, con `periodosSueldo`):
+  cada periodo con su importe, "desde … hasta …", cuál está vigente ahora y cuál es el del
+  mes que se ve, más la cuenta del mes (`En noviembre 2026 (30 días) el día sale a 31,67 €;
+  el mes completo, 950,00 €`). En el formulario, el campo «valen desde» va **justo debajo
+  del sueldo** con "Ahora mismo: 900,00 € desde que empezó" (`#pe-sueldo-actual`), y el
+  formulario se trae a la vista al editar. **Al guardar un cambio se pide confirmación**
+  con lo que cambia, desde qué mes vale, que los meses de antes se quedan con el sueldo de
+  antes y el precio del día resultante; cancelar no guarda nada y deja el formulario
+  abierto. Guardar otro cambio con el mismo «desde» sustituye al anterior, no se acumula.
 - **La cuenta se congela al liquidar** (`t.cuadreLiquidacion`, con `fotoDelCuadre`): fecha, lo
   que le correspondió, lo pagado y los meses. La ficha del liquidado compara la cuenta de hoy
   con la cerrada: si coinciden lo dice con un candado; si algo cambió después (un cierre, un
@@ -408,7 +418,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 408 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 416 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.
 

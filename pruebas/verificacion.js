@@ -2432,6 +2432,72 @@ TARJETA 450,00`)]);
   chk('personal', 'Un día pasado sin marcar no se paga (30 de 31 → 870,97) y la ficha lo avisa: "Hay 1 día ya pasado sin marcar (15)"',
     /Hay 1 día ya pasado sin marcar \(15\)/.test(fichaSinMarcar) && fichaSinMarcar.includes('870,97'), fichaSinMarcar.slice(0, 900));
 
+  // ══════════════ 9p. SUBIRLE EL SUELDO: DESDE CUÁNDO VALE ══════════════
+  // El caso del dueño: a un chico le sube el sueldo a 950 (o 1.000). La app tiene
+  // que decir desde cuándo vale, calcularlo sola y no tocar los meses de antes.
+  console.log('\n═══ 9p. CAMBIO DE SUELDO: DESDE CUÁNDO VALE ═══');
+  await limpiar();
+  await page.evaluate(async () => {
+    const f = (mes, d) => `${mes}-${String(d).padStart(2, '0')}`;
+    const rango = (mes, n) => Array.from({ length: n }, (_, i) => f(mes, i + 1));
+    const descOct = [5, 12, 19, 26, 31].map(d => f('2026-10', d));
+    const descNov = [2, 9, 16, 23, 30].map(d => f('2026-11', d));
+    await DB.perGuardar({ nombre: 'Subida', sueldoMensual: 900, diasMes: 26, horasJornada: 7.5, tramos: [],
+      dias: [...rango('2026-10', 31).filter(x => !descOct.includes(x)), ...rango('2026-11', 30).filter(x => !descNov.includes(x))],
+      tardes: [], faltas: [], descansos: [...descOct, ...descNov], notasDias: [], inicio: '2026-09-01', creado: new Date().toISOString() });
+  });
+  let fichaSub = await verMes('2026-11');
+  chk('personal', 'La ficha enseña su sueldo y desde cuándo: "900,00 € al mes · desde que empezó (01/09/2026)"',
+    /💶 Su sueldo/.test(fichaSub) && /900,00 € al mes · desde que empezó \(01\/09\/2026\)/.test(fichaSub), fichaSub.slice(0, 600));
+  await page.click('#per-lista .per-editar');
+  await page.waitForTimeout(400);
+  const formSub = (await page.textContent('#pe-sueldo-actual')).replace(/\s+/g, ' ');
+  chk('personal', 'Al editar, el formulario dice lo que cobra ahora y el "desde" viene con el mes de hoy',
+    /Ahora mismo: 900,00 € desde que empezó/.test(formSub) && (await page.inputValue('#pe-desde')) === new Date().toISOString().slice(0, 7), formSub);
+  await page.fill('#pe-sueldo', '950');
+  await page.fill('#pe-desde', '2026-11');
+  aceptarDialogos = false;
+  await page.click('#per-guardar');
+  await page.waitForTimeout(700);
+  const preguntaSub = ultimoDialogo;
+  chk('personal', 'Antes de guardar pregunta con las cuentas hechas: 900 → 950, vale DESDE NOVIEMBRE, el día sale a 31,67 (950 ÷ 30)',
+    /Sueldo: 900,00 € → 950,00 € al mes/.test(preguntaSub) && /Vale DESDE NOVIEMBRE 2026/.test(preguntaSub) && /octubre 2026 y los de antes se quedan como estaban \(900,00 €\)/i.test(preguntaSub) && /31,67/.test(preguntaSub), preguntaSub);
+  const sinGuardar = await page.evaluate(async () => {
+    const t = (await DB.perTodos()).find(x => x.nombre === 'Subida');
+    return { sueldo: t.sueldoMensual, cond: (t.condiciones || []).length, formAbierto: !document.querySelector('#per-form').classList.contains('hidden') };
+  });
+  chk('personal', 'Cancelar la pregunta no guarda nada y deja el formulario abierto para cambiar el mes',
+    sinGuardar.sueldo === 900 && sinGuardar.cond === 0 && sinGuardar.formAbierto, JSON.stringify(sinGuardar));
+  aceptarDialogos = true;
+  await page.click('#per-guardar');
+  await page.waitForTimeout(900);
+  const subida = await page.evaluate(async () => {
+    const d = await APP.deudaDe('Subida', true);
+    const m = (mes) => d.meses.find(x => x.mes === mes);
+    return { oct: m('2026-10').calc.fijo, nov: m('2026-11').calc.fijo, precioNov: m('2026-11').calc.precioDia };
+  });
+  chk('personal', 'Octubre se queda con 900,00 y noviembre (mes completo) pasa a 950,00 solo, con el día a 31,67',
+    cerca(subida.oct, 900) && cerca(subida.nov, 950) && cerca(subida.precioNov, 31.67), JSON.stringify(subida));
+  fichaSub = await verMes('2026-11');
+  chk('personal', 'La ficha dice los dos periodos: 900 hasta octubre y 950 desde noviembre (el de este mes)',
+    /900,00 € al mes · desde que empezó \(01\/09\/2026\) hasta octubre 2026/.test(fichaSub) && /950,00 € al mes · desde noviembre 2026/.test(fichaSub) && /← el de este mes/.test(fichaSub), fichaSub.slice(0, 900));
+  chk('personal', 'Y explica la cuenta del mes: en noviembre (30 días) el día sale a 31,67; el mes completo, 950,00',
+    /En noviembre 2026 \(30 días\) el día sale a 31,67 €; el mes completo, 950,00 €/.test(fichaSub), fichaSub.slice(0, 900));
+  // Cambia de idea: 1.000 desde noviembre → sustituye al de 950, no se acumula
+  await page.click('#per-lista .per-editar');
+  await page.waitForTimeout(400);
+  await page.fill('#pe-sueldo', '1000');
+  await page.fill('#pe-desde', '2026-11');
+  await page.click('#per-guardar');
+  await page.waitForTimeout(900);
+  const mil = await page.evaluate(async () => {
+    const t = (await DB.perTodos()).find(x => x.nombre === 'Subida');
+    const d = await APP.deudaDe('Subida', true);
+    return { periodos: (t.condiciones || []).map(c => [c.desde, c.sueldoMensual]), oct: d.meses.find(x => x.mes === '2026-10').calc.fijo, nov: d.meses.find(x => x.mes === '2026-11').calc.fijo };
+  });
+  chk('personal', 'Si cambia de idea (1.000 desde noviembre), sustituye al de 950: quedan 900 hasta octubre y 1.000 desde noviembre',
+    JSON.stringify(mil.periodos) === JSON.stringify([['', 900], ['2026-11', 1000]]) && cerca(mil.oct, 900) && cerca(mil.nov, 1000), JSON.stringify(mil));
+
   // ══════════════ 10. ERRORES DE JAVASCRIPT ══════════════
   console.log('\n═══ 10. ESTABILIDAD ═══');
   chk('estabilidad', 'Ningún error de JavaScript durante toda la verificación',
