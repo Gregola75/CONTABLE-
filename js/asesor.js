@@ -9,8 +9,9 @@
      y debajo de cada respuesta se enseña qué datos consultó.
    - Va aprendiendo: lo que el dueño le cuenta y merece recordarse lo guarda con
      la herramienta "recordar", y se le vuelve a dar en cada conversación.
-   - Puede APUNTAR un gasto o un cierre de caja que el dueño le dicte ("Movistar,
-     45 €, ayer"), pero nunca por su cuenta: la app enseña una tarjeta con lo que
+   - Puede APUNTAR un gasto, un cierre de caja o una entrega al personal que el
+     dueño le dicte ("Movistar, 45 €, ayer"; "100 a Jeferson hoy"), pero nunca por
+     su cuenta: la app enseña una tarjeta con lo que
      se va a guardar y solo se guarda si el dueño pulsa Guardar. No puede cambiar
      ni borrar nada.
    - Vive en una burbuja flotante, a mano desde cualquier pantalla.
@@ -196,8 +197,14 @@
     },
     {
       name: 'trabajador',
-      description: 'La cuenta completa de una persona del equipo (trabajador o RRPP) por su nombre: mes a mes lo que le correspondió, todas las entregas con su fecha, los cambios de sueldo y lo pendiente a día de hoy. Para dudas sobre una persona concreta o para comprobar un pago.',
-      input_schema: { type: 'object', properties: { nombre: { type: 'string', description: 'Nombre o parte del nombre.' } }, required: ['nombre'] }
+      description: 'La cuenta completa de una persona del equipo (trabajador o RRPP): lo que se le debe a día de hoy, lo que vale cada día de trabajo este mes, lo que le corresponde y lo entregado este mes, mes a mes lo que le correspondió, todas las entregas con su fecha y los cambios de sueldo. Si varias personas coinciden con el nombre, devuelve la lista numerada para que preguntes cuál.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          nombre: { type: 'string', description: 'Nombre o parte del nombre.' },
+          persona_id: { type: 'string', description: 'El identificador de la persona, si ya lo tienes de una respuesta anterior.' }
+        }
+      }
     },
     {
       name: 'impuestos_trimestre',
@@ -250,6 +257,21 @@
       }
     },
     {
+      name: 'apuntar_entrega',
+      description: 'Apunta una entrega de dinero a alguien del equipo (un adelanto, la paga o un pago a un RRPP) que el dueño te dicta, por ejemplo "100 en efectivo a Jeferson hoy". Necesita la persona, el importe y la fecha. Si varias personas coinciden con el nombre NO se apunta: te devuelve la lista numerada para que le preguntes al dueño a cuál, y vuelves a llamar con su persona_id. La app le enseña al dueño una tarjeta (con lo que le debe hoy y lo que quedará después) y solo se guarda si pulsa Guardar.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          nombre: { type: 'string', description: 'Nombre o parte del nombre de la persona, como lo dice el dueño.' },
+          persona_id: { type: 'string', description: 'El identificador de la persona, cuando ya lo tienes de una respuesta anterior (por ejemplo tras elegir entre varias que coincidían).' },
+          importe: { type: 'number', description: 'El dinero entregado, en euros.' },
+          fecha: FECHA('El día de la entrega'),
+          nota: { type: 'string', description: 'Nota corta opcional, tal como lo diga el dueño: "adelanto", "en efectivo", "paga de octubre"…' }
+        },
+        required: ['importe', 'fecha']
+      }
+    },
+    {
       name: 'calcular',
       description: 'Calculadora exacta. Úsala para cualquier suma, resta, porcentaje, media o proyección en vez de hacer la cuenta de cabeza. Escribe la operación con números (punto decimal), + - * / y paréntesis.',
       input_schema: { type: 'object', properties: { expresion: { type: 'string', description: 'Por ejemplo: (18250.40-5300)/18250.40*100' } }, required: ['expresion'] }
@@ -289,18 +311,21 @@
      confirma. "confirmar" recibe la tarjeta y devuelve true (Guardar) o false. */
   async function apuntar(preparar, entrada, confirmar) {
     const p = await preparar(entrada);
-    if (!p.valido) return { guardado: false, motivo: p.motivo };
+    if (!p.valido) { const { valido, ...porQue } = p; return { guardado: false, ...porQue }; }
     if (typeof confirmar !== 'function') return { guardado: false, motivo: 'No se le ha podido enseñar al dueño para que lo confirme: no se ha guardado nada.' };
     const si = await confirmar({ titulo: p.titulo, lineas: p.lineas, avisos: p.avisos });
     if (!si) return { guardado: false, motivo: 'El dueño ha pulsado Cancelar: no se ha guardado nada.' };
-    await datos().guardarApunte(p.registro);
-    return { guardado: true, apuntado: p.resumen, avisos_que_vio_el_dueno: p.avisos.length ? p.avisos : undefined };
+    await datos().guardarApunte(p.registro, p.almacen);
+    const hecho = { guardado: true, apuntado: p.resumen, avisos_que_vio_el_dueno: p.avisos.length ? p.avisos : undefined };
+    if (typeof p.pendiente_despues === 'number') hecho.pendiente_con_esa_persona_ahora = p.pendiente_despues;
+    return hecho;
   }
 
   async function ejecutar(nombre, entrada, confirmar) {
     const i = entrada && typeof entrada === 'object' ? entrada : {};
     if (nombre === 'apuntar_gasto') return apuntar((x) => datos().prepararGasto(x), i, confirmar);
     if (nombre === 'apuntar_cierre') return apuntar((x) => datos().prepararCierre(x), i, confirmar);
+    if (nombre === 'apuntar_entrega') return apuntar((x) => datos().prepararEntrega(x), i, confirmar);
     const fn = EJECUTAR[nombre];
     if (!fn) throw new Error(`No existe la herramienta "${nombre}".`);
     return fn(i);
@@ -351,13 +376,16 @@ CÓMO CUENTA LA APP
 - La previsión de impuestos es interna y orientativa, y no incluye el coste de personal. La cifra oficial la calcula su gestoría: dilo una vez cuando hables de impuestos, sin sermones.
 - El mes en curso está sin terminar: compáralo con otros por media diaria, no por total.
 
-APUNTAR GASTOS Y CIERRES
-Puedes apuntar en la app un gasto (o factura) y un cierre de caja cuando el dueño te lo dicta, con apuntar_gasto y apuntar_cierre.
-- Un gasto necesita tres cosas: a quién se paga, el importe total y la fecha. Un cierre, la fecha y las ventas. Si te falta alguna, pregúntala en una línea; no la supongas. "Hoy", "ayer" o "el viernes" los conviertes tú a fecha con el día de hoy.
+APUNTAR GASTOS, CIERRES Y ENTREGAS AL EQUIPO
+Puedes apuntar en la app un gasto (o factura), un cierre de caja y una entrega de dinero a alguien del equipo (adelanto, paga, pago a un RRPP) cuando el dueño te lo dicta, con apuntar_gasto, apuntar_cierre y apuntar_entrega.
+- Un gasto necesita tres cosas: a quién se paga, el importe total y la fecha. Un cierre, la fecha y las ventas. Una entrega, a quién, cuánto y qué día. Si te falta alguna, pregúntala en una línea; no la supongas. "Hoy", "ayer", "el viernes" o "el 12" los conviertes tú a fecha con el día de hoy.
+- En una entrega, si la herramienta te dice que varias personas coinciden con el nombre, no elijas tú: pregúntale a cuál, enseñándole las opciones numeradas con lo que las distingue ("1. Jeferson, trabajador, empezó el…; 2. Jeferson, RRPP"), y cuando conteste vuelve a llamar con el persona_id de esa. Cómo se pagó ("en efectivo") o por qué ("adelanto") va en la nota.
+- Después de apuntar una entrega, dile lo que le queda pendiente con esa persona (te lo devuelve la herramienta).
 - En cuanto tengas lo necesario, llama a la herramienta directamente: la app le enseña al dueño una tarjeta con todo lo que se va a guardar y él pulsa Guardar o Cancelar. No le pidas tú otra confirmación antes.
 - El IVA ponlo solo si te lo dice o si no hay duda (teléfono, luz, agua y suministros parecidos van al 21 %). En mercancía no lo supongas: las bebidas mezclan tipos.
 - Después dile en una línea lo que ha quedado apuntado, o que no se ha guardado si lo canceló o falló. Nunca digas que algo está apuntado si la herramienta no te ha confirmado que se guardó.
-- No puedes cambiar ni borrar lo que ya está apuntado, ni apuntar pagos al personal: si te lo pide, dile en qué pestaña se hace (Consultar para corregir o borrar una factura o un cierre; Personal para las entregas).
+- No puedes cambiar ni borrar lo que ya está apuntado, ni marcar días, sueldos o bonos: si te lo pide, dile en qué pestaña se hace (Consultar para corregir o borrar una factura o un cierre; Personal para borrar una entrega, marcar días o cambiar el sueldo).
+- Si te pregunta qué le debe a alguien o cuánto vale su día de trabajo, consúltalo con la herramienta trabajador: te da lo pendiente a día de hoy y lo que vale cada día este mes (sueldo ÷ días del mes).
 
 TU MEMORIA
 Vas aprendiendo de este negocio. Cuando el dueño te cuente algo duradero que te servirá otro día (un objetivo, un acuerdo con un proveedor o un trabajador, una costumbre del local, cómo prefiere que le hables, una corrección que te hace), guárdalo con la herramienta recordar. No guardes cifras que ya están en la app ni cosas pasajeras. Si algo guardado deja de ser verdad, bórralo con olvidar y guarda lo nuevo.`;
@@ -491,7 +519,7 @@ ${notas.length ? notas.map(n => `- [${n.id}] ${n.texto} (apuntado el ${fechaCort
           const etiqueta = etiquetaDe(p.name, p.input || {});
           if (etiqueta) { consultados.push(etiqueta); alAvanzar(`Consultando: ${etiqueta.toLowerCase()}…`); }
           try {
-            const esApunte = p.name === 'apuntar_gasto' || p.name === 'apuntar_cierre';
+            const esApunte = p.name === 'apuntar_gasto' || p.name === 'apuntar_cierre' || p.name === 'apuntar_entrega';
             if (esApunte) alAvanzar('Esperando a que confirmes en la tarjeta…');
             const dato = await ejecutar(p.name, p.input, confirmar);
             if (p.name === 'recordar' && dato && dato.guardado) aprendido++;
@@ -563,7 +591,7 @@ ${notas.length ? notas.map(n => `- [${n.id}] ${n.texto} (apuntado el ${fechaCort
     const caja = $('#ase-mensajes');
     caja.innerHTML = chat.length
       ? chat.map(burbujaHTML).join('')
-      : '<div class="ase-msg ase-el"><p>Pregúntame cómo va el mes, qué debes al equipo o cuánto te tocará de impuestos.</p><p>Y si me dictas un gasto o un cierre, te lo apunto: por ejemplo, «Movistar, 45 €, ayer».</p></div>';
+      : '<div class="ase-msg ase-el"><p>Pregúntame cómo va el mes, qué debes al equipo o cuánto te tocará de impuestos.</p><p>Y si me dictas un gasto, un cierre o una entrega a un trabajador, te lo apunto: por ejemplo, «Movistar, 45 €, ayer» o «100 en efectivo a Jeferson hoy».</p></div>';
     caja.scrollTop = caja.scrollHeight;
     $('#ase-sugerencias').classList.toggle('hidden', chat.length > 0);
   }

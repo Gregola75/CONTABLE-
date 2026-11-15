@@ -807,7 +807,7 @@
 
   <!-- Sin clave: cómo activarlo. No se envía nada hasta que se guarda una clave. -->
   <div id="ase-config" class="ase-panel-cuerpo">
-    <p class="hint">Escríbeme lo que quieras saber de tu negocio y te contesto con los datos de tu app: ventas, gastos, proveedores, personal e impuestos. Y si me dictas un gasto o un cierre («Movistar, 45 €, ayer»), te lo apunto.</p>
+    <p class="hint">Escríbeme lo que quieras saber de tu negocio y te contesto con los datos de tu app: ventas, gastos, proveedores, personal e impuestos. Y si me dictas un gasto, un cierre o una entrega a un trabajador («Movistar, 45 €, ayer»; «100 a Jeferson hoy»), te lo apunto.</p>
     <p class="per-seccion">Para activarlo (una sola vez)</p>
     <p class="hint">El asesor funciona con Claude, un servicio de inteligencia artificial de la empresa Anthropic. Se paga por uso, directamente a ellos: unos céntimos por pregunta.</p>
     <ol class="ase-pasos">
@@ -834,9 +834,10 @@
         <button class="btn btn-small ase-sugerencia">¿Cuánto debo al equipo?</button>
         <button class="btn btn-small ase-sugerencia">¿Cuánto me tocará pagar de impuestos este trimestre?</button>
         <button class="btn btn-small ase-sugerencia">Quiero apuntar un gasto</button>
+        <button class="btn btn-small ase-sugerencia">Quiero apuntar una entrega a un trabajador</button>
       </div>
       <div class="ase-entrada">
-        <textarea id="ase-texto" rows="2" placeholder="Pregunta o dicta un gasto…"></textarea>
+        <textarea id="ase-texto" rows="2" placeholder="Pregunta, o dicta un gasto o un pago…"></textarea>
         <button class="btn btn-primary" id="ase-enviar">Enviar</button>
       </div>
     </div>
@@ -853,7 +854,7 @@
       </div>
 
       <p class="per-seccion">✍️ Lo que puede apuntar</p>
-      <p class="hint" style="margin:0 0 6px">Solo un gasto o un cierre de caja nuevo, y siempre te enseña antes una tarjeta con lo que va a guardar: nada se guarda si no pulsas Guardar. No puede cambiar ni borrar nada de lo que ya tienes; eso se hace en Consultar.</p>
+      <p class="hint" style="margin:0 0 6px">Un gasto, un cierre de caja o una entrega a alguien del equipo, y siempre te enseña antes una tarjeta con lo que va a guardar: nada se guarda si no pulsas Guardar. No puede cambiar ni borrar nada de lo que ya tienes; eso se hace en Consultar y en Personal.</p>
 
       <p class="per-seccion">🔐 Clave y privacidad</p>
       <p class="hint" style="margin:0 0 6px">Al preguntar, sale de tu móvil hacia Claude (de la empresa Anthropic) solo lo necesario para responderte: tu pregunta, la conversación reciente, lo aprendido y los números que haga falta consultar. Nunca las fotos. La clave, la conversación y lo aprendido se guardan solo en este dispositivo. Contesta con lo que está apuntado en la app; la cifra oficial de impuestos es siempre la de tu gestoría.</p>

@@ -400,7 +400,8 @@ restaurar). `window.APP` expone `inicio`, `recientes` y `miniaturas` para la ver
 Un chat donde el dueño pregunta por su negocio y le contesta "un asesor financiero
 de bares de copas". Lo pidió así: que hable con seguridad, que vaya aprendiendo,
 **que no se invente datos** y que **le apunte lo que le dicta** ("Movistar, 45 €,
-ayer"). Es solo interno: no sale en el CSV ni en la impresión.
+ayer"; "100 en efectivo a Jeferson hoy"). Es solo interno: no sale en el CSV ni en la
+impresión.
 
 - **Es una burbuja flotante** (`#ase-burbuja`), no una pestaña: está en todas las
   pantallas y al tocarla abre el panel del chat (`#ase-panel`), que saluda por el nombre
@@ -409,7 +410,8 @@ ayer"). Es solo interno: no sale en el CSV ni en la impresión.
   bloqueo, y no se imprime. La rueda ⚙️ enseña lo aprendido, el nombre, la clave y la
   privacidad.
 - **Apuntar es lo único que puede escribir, y nunca solo** (`apuntar_gasto`,
-  `apuntar_cierre`): `APP.asesor.prepararGasto` / `prepararCierre` comprueban lo dictado y
+  `apuntar_cierre`, `apuntar_entrega`): `APP.asesor.prepararGasto` / `prepararCierre` /
+  `prepararEntrega` comprueban lo dictado y
   devuelven el registro, las líneas de una **tarjeta de confirmación** y **los mismos
   avisos que el formulario** (factura duplicada, total de trimestre ya guardado, cierre
   ya apuntado ese día, total del mes ya guardado, desglose que suma más que el total,
@@ -420,8 +422,20 @@ ayer"). Es solo interno: no sale en el CSV ni en la impresión.
   proveedor se escribe como ya está en la app (el dado de alta o el de sus facturas
   anteriores, porque el informe agrupa por nombre exacto) y el IVA solo se desglosa si se
   dice; con retención, `total = base + IVA − retención`. **No puede cambiar ni borrar nada
-  ya apuntado, ni apuntar pagos al personal**: no hay herramienta para eso. Tras guardar
+  ya apuntado, ni marcar días, sueldos o bonos**: no hay herramienta para eso. Tras guardar
   se repinta la pantalla que se esté viendo (`refrescarPantalla`).
+- **Entregas al equipo** (`prepararEntrega`, lo pidió el dueño: "100 efectivo a Jeferson
+  hoy"): adelantos, pagas y pagos a RRPP, al almacén de pagos de siempre (a un RRPP, con la
+  nota `RRPP`). **Si varias personas coinciden con el nombre no elige** (`buscarPersona`):
+  devuelve la lista numerada con lo que las distingue (tipo, estado, cuándo empezó, sueldo)
+  y su `persona_id`, el asesor pregunta "¿al 1 o al 2?" y vuelve a llamar con ese
+  identificador. La tarjeta enseña **lo que se le debe hoy y cómo quedará después**, y avisa
+  si ya hay una entrega igual ese día, si la fecha es futura o anterior a su alta, o si con
+  ella se le adelanta de más. A un **liquidado no se le apunta nada** (cuenta cerrada: hay
+  que reabrir su ficha). Cómo se pagó ("en efectivo") va en la nota. La herramienta
+  `trabajador` acepta también `persona_id` y da `este_mes.lo_que_vale_cada_dia` (sueldo ÷
+  días del mes) y lo pendiente, que es lo que el dueño pregunta ("qué le debo y qué vale
+  cada día").
 
 - **Es Claude (Anthropic), llamado desde el navegador** con la clave del propio dueño
   (`contable-asesor-clave` en localStorage). La app no tiene servidor, así que se usa el
@@ -487,7 +501,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 473 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 483 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad, el asesor (con un Claude
 simulado: no gasta saldo ni necesita clave) y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.

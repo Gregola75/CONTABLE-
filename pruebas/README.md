@@ -12,7 +12,7 @@ bash pruebas/ejecutar.sh
 
 Al final dice `✅ TODO CORRECTO` o lista los fallos encontrados.
 
-## Qué se comprueba (473 comprobaciones)
+## Qué se comprueba (483 comprobaciones)
 
 **El asesor (chat)** — con un Claude simulado, así que no gasta saldo ni necesita
 clave: que sin clave no sale nada del móvil, que una clave mala no se guarda, que cada
@@ -23,7 +23,10 @@ texto del asesor no se ejecuta como código y que la clave y la conversación no
 las copias de seguridad. Y lo de apuntar: que un gasto o un cierre dictado enseña antes
 una tarjeta con lo que se va a guardar, que **no se guarda nada hasta pulsar Guardar** (ni
 con Cancelar), que salen los avisos de siempre (duplicado, cierre ya apuntado), que se
-reconoce al proveedor dado de alta y que no existe herramienta para cambiar o borrar.
+reconoce al proveedor dado de alta y que no existe herramienta para cambiar o borrar. Y
+las entregas al equipo: que con dos personas del mismo nombre no elige él sino que devuelve
+las dos para preguntar a cuál, que la tarjeta dice lo que se le debe y cómo quedará, que se
+apunta a la persona elegida y no a la otra, y que a un liquidado no se le apunta nada.
 **No comprueba la conexión real con Claude.**
 
 **Informe trimestral** — que los ingresos y gastos del trimestre son los

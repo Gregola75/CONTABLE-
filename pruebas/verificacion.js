@@ -2616,8 +2616,8 @@ TARJETA 450,00`)]);
     envio1.cabeceras['authorization'] === 'Bearer ' + CLAVE_BUENA && envio1.cabeceras['anthropic-dangerous-direct-browser-access'] === 'true' && /bar de copas/.test(JSON.stringify(envio1.cuerpo.system)) &&
     /Nunca de memoria ni de una suposición/.test(JSON.stringify(envio1.cuerpo.system)), JSON.stringify(envio1.cuerpo.system).slice(0, 300));
   const nombresHerr = (envio1.cuerpo.tools || []).map(t => t.name).sort().join(',');
-  chk('asesor', 'Se le dan las 14 herramientas: 9 para consultar, la calculadora, recordar y olvidar, y las 2 para apuntar (gasto y cierre)',
-    nombresHerr === 'apuntar_cierre,apuntar_gasto,avisos,calcular,evolucion,facturas,impuestos_trimestre,olvidar,personal_mes,proveedores,recordar,resumen_mes,trabajador,ventas_por_dia', nombresHerr);
+  chk('asesor', 'Se le dan las 15 herramientas: 9 para consultar, la calculadora, recordar y olvidar, y las 3 para apuntar (gasto, cierre y entrega)',
+    nombresHerr === 'apuntar_cierre,apuntar_entrega,apuntar_gasto,avisos,calcular,evolucion,facturas,impuestos_trimestre,olvidar,personal_mes,proveedores,recordar,resumen_mes,trabajador,ventas_por_dia', nombresHerr);
   chk('asesor', 'Ninguna herramienta sirve para cambiar o borrar lo que ya está apuntado',
     !(envio1.cuerpo.tools || []).some(t => /borrar|eliminar|editar|modificar|cambiar/.test(t.name)));
   const envio2 = apiVistas[1] || { cuerpo: { messages: [] } };
@@ -2669,7 +2669,11 @@ TARJETA 450,00`)]);
     herr.ana.encontrado && herr.ana.nombre === 'Ana' && herr.ana.entregas.length === 1 && cerca(herr.ana.entregas[0].importe, 20) && cerca(herr.ana.pendiente_a_dia_de_hoy, 38.06),
     JSON.stringify(herr.ana).slice(0, 300));
   chk('asesor', 'Si la persona no existe se dice (no se inventa) y se dan los nombres apuntados',
-    herr.nadie.encontrado === false && herr.nadie.personas_apuntadas.includes('Ana'), JSON.stringify(herr.nadie));
+    herr.nadie.encontrado === false && herr.nadie.personas_en_activo.includes('Ana'), JSON.stringify(herr.nadie));
+  chk('asesor', 'Y dice lo que vale su día este mes y lo que le corresponde (lo que el dueño le pregunta: "qué le debo y qué vale cada día")',
+    herr.ana.este_mes && herr.ana.este_mes.lo_que_vale_cada_dia > 0 &&
+    cerca(herr.ana.este_mes.lo_que_vale_cada_dia, Math.round(900 / herr.ana.este_mes.dias_que_tiene_el_mes * 100) / 100) &&
+    typeof herr.ana.persona_id === 'string', JSON.stringify(herr.ana.este_mes));
   chk('asesor', 'Facturas: el gasto de casa va aparte (negocio 700, casa 100) y el IVA detectado es 121,49',
     herr.fac.encontradas === 2 && cerca(herr.fac.total_negocio, 700) && cerca(herr.fac.total_de_casa_aparte, 100) && cerca(herr.fac.iva_soportado_detectado, 121.49), JSON.stringify(herr.fac).slice(0, 300));
   chk('asesor', 'Proveedores: solo los del negocio (Bebidas Pepe, 700, el 100 % del gasto)',
@@ -2819,13 +2823,71 @@ TARJETA 450,00`)]);
   await page.click('#ase-mensajes .ase-tarjeta .ase-cancelar');
   await acabar();
 
+  // --- Apuntar una entrega a alguien del equipo: "100 en efectivo a Jeferson hoy" ---
+  await page.evaluate(async () => {
+    const ahora = new Date().toISOString();
+    const base = { sueldoMensual: 900, diasMes: 26, horasJornada: 7.5, tramos: [], tardes: [], faltas: [], descansos: [], notasDias: [] };
+    await DB.perGuardar({ ...base, nombre: 'Jeferson', dias: ['2026-11-02', '2026-11-03', '2026-11-04'], inicio: '2026-11-02', creado: ahora });
+    await DB.perGuardar({ ...base, nombre: 'Jeferson', sueldoMensual: 1100, dias: ['2026-11-05'], inicio: '2026-11-05', creado: ahora });
+    await DB.perGuardar({ ...base, nombre: 'Carlos', dias: ['2026-11-02'], inicio: '2026-11-02', creado: ahora });
+    await DB.perGuardar({ ...base, nombre: 'Viejo', dias: ['2026-09-01'], inicio: '2026-09-01', fin: '2026-09-01', liquidado: '2026-09-05', creado: ahora });
+  });
+  const pagosDe = (sid) => page.evaluate(async (s) => (await DB.pagoTodos()).filter(p => p.trabajadorSid === s).map(p => ({ fecha: p.fecha, importe: p.importe, notas: p.notas })), sid);
+  // Hay dos Jeferson: no elige él, devuelve las opciones para preguntar a cuál
+  colaAPI = [usa('toolu_e1', 'apuntar_entrega', { nombre: 'jeferson', importe: 100, fecha: '2026-11-12', nota: 'en efectivo' }), dice('Tienes dos Jeferson: ¿al 1 o al 2?')];
+  const chatE1 = await preguntarAlAsesor('100 efectivo a Jeferson hoy 12');
+  const dosJ = ultimoResultado();
+  chk('asesor', 'Si hay dos personas con ese nombre NO apunta ni enseña tarjeta: devuelve las dos, numeradas y con lo que las distingue, para preguntar a cuál',
+    dosJ.guardado === false && (dosJ.coinciden || []).length === 2 && dosJ.coinciden[0].numero === 1 && dosJ.coinciden[1].numero === 2 &&
+    dosJ.coinciden[0].comenzo === '02/11/2026' && dosJ.coinciden[1].comenzo === '05/11/2026' && dosJ.coinciden[1].sueldo_al_mes === 1100 &&
+    /Pregúntale al dueño a cuál/.test(dosJ.motivo) && await page.evaluate(async () => !document.querySelector('#ase-mensajes .ase-tarjeta') && (await DB.pagoTodos()).length === 1),
+    JSON.stringify(dosJ).slice(0, 500));
+  chk('asesor', 'Y la pregunta del asesor ("¿al 1 o al 2?") sale en el chat', /¿al 1 o al 2\?/.test(chatE1), chatE1.slice(-200));
+  // El dueño elige el 2: ahora sí, con la tarjeta de lo que le debe y lo que quedará
+  const sidJ2 = dosJ.coinciden[1].persona_id;
+  colaAPI = [usa('toolu_e2', 'apuntar_entrega', { persona_id: sidJ2, importe: 100, fecha: '2026-11-12', nota: 'en efectivo' }), dice('Apuntado.')];
+  const tarjetaE = await dictar('Al 2');
+  const debeJ2 = await page.evaluate(async (sid) => (await APP.asesor.trabajador({ persona_id: sid })).pendiente_a_dia_de_hoy, sidJ2);
+  chk('asesor', 'Elegida la persona, la tarjeta dice a quién, cuánto, cuándo, la nota, lo que le debe hoy (36,67) y cómo quedará: 63,33 adelantados de más, con su aviso',
+    /Apuntar esta entrega/.test(tarjetaE) && /Para\s*Jeferson/.test(tarjetaE) && /Importe\s*100,00 €/.test(tarjetaE) && /12\/11\/2026/.test(tarjetaE) && /en efectivo/.test(tarjetaE) &&
+    cerca(debeJ2, 36.67) && /Le debes hoy\s*36,67 €/.test(tarjetaE) && /Después de esta entrega\s*63,33 € adelantados de más/.test(tarjetaE) && /63,33 € MÁS de lo que le corresponde/.test(tarjetaE), tarjetaE);
+  chk('asesor', 'Antes de pulsar Guardar no hay ninguna entrega apuntada', (await pagosDe(sidJ2)).length === 0);
+  await page.click('#ase-mensajes .ase-tarjeta .ase-confirmar');
+  const chatE2 = await acabar();
+  const pagosJ2 = await pagosDe(sidJ2);
+  chk('asesor', 'Al pulsar Guardar la entrega queda apuntada a ESE Jeferson (y no al otro), con su fecha y su nota',
+    pagosJ2.length === 1 && cerca(pagosJ2[0].importe, 100) && pagosJ2[0].fecha === '2026-11-12' && pagosJ2[0].notas === 'en efectivo' &&
+    (await pagosDe(dosJ.coinciden[0].persona_id)).length === 0, JSON.stringify(pagosJ2));
+  chk('asesor', 'Al asesor se le dice lo que queda pendiente con él (−63,33) y en el chat queda escrito qué se apuntó',
+    ultimoResultado().guardado === true && cerca(ultimoResultado().pendiente_con_esa_persona_ahora, -63.33) &&
+    /Apuntado en la app: 100,00 € a Jeferson · 12\/11\/2026/.test(chatE2), JSON.stringify(ultimoResultado()));
+  chk('asesor', 'Y la cuenta de la app ya lo refleja: con ese Jeferson va adelantado 63,33',
+    cerca(await page.evaluate(async (sid) => (await APP.asesor.trabajador({ persona_id: sid })).pendiente_a_dia_de_hoy, sidJ2), -63.33));
+  // Con un nombre que solo tiene uno, directo a la tarjeta; y Cancelar no guarda
+  colaAPI = [usa('toolu_e3', 'apuntar_entrega', { nombre: 'carlos', importe: 20, fecha: '2026-11-12' }), dice('No lo apunto.')];
+  const tarjetaE3 = await dictar('20 a Carlos hoy');
+  await page.click('#ase-mensajes .ase-tarjeta .ase-cancelar');
+  await acabar();
+  chk('asesor', 'Si solo hay uno con ese nombre va directo a la tarjeta, y con Cancelar no se apunta nada',
+    /Para\s*Carlos/.test(tarjetaE3) && ultimoResultado().guardado === false &&
+    await page.evaluate(async () => { const c = (await DB.perTodos()).find(t => t.nombre === 'Carlos'); return (await DB.pagoTodos()).filter(p => p.trabajadorSid === c.sid).length === 0; }), tarjetaE3);
+  // A un liquidado no se le apunta nada (su cuenta está cerrada), y sin importe tampoco
+  const entregasNo = await page.evaluate(async () => ({
+    viejo: await APP.asesor.prepararEntrega({ nombre: 'Viejo', importe: 50, fecha: '2026-11-12' }),
+    sinImporte: await APP.asesor.prepararEntrega({ nombre: 'Carlos', fecha: '2026-11-12' }),
+    nadie: await APP.asesor.prepararEntrega({ nombre: 'Zacarías', importe: 50, fecha: '2026-11-12' })
+  }));
+  chk('asesor', 'A un liquidado no se le apuntan entregas (cuenta cerrada), y sin importe o con un nombre que no existe tampoco',
+    entregasNo.viejo.valido === false && /ya está liquidado/.test(entregasNo.viejo.motivo) && entregasNo.sinImporte.valido === false && /Falta el importe/.test(entregasNo.sinImporte.motivo) &&
+    entregasNo.nadie.valido === false && entregasNo.nadie.personas_en_activo.includes('Carlos') && !entregasNo.nadie.personas_en_activo.includes('Viejo'), JSON.stringify(entregasNo).slice(0, 500));
+
   // --- Nada falla en silencio ---
   colaAPI = [usa('toolu_3', 'borrar_todo', {}), dice('No puedo hacer eso.')];
   await preguntarAlAsesor('Borra todos los datos');
   const errHerr = apiVistas[apiVistas.length - 1].cuerpo.messages.slice(-1)[0].content[0];
   chk('asesor', 'Si pide algo que no existe (no hay herramienta para borrar), recibe un error y la app no borra nada',
     errHerr.is_error === true && /No existe la herramienta/.test(errHerr.content) &&
-    await page.evaluate(async () => (await DB.todos()).length === 7 && (await DB.perTodos()).length === 1), JSON.stringify(errHerr));
+    await page.evaluate(async () => (await DB.todos()).length === 7 && (await DB.perTodos()).length === 5 && (await DB.pagoTodos()).length === 2), JSON.stringify(errHerr));
   colaAPI = [dice('Mira: <img src=x onerror="window.__colado=1"> y <b>esto</b>')];
   await preguntarAlAsesor('Prueba de texto raro');
   chk('asesor', 'El texto del asesor nunca se ejecuta como código en la pantalla',

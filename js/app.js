@@ -4873,7 +4873,8 @@
      que pintan el Inicio, el cuadro de mando y Personal, devueltas como datos
      sueltos (sin HTML ni fotos). El asesor no calcula el negocio por su cuenta:
      pregunta aquí y repite lo que le devuelven. Las consultas son de solo
-     lectura; lo único que puede escribir es un gasto o un cierre nuevo, y solo
+     lectura; lo único que puede escribir es un gasto, un cierre o una entrega
+     al personal nuevos, y solo
      después de que el dueño lo confirme en pantalla (ver "Apuntar" más abajo).
      No puede cambiar ni borrar nada. Los importes van redondeados al céntimo. */
   const esMes = (m) => typeof m === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(m);
@@ -4893,6 +4894,41 @@
     d.querySelectorAll('button').forEach(b => b.remove());
     return d.textContent.replace(/\s+/g, ' ').trim();
   };
+
+  /* Encuentra a UNA persona del equipo por su nombre (o parte) o por el
+     identificador que se devolvió en una búsqueda anterior. Si coinciden
+     varias no elige: devuelve la lista numerada, con lo que las distingue,
+     para que el asesor le pregunte al dueño a cuál se refiere. */
+  function fichaCorta(t, n) {
+    return {
+      numero: n, persona_id: t.sid, nombre: t.nombre,
+      tipo: t.esRRPP ? 'RRPP (promotor)' : 'trabajador',
+      estado: t.liquidado ? 'liquidado (ya no trabaja)' : (t.fin ? `de baja desde ${fmtFecha(t.fin)}` : 'en activo'),
+      comenzo: t.inicio ? fmtFecha(t.inicio) : undefined,
+      sueldo_al_mes: t.esRRPP ? undefined : (t.sueldoMensual || 0)
+    };
+  }
+  function buscarPersona(todos, { nombre, persona_id } = {}) {
+    if (persona_id) {
+      const t = todos.find(x => x.sid === String(persona_id));
+      if (t) return { persona: t };
+    }
+    const busca = normalizarNombre(nombre);
+    const apuntadas = todos.filter(t => !t.liquidado).map(t => t.nombre);
+    if (!busca) return { motivo: 'Falta el nombre de la persona. Pregúntaselo al dueño.', personas_en_activo: apuntadas };
+    const candidatos = todos.filter(t => normalizarNombre(t.nombre).includes(busca));
+    const exactos = candidatos.filter(t => normalizarNombre(t.nombre) === busca);
+    let elegidos = exactos.length ? exactos : candidatos;
+    // Entre uno que sigue y otro ya liquidado con el mismo nombre, se entiende el que sigue
+    const vivos = elegidos.filter(t => !t.liquidado);
+    if (vivos.length === 1) elegidos = vivos;
+    if (elegidos.length === 1) return { persona: elegidos[0] };
+    if (!elegidos.length) return { motivo: 'No hay nadie apuntado con ese nombre. Dile al dueño los nombres que hay.', personas_en_activo: apuntadas };
+    return {
+      motivo: `Hay ${elegidos.length} personas que coinciden con ese nombre. Pregúntale al dueño a cuál se refiere (dile las opciones numeradas, con lo que las distingue) y vuelve a llamar con el persona_id de la elegida.`,
+      coinciden: elegidos.map((t, k) => fichaCorta(t, k + 1))
+    };
+  }
 
   const DATOS_ASESOR = {
     /* Un mes entero: ventas, gastos, personal y lo que queda */
@@ -5129,18 +5165,11 @@
     },
 
     /* La cuenta completa de una persona: mes a mes y todas las entregas */
-    async trabajador({ nombre } = {}) {
-      const busca = String(nombre || '').trim().toLowerCase();
+    async trabajador({ nombre, persona_id } = {}) {
       const [regs, todos, pagos] = await Promise.all([DB.todos(), DB.perTodos(), DB.pagoTodos()]);
-      const nombres = todos.map(t => t.nombre);
-      if (!busca) return { encontrado: false, motivo: 'Falta el nombre.', personas_apuntadas: nombres };
-      const candidatos = todos.filter(t => (t.nombre || '').toLowerCase().includes(busca));
-      const exacto = candidatos.filter(t => (t.nombre || '').toLowerCase() === busca);
-      const elegidos = exacto.length ? exacto : candidatos;
-      if (elegidos.length !== 1) {
-        return { encontrado: false, motivo: elegidos.length ? 'Hay varias personas que coinciden: pregunta cuál.' : 'No hay nadie apuntado con ese nombre.', coinciden: elegidos.map(t => t.nombre), personas_apuntadas: nombres };
-      }
-      const t = elegidos[0];
+      const hallado = buscarPersona(todos, { nombre, persona_id });
+      if (!hallado.persona) return { encontrado: false, ...hallado };
+      const t = hallado.persona;
       const pagosT = pagos.filter(p => p.trabajadorSid === t.sid).sort((a, b) => (a.fecha || '').localeCompare(b.fecha || ''));
       const entregas = pagosT.map(p => ({ fecha: p.fecha || null, importe: r2(p.importe || 0), nota: p.notas || undefined }));
       const totalEntregado = r2(pagosT.reduce((s, p) => s + (p.importe || 0), 0));
@@ -5148,7 +5177,7 @@
         const semanas = semanasRRPP(t).reverse();
         const devengado = r2(semanas.reduce((s, w) => s + w.total, 0));
         return {
-          encontrado: true, nombre: t.nombre, tipo: 'RRPP (promotor)', comenzo: t.inicio || null,
+          encontrado: true, persona_id: t.sid, nombre: t.nombre, tipo: 'RRPP (promotor)', comenzo: t.inicio || null,
           semanas: semanas.map(w => ({ del: w.lunes, al: w.hasta, ventas: w.ventas, comision: w.comision, bonos: w.bonos, total: w.total })),
           le_corresponde_en_total: devengado, entregado_en_total: totalEntregado, entregas,
           pendiente_a_dia_de_hoy: r2(devengado - totalEntregado)
@@ -5156,8 +5185,20 @@
       }
       const rrpps = todos.filter(x => x.esRRPP);
       const deuda = await desgloseDeuda(t, pagosT, cierresDesde(regs), true, rrpps);
+      // Lo de este mes, con lo que vale su día (cambia según los días que tenga el mes)
+      const mesHoy = hoyISO().slice(0, 7);
+      const cierresHoy = regs.filter(r => r.tipo === 'cierre' && (r.fecha || '').startsWith(mesHoy));
+      const cHoy = calcularMes(t, ventasParaTrabajador(t, cierresHoy, mesHoy, false, rrpps), pagosT.filter(p => (p.fecha || '').startsWith(mesHoy)), mesHoy);
       return {
-        encontrado: true, nombre: t.nombre, tipo: 'trabajador',
+        encontrado: true, persona_id: t.sid, nombre: t.nombre, tipo: 'trabajador',
+        este_mes: {
+          mes: mesHoy, sueldo_al_mes: cHoy.cond.sueldoMensual, dias_que_tiene_el_mes: cHoy.divisor,
+          lo_que_vale_cada_dia: cHoy.precioDia,
+          dias_trabajados: cHoy.dias.length, dias_de_descanso: cHoy.descanso, dias_pagados: cHoy.diasPagados,
+          dias_pasados_sin_marcar: cHoy.sinMarcar,
+          fijo: cHoy.fijo, comision: cHoy.comision, bonos: cHoy.bono,
+          le_corresponde_este_mes: cHoy.devengado, entregado_este_mes: cHoy.entregado
+        },
         estado: t.liquidado ? `liquidado el ${t.liquidado}` : (t.fin ? `de baja desde ${t.fin}, pendiente de liquidar` : 'en activo'),
         comenzo: t.inicio || null, dejo_de_trabajar: t.fin || null,
         sueldos: periodosSueldo(t).map(p => ({ sueldo_al_mes: p.sueldo, desde: p.desde || 'desde que empezó', hasta: p.hasta || 'hoy' })),
@@ -5317,8 +5358,65 @@
       return { valido: true, titulo: 'Apuntar este cierre de caja', registro, lineas, avisos, resumen: `Cierre del ${fmtFecha(fecha)} · ${INFORME.eur(tot)}` };
     },
 
+    /* Una entrega de dinero a alguien del equipo (adelanto, paga, pago a un RRPP) */
+    async prepararEntrega({ nombre, persona_id, importe, fecha, nota } = {}) {
+      const [regs, todos, pagos] = await Promise.all([DB.todos(), DB.perTodos(), DB.pagoTodos()]);
+      const hallado = buscarPersona(todos, { nombre, persona_id });
+      if (!hallado.persona) return { valido: false, ...hallado };
+      const t = hallado.persona;
+      if (t.liquidado) return { valido: false, motivo: `${t.nombre} ya está liquidado y su cuenta está cerrada: no se le pueden apuntar entregas. Para corregir algo hay que reabrir antes su ficha en Personal.` };
+      importe = r2(Number(importe));
+      if (!(importe > 0)) return { valido: false, motivo: 'Falta el importe de la entrega (un número mayor que cero). Pregúntaselo al dueño.' };
+      if (!esFechaReal(fecha)) return { valido: false, motivo: 'Falta la fecha de la entrega o no es una fecha de verdad (formato AAAA-MM-DD). Pregúntasela al dueño.' };
+
+      const pagosT = pagos.filter(p => p.trabajadorSid === t.sid);
+      let pendiente;
+      if (t.esRRPP) {
+        pendiente = r2(semanasRRPP(t).reduce((s, w) => s + w.total, 0) - pagosT.reduce((s, p) => s + (p.importe || 0), 0));
+      } else {
+        pendiente = (await desgloseDeuda(t, pagosT, cierresDesde(regs), false, todos.filter(x => x.esRRPP))).total;
+      }
+      const despues = r2(pendiente - importe);
+
+      const avisos = [];
+      if (fecha > hoyISO()) avisos.push(`La fecha (${fmtFecha(fecha)}) es posterior a hoy. Comprueba que es la correcta.`);
+      if (t.inicio && fecha < t.inicio) avisos.push(`La fecha es anterior al día en que empezó (${fmtFecha(t.inicio)}). Comprueba que es la correcta.`);
+      if (pagosT.some(p => p.fecha === fecha && Math.abs((p.importe || 0) - importe) < 0.005)) {
+        avisos.push(`Ya hay apuntada una entrega de ${INFORME.eur(importe)} a ${t.nombre} el ${fmtFecha(fecha)}. Si guardas esta, contará DOS VECES.`);
+      }
+      if (despues < -0.005) avisos.push(`Con esta entrega le habrás dado ${INFORME.eur(-despues)} MÁS de lo que le corresponde hasta hoy (quedará como adelanto).`);
+
+      const notaTxt = String(nota || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+      const registro = {
+        trabajadorSid: t.sid, fecha, importe,
+        notas: t.esRRPP ? (notaTxt ? `RRPP · ${notaTxt}` : 'RRPP') : notaTxt,
+        creado: new Date().toISOString(), origen: 'asesor'
+      };
+      const pendienteTxt = (n) => n >= 0 ? INFORME.eur(n) : `${INFORME.eur(-n)} adelantados de más`;
+      const lineas = [
+        ['Para', `${t.nombre}${t.esRRPP ? ' (RRPP)' : ''}`],
+        ['Importe', INFORME.eur(importe)],
+        ['Fecha', fmtFecha(fecha)]
+      ];
+      if (notaTxt) lineas.push(['Nota', notaTxt]);
+      lineas.push(['Le debes hoy', pendienteTxt(pendiente)], ['Después de esta entrega', pendienteTxt(despues)]);
+      return {
+        valido: true, titulo: 'Apuntar esta entrega', almacen: 'pago', registro, lineas, avisos,
+        resumen: `${INFORME.eur(importe)} a ${t.nombre} · ${fmtFecha(fecha)}`,
+        pendiente_antes: pendiente, pendiente_despues: despues
+      };
+    },
+
     /* Guarda lo que "preparar" devolvió y el dueño ha confirmado en la tarjeta */
-    async guardarApunte(registro) {
+    async guardarApunte(registro, almacen = 'registro') {
+      if (almacen === 'pago') {
+        if (!registro || !registro.trabajadorSid || !esFechaReal(registro.fecha) || !(registro.importe > 0)) {
+          throw new Error('La entrega no está completa: no se ha guardado nada.');
+        }
+        const id = await DB.pagoGuardar({ ...registro });
+        refrescarPantalla();
+        return id;
+      }
       if (!registro || (registro.tipo !== 'factura' && registro.tipo !== 'cierre') || !esFechaReal(registro.fecha) ||
           typeof registro.total !== 'number' || !(registro.total >= 0)) {
         throw new Error('El apunte no está completo: no se ha guardado nada.');
