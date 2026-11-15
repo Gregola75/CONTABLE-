@@ -9,13 +9,18 @@
      y debajo de cada respuesta se enseña qué datos consultó.
    - Va aprendiendo: lo que el dueño le cuenta y merece recordarse lo guarda con
      la herramienta "recordar", y se le vuelve a dar en cada conversación.
+   - Puede APUNTAR un gasto o un cierre de caja que el dueño le dicte ("Movistar,
+     45 €, ayer"), pero nunca por su cuenta: la app enseña una tarjeta con lo que
+     se va a guardar y solo se guarda si el dueño pulsa Guardar. No puede cambiar
+     ni borrar nada.
+   - Vive en una burbuja flotante, a mano desde cualquier pantalla.
 
    Qué sale del móvil: la pregunta, la conversación reciente, lo aprendido y los
    datos que haga falta consultar para responder. Nunca las fotos. La clave, la
    conversación y lo aprendido viven solo en este dispositivo (localStorage): no
    van a la nube de la app ni a las copias de seguridad.
 
-   Sin clave, la pestaña solo enseña cómo activarlo: no se envía nada. */
+   Sin clave, la burbuja solo enseña cómo activarlo: no se envía nada. */
 (() => {
   'use strict';
 
@@ -33,6 +38,8 @@
   const CLAVE_API = 'contable-asesor-clave';
   const CLAVE_MEMORIA = 'contable-asesor-memoria';
   const CLAVE_CHAT = 'contable-asesor-chat';
+  const CLAVE_NOMBRE = 'contable-asesor-nombre';
+  const NOMBRE_POR_DEFECTO = 'Gregory';   // el dueño; lo puede cambiar en los ajustes del asesor
 
   /* ---------- Lo que se guarda en el dispositivo ---------- */
 
@@ -48,6 +55,10 @@
   const leerClave = () => { try { return localStorage.getItem(CLAVE_API) || ''; } catch (e) { return ''; } };
   const leerMemoria = () => leerJSON(CLAVE_MEMORIA, []).filter(n => n && n.texto);
   const leerChat = () => leerJSON(CLAVE_CHAT, []).filter(m => m && m.texto);
+  const leerNombre = () => {
+    try { const n = localStorage.getItem(CLAVE_NOMBRE); return n === null ? NOMBRE_POR_DEFECTO : n; }
+    catch (e) { return NOMBRE_POR_DEFECTO; }
+  };
 
   function avisar(texto) {
     const t = $('#toast');
@@ -205,6 +216,40 @@
       input_schema: { type: 'object', properties: {} }
     },
     {
+      name: 'apuntar_gasto',
+      description: 'Apunta en la app un gasto o una factura que el dueño te dicta (por ejemplo "Movistar, 45 euros, ayer"). Necesita el proveedor, el importe total pagado y la fecha. La app le enseña al dueño una tarjeta con todo y solo se guarda si él pulsa Guardar: el resultado te dice si se guardó o si lo canceló. Un gasto por llamada; si te dicta varios, llama una vez por cada uno.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          proveedor: { type: 'string', description: 'A quién se le paga (Movistar, Endesa, Bebidas Pepe…), tal como lo dice el dueño.' },
+          total: { type: 'number', description: 'El importe total pagado, en euros, IVA incluido. Por ejemplo 45.5' },
+          fecha: FECHA('La fecha de la factura o del gasto'),
+          categoria: { type: 'string', enum: ['Mercancía', 'Alquiler', 'Luz', 'Agua', 'Teléfono/Internet', 'Seguros', 'Personal', 'Reparaciones', 'Limpieza', 'Otros'], description: 'El tipo de gasto. Si el proveedor ya está dado de alta en la app y no lo indicas, se usa el suyo.' },
+          iva_tipo: { type: 'integer', enum: [21, 10, 5, 4, 0], description: 'El tipo de IVA de la factura, solo si el dueño lo dice o es seguro. Si no se indica, se guarda sin desglosar.' },
+          retencion_tipo: { type: 'integer', enum: [19, 15, 7], description: 'Retención de IRPF, solo si la factura la lleva (19 en el alquiler del local; 15 o 7 en profesionales).' },
+          gasto_de_casa: { type: 'boolean', description: 'true si es un gasto personal o de casa, no del negocio.' },
+          notas: { type: 'string', description: 'Una nota corta opcional.' }
+        },
+        required: ['proveedor', 'total', 'fecha']
+      }
+    },
+    {
+      name: 'apuntar_cierre',
+      description: 'Apunta en la app el cierre de caja de un día que el dueño te dicta (por ejemplo "ayer hicimos 1.200, 500 en efectivo y 700 con tarjeta"). Necesita la fecha y el total de ventas (o el desglose). La app le enseña al dueño una tarjeta y solo se guarda si él pulsa Guardar.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          fecha: FECHA('El día del cierre (el día en que se abrió la caja, aunque cerrara de madrugada)'),
+          total: { type: 'number', description: 'El total de ventas del día, en euros.' },
+          efectivo: { type: 'number', description: 'Lo cobrado en efectivo, si lo dice.' },
+          tarjeta: { type: 'number', description: 'Lo cobrado con tarjeta, si lo dice.' },
+          sumup: { type: 'number', description: 'Lo cobrado con SumUp, si lo dice.' },
+          notas: { type: 'string', description: 'Una nota corta opcional.' }
+        },
+        required: ['fecha']
+      }
+    },
+    {
       name: 'calcular',
       description: 'Calculadora exacta. Úsala para cualquier suma, resta, porcentaje, media o proyección en vez de hacer la cuenta de cabeza. Escribe la operación con números (punto decimal), + - * / y paréntesis.',
       input_schema: { type: 'object', properties: { expresion: { type: 'string', description: 'Por ejemplo: (18250.40-5300)/18250.40*100' } }, required: ['expresion'] }
@@ -240,10 +285,25 @@
     olvidar: (i) => olvidar(i)
   };
 
-  async function ejecutar(nombre, entrada) {
+  /* Apuntar algo: se prepara, se le enseña al dueño y solo se guarda si lo
+     confirma. "confirmar" recibe la tarjeta y devuelve true (Guardar) o false. */
+  async function apuntar(preparar, entrada, confirmar) {
+    const p = await preparar(entrada);
+    if (!p.valido) return { guardado: false, motivo: p.motivo };
+    if (typeof confirmar !== 'function') return { guardado: false, motivo: 'No se le ha podido enseñar al dueño para que lo confirme: no se ha guardado nada.' };
+    const si = await confirmar({ titulo: p.titulo, lineas: p.lineas, avisos: p.avisos });
+    if (!si) return { guardado: false, motivo: 'El dueño ha pulsado Cancelar: no se ha guardado nada.' };
+    await datos().guardarApunte(p.registro);
+    return { guardado: true, apuntado: p.resumen, avisos_que_vio_el_dueno: p.avisos.length ? p.avisos : undefined };
+  }
+
+  async function ejecutar(nombre, entrada, confirmar) {
+    const i = entrada && typeof entrada === 'object' ? entrada : {};
+    if (nombre === 'apuntar_gasto') return apuntar((x) => datos().prepararGasto(x), i, confirmar);
+    if (nombre === 'apuntar_cierre') return apuntar((x) => datos().prepararCierre(x), i, confirmar);
     const fn = EJECUTAR[nombre];
     if (!fn) throw new Error(`No existe la herramienta "${nombre}".`);
-    return fn(entrada && typeof entrada === 'object' ? entrada : {});
+    return fn(i);
   }
 
   /* Cómo se le cuenta al dueño lo que se consultó, debajo de cada respuesta */
@@ -276,7 +336,7 @@ CÓMO HABLAS
 
 DE DÓNDE SALEN LOS DATOS
 El dueño decide cosas de dinero con lo que le dices: una cifra inventada le puede costar dinero o una discusión con un trabajador. Por eso:
-- Toda cifra de su negocio (ventas, gastos, sueldos, deudas, impuestos, fechas) sale de una herramienta consultada en esta misma respuesta. Nunca de memoria ni de una suposición. Aunque creas recordar el número de antes, vuelve a consultarlo: los datos cambian.
+- Toda cifra de su negocio (ventas, gastos, sueldos, deudas, impuestos, fechas) sale de una herramienta consultada en esta misma respuesta, o de lo que el propio dueño te acaba de dictar. Nunca de memoria ni de una suposición. Aunque creas recordar el número de antes, vuelve a consultarlo: los datos cambian.
 - Si la app no tiene el dato, dilo sin rodeos ("eso no lo tengo apuntado en la app") y di qué habría que apuntar. No rellenes huecos.
 - Las cuentas (sumas, restas, porcentajes, medias) hazlas con la herramienta calcular, y usa los totales que ya te dan las herramientas antes que sumar listas.
 - Si te piden una proyección o un "qué pasaría si", hazla, llámala estimación y di en una línea con qué números la has hecho.
@@ -291,6 +351,14 @@ CÓMO CUENTA LA APP
 - La previsión de impuestos es interna y orientativa, y no incluye el coste de personal. La cifra oficial la calcula su gestoría: dilo una vez cuando hables de impuestos, sin sermones.
 - El mes en curso está sin terminar: compáralo con otros por media diaria, no por total.
 
+APUNTAR GASTOS Y CIERRES
+Puedes apuntar en la app un gasto (o factura) y un cierre de caja cuando el dueño te lo dicta, con apuntar_gasto y apuntar_cierre.
+- Un gasto necesita tres cosas: a quién se paga, el importe total y la fecha. Un cierre, la fecha y las ventas. Si te falta alguna, pregúntala en una línea; no la supongas. "Hoy", "ayer" o "el viernes" los conviertes tú a fecha con el día de hoy.
+- En cuanto tengas lo necesario, llama a la herramienta directamente: la app le enseña al dueño una tarjeta con todo lo que se va a guardar y él pulsa Guardar o Cancelar. No le pidas tú otra confirmación antes.
+- El IVA ponlo solo si te lo dice o si no hay duda (teléfono, luz, agua y suministros parecidos van al 21 %). En mercancía no lo supongas: las bebidas mezclan tipos.
+- Después dile en una línea lo que ha quedado apuntado, o que no se ha guardado si lo canceló o falló. Nunca digas que algo está apuntado si la herramienta no te ha confirmado que se guardó.
+- No puedes cambiar ni borrar lo que ya está apuntado, ni apuntar pagos al personal: si te lo pide, dile en qué pestaña se hace (Consultar para corregir o borrar una factura o un cierre; Personal para las entregas).
+
 TU MEMORIA
 Vas aprendiendo de este negocio. Cuando el dueño te cuente algo duradero que te servirá otro día (un objetivo, un acuerdo con un proveedor o un trabajador, una costumbre del local, cómo prefiere que le hables, una corrección que te hace), guárdalo con la herramienta recordar. No guardes cifras que ya están en la app ni cosas pasajeras. Si algo guardado deja de ser verdad, bórralo con olvidar y guarda lo nuevo.`;
 
@@ -298,7 +366,8 @@ Vas aprendiendo de este negocio. Cuando el dueño te cuente algo duradero que te
     const hoy = hoyISO();
     const d = new Date();
     const notas = leerMemoria();
-    return `Hoy es ${DIAS[d.getDay()]} ${d.getDate()} de ${MESES[d.getMonth()]} de ${d.getFullYear()} (${hoy}). El mes en curso es ${hoy.slice(0, 7)}.
+    const nombre = leerNombre().trim();
+    return `Hoy es ${DIAS[d.getDay()]} ${d.getDate()} de ${MESES[d.getMonth()]} de ${d.getFullYear()} (${hoy}). El mes en curso es ${hoy.slice(0, 7)}.${nombre ? `\nEl dueño se llama ${nombre}: llámale por su nombre de vez en cuando, con naturalidad.` : ''}
 
 LO QUE HAS APRENDIDO DE ESTE NEGOCIO HASTA HOY:
 ${notas.length ? notas.map(n => `- [${n.id}] ${n.texto} (apuntado el ${fechaCorta(n.fecha)})`).join('\n') : '(todavía nada)'}`;
@@ -359,7 +428,7 @@ ${notas.length ? notas.map(n => `- [${n.id}] ${n.texto} (apuntado el ${fechaCort
 
   /* Una pregunta entera: se envía, se ejecutan aquí las consultas que pida y
      se repite hasta que da la respuesta. Devuelve { texto, consultados, coste }. */
-  async function preguntar(pregunta, alAvanzar = () => {}) {
+  async function preguntar(pregunta, alAvanzar = () => {}, confirmar = null) {
     const clave = leerClave();
     if (!clave) throw new Error('Falta la clave del asesor.');
     const { Anthropic, cliente } = await clienteCon(clave);
@@ -371,6 +440,7 @@ ${notas.length ? notas.map(n => `- [${n.id}] ${n.texto} (apuntado el ${fechaCort
     ];
     const mensajes = [...historialParaClaude(), { role: 'user', content: pregunta }];
     const consultados = [];
+    const apuntados = [];
     const uso = { entrada: 0, salida: 0, cacheLeer: 0, cacheEscribir: 0 };
     let aprendido = 0;
 
@@ -409,6 +479,7 @@ ${notas.length ? notas.map(n => `- [${n.id}] ${n.texto} (apuntado el ${fechaCort
           return {
             texto: r.stop_reason === 'max_tokens' ? texto + '\n\n(La respuesta se ha cortado por larga. Pídele que continúe.)' : texto,
             consultados: [...new Set(consultados)],
+            apuntados,
             aprendido,
             coste: costeDe(uso)
           };
@@ -420,8 +491,11 @@ ${notas.length ? notas.map(n => `- [${n.id}] ${n.texto} (apuntado el ${fechaCort
           const etiqueta = etiquetaDe(p.name, p.input || {});
           if (etiqueta) { consultados.push(etiqueta); alAvanzar(`Consultando: ${etiqueta.toLowerCase()}…`); }
           try {
-            const dato = await ejecutar(p.name, p.input);
+            const esApunte = p.name === 'apuntar_gasto' || p.name === 'apuntar_cierre';
+            if (esApunte) alAvanzar('Esperando a que confirmes en la tarjeta…');
+            const dato = await ejecutar(p.name, p.input, confirmar);
             if (p.name === 'recordar' && dato && dato.guardado) aprendido++;
+            if (esApunte && dato && dato.guardado) apuntados.push(dato.apuntado);
             return { type: 'tool_result', tool_use_id: p.id, content: JSON.stringify(dato) };
           } catch (err) {
             return { type: 'tool_result', tool_use_id: p.id, is_error: true, content: (err && err.message) || 'La consulta ha fallado.' };
@@ -434,11 +508,13 @@ ${notas.length ? notas.map(n => `- [${n.id}] ${n.texto} (apuntado el ${fechaCort
     } catch (e) {
       const err = new Error(explicarError(e, Anthropic));
       err.coste = costeDe(uso);
+      // Si algo se guardó antes del fallo, tiene que decirse igual
+      err.apuntados = apuntados;
       throw err;
     }
   }
 
-  /* ---------- La pantalla ---------- */
+  /* ---------- La pantalla: una burbuja flotante que abre el chat ---------- */
 
   const escapar = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
@@ -465,14 +541,21 @@ ${notas.length ? notas.map(n => `- [${n.id}] ${n.texto} (apuntado el ${fechaCort
 
   function burbujaHTML(m) {
     if (m.rol === 'yo') return `<div class="ase-msg ase-yo">${escapar(m.texto).replace(/\n/g, '<br>')}</div>`;
-    if (m.rol === 'aviso') return `<div class="ase-msg ase-aviso">⚠️ ${escapar(m.texto)}</div>`;
-    const pie = [];
-    pie.push(m.datos && m.datos.length
-      ? `📊 Datos consultados en tu app: ${m.datos.map(escapar).join(' · ')}`
-      : '💬 Respuesta sin consultar datos de la app (conocimiento general del asesor)');
+    const apuntado = (m.apuntados || []).map(a => `✍️ Apuntado en la app: ${escapar(a)}`);
+    if (m.rol === 'aviso') {
+      return `<div class="ase-msg ase-aviso">⚠️ ${escapar(m.texto)}${apuntado.length ? `<div class="ase-pie">${apuntado.join('<br>')}</div>` : ''}</div>`;
+    }
+    const pie = [...apuntado];
+    if (m.datos && m.datos.length) pie.push(`📊 Datos consultados en tu app: ${m.datos.map(escapar).join(' · ')}`);
+    else if (!apuntado.length) pie.push('💬 Respuesta sin consultar datos de la app (conocimiento general del asesor)');
     if (m.aprendido) pie.push(`🧠 Ha guardado ${m.aprendido === 1 ? 'una nota' : m.aprendido + ' notas'} en su memoria`);
     if (typeof m.coste === 'number') pie.push(`Coste aprox.: ${dolares(m.coste)}`);
     return `<div class="ase-msg ase-el">${aHTML(m.texto)}<div class="ase-pie">${pie.join('<br>')}</div></div>`;
+  }
+
+  function saludo() {
+    const nombre = leerNombre().trim();
+    return nombre ? `¿Qué tal, ${nombre}? ¿Qué necesitas?` : '¿Qué tal? ¿Qué necesitas?';
   }
 
   function pintarChat() {
@@ -480,7 +563,7 @@ ${notas.length ? notas.map(n => `- [${n.id}] ${n.texto} (apuntado el ${fechaCort
     const caja = $('#ase-mensajes');
     caja.innerHTML = chat.length
       ? chat.map(burbujaHTML).join('')
-      : '<p class="vacio">Pregúntame por tus ventas, gastos, proveedores, personal o impuestos. Contesto con los datos de tu app.</p>';
+      : '<div class="ase-msg ase-el"><p>Pregúntame cómo va el mes, qué debes al equipo o cuánto te tocará de impuestos.</p><p>Y si me dictas un gasto o un cierre, te lo apunto: por ejemplo, «Movistar, 45 €, ayer».</p></div>';
     caja.scrollTop = caja.scrollHeight;
     $('#ase-sugerencias').classList.toggle('hidden', chat.length > 0);
   }
@@ -502,11 +585,65 @@ ${notas.length ? notas.map(n => `- [${n.id}] ${n.texto} (apuntado el ${fechaCort
     }));
   }
 
-  function abrir() {
+  /* Qué se ve dentro del panel: cómo activarlo (sin clave), el chat o sus ajustes */
+  function pintar(verAjustes = false) {
     const hayClave = !!leerClave();
+    $('#ase-saludo').textContent = saludo();
     $('#ase-config').classList.toggle('hidden', hayClave);
     $('#ase-chat').classList.toggle('hidden', !hayClave);
-    if (hayClave) { pintarChat(); pintarMemoria(); }
+    $('#ase-ver-ajustes').classList.toggle('hidden', !hayClave);
+    if (!hayClave) return;
+    $('#ase-vista-chat').classList.toggle('hidden', verAjustes);
+    $('#ase-vista-ajustes').classList.toggle('hidden', !verAjustes);
+    $('#ase-ver-ajustes').textContent = verAjustes ? '💬' : '⚙️';
+    $('#ase-ver-ajustes').title = verAjustes ? 'Volver al chat' : 'Memoria, clave y privacidad';
+    if (verAjustes) { pintarMemoria(); $('#ase-nombre').value = leerNombre(); }
+    else pintarChat();
+  }
+
+  const panelAbierto = () => !$('#ase-panel').classList.contains('hidden');
+
+  function abrir() {
+    $('#ase-panel').classList.remove('hidden');
+    $('#ase-burbuja').classList.add('hidden');
+    document.body.classList.add('ase-abierto');
+    pintar(false);
+  }
+
+  function cerrar() {
+    $('#ase-panel').classList.add('hidden');
+    $('#ase-burbuja').classList.remove('hidden');
+    document.body.classList.remove('ase-abierto');
+  }
+
+  /* La tarjeta de "esto es lo que voy a apuntar": nada se guarda sin que el
+     dueño pulse Guardar. Devuelve true (Guardar) o false (Cancelar). */
+  function confirmarEnPantalla({ titulo, lineas, avisos }) {
+    return new Promise((resolve) => {
+      if (!panelAbierto()) abrir();
+      if (!$('#ase-vista-ajustes').classList.contains('hidden')) pintar(false);
+      const caja = $('#ase-mensajes');
+      const t = document.createElement('div');
+      t.className = 'ase-msg ase-tarjeta';
+      t.innerHTML = `
+        <div class="ase-tarjeta-titulo">✍️ ${escapar(titulo)}</div>
+        ${lineas.map(([k, v]) => `<div class="stat-linea"><span>${escapar(k)}</span><strong>${escapar(v)}</strong></div>`).join('')}
+        ${(avisos || []).map(a => `<p class="ase-tarjeta-aviso">⚠️ ${escapar(a)}</p>`).join('')}
+        <div class="ase-tarjeta-botones">
+          <button class="btn btn-primary ase-confirmar">💾 Guardar</button>
+          <button class="btn btn-ghost ase-cancelar">Cancelar</button>
+        </div>`;
+      caja.insertBefore(t, caja.querySelector('.ase-espera'));
+      caja.scrollTop = caja.scrollHeight;
+      const decidir = (si) => {
+        t.querySelector('.ase-tarjeta-botones').innerHTML = si
+          ? '<span class="txt-ok">✓ Guardando…</span>'
+          : '<span class="txt-sec">Cancelado: no se guarda nada.</span>';
+        resolve(si);
+      };
+      t.querySelector('.ase-confirmar').addEventListener('click', () => decidir(true), { once: true });
+      t.querySelector('.ase-cancelar').addEventListener('click', () => decidir(false), { once: true });
+    });
   }
 
   let ocupado = false;
@@ -532,18 +669,17 @@ ${notas.length ? notas.map(n => `- [${n.id}] ${n.texto} (apuntado el ${fechaCort
 
     let nuevo;
     try {
-      const r = await preguntar(texto, (estado) => { espera.textContent = estado; });
-      nuevo = { rol: 'asesor', texto: r.texto, datos: r.consultados, aprendido: r.aprendido, coste: r.coste, fecha: hoyISO() };
+      const r = await preguntar(texto, (estado) => { espera.textContent = estado; }, confirmarEnPantalla);
+      nuevo = { rol: 'asesor', texto: r.texto, datos: r.consultados, apuntados: r.apuntados, aprendido: r.aprendido, coste: r.coste, fecha: hoyISO() };
     } catch (e) {
-      nuevo = { rol: 'aviso', texto: (e && e.message) || 'Ha fallado algo inesperado.', fecha: hoyISO() };
+      nuevo = { rol: 'aviso', texto: (e && e.message) || 'Ha fallado algo inesperado.', apuntados: (e && e.apuntados) || [], fecha: hoyISO() };
     }
     const despues = leerChat();
     despues.push(nuevo);
     guardarJSON(CLAVE_CHAT, despues.slice(-MAX_CHAT));
     ocupado = false;
     $('#ase-enviar').disabled = false;
-    pintarChat();
-    pintarMemoria();
+    if ($('#ase-vista-ajustes').classList.contains('hidden')) pintarChat();
   }
 
   /* Guardar la clave: antes se comprueba con una consulta que no cuesta nada */
@@ -562,7 +698,7 @@ ${notas.length ? notas.map(n => `- [${n.id}] ${n.texto} (apuntado el ${fechaCort
       localStorage.setItem(CLAVE_API, clave);
       $('#ase-clave').value = '';
       msg.textContent = '';
-      abrir();
+      pintar(false);
       avisar('✅ Asesor activado.');
     } catch (e) {
       msg.textContent = '⚠️ No se ha guardado. ' + explicarError(e, Anthropic);
@@ -572,26 +708,35 @@ ${notas.length ? notas.map(n => `- [${n.id}] ${n.texto} (apuntado el ${fechaCort
   }
 
   function conectar() {
-    if (!$('#tab-asesor')) return;
+    if (!$('#ase-panel')) return;
+    $('#ase-burbuja').addEventListener('click', abrir);
+    $('#ase-cerrar').addEventListener('click', cerrar);
+    $('#ase-ver-ajustes').addEventListener('click', () => pintar($('#ase-vista-ajustes').classList.contains('hidden')));
     $('#ase-guardar-clave').addEventListener('click', guardarClave);
     $('#ase-enviar').addEventListener('click', () => enviar($('#ase-texto').value));
     $('#ase-texto').addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); enviar($('#ase-texto').value); }
     });
     document.querySelectorAll('.ase-sugerencia').forEach(b => b.addEventListener('click', () => enviar(b.textContent)));
+    $('#ase-guardar-nombre').addEventListener('click', () => {
+      const nombre = $('#ase-nombre').value.replace(/\s+/g, ' ').trim().slice(0, 40);
+      try { localStorage.setItem(CLAVE_NOMBRE, nombre); } catch (e) { avisar('⚠️ No se pudo guardar en este dispositivo.'); return; }
+      $('#ase-saludo').textContent = saludo();
+      avisar(nombre ? `💾 Te llamaré ${nombre}.` : '💾 No te llamaré por ningún nombre.');
+    });
     $('#ase-borrar-chat').addEventListener('click', () => {
       if (!confirm('¿Borrar toda la conversación con el asesor? Lo que ha aprendido se conserva.')) return;
       localStorage.removeItem(CLAVE_CHAT);
-      pintarChat();
+      pintar(false);
     });
     $('#ase-quitar-clave').addEventListener('click', () => {
       if (!confirm('¿Quitar la clave de este dispositivo? El asesor dejará de funcionar aquí hasta que pongas otra. La conversación y lo aprendido se conservan.')) return;
       localStorage.removeItem(CLAVE_API);
-      abrir();
+      pintar(false);
     });
   }
 
   conectar();
 
-  window.ASESOR = { abrir, enviar, preguntar, ejecutar, calcular, HERRAMIENTAS, MODELO, memoria: leerMemoria, chat: leerChat, aHTML };
+  window.ASESOR = { abrir, cerrar, enviar, preguntar, ejecutar, calcular, HERRAMIENTAS, MODELO, memoria: leerMemoria, chat: leerChat, aHTML };
 })();

@@ -13,7 +13,7 @@ desde la rama por defecto del repositorio.
 
 | Archivo | Qué hace |
 |---|---|
-| `index.html` | Toda la interfaz, en pestañas (Inicio, Facturas, Facturación, Consultar, Personal, RRPP, Informes, Asesor, Ajustes) |
+| `index.html` | Toda la interfaz, en pestañas (Inicio, Facturas, Facturación, Consultar, Personal, RRPP, Informes, Ajustes), más la burbuja flotante del asesor |
 | `js/db.js` | Almacenamiento local (IndexedDB): registros, proveedores, personal, pagos |
 | `js/nube.js` | Sincronización con Firebase (Firestore) del proyecto del propio usuario |
 | `js/ocr.js` | Lectura de fotos con Tesseract y detección de proveedor, fechas, totales, IVA y retenciones |
@@ -395,11 +395,33 @@ restaurar). `window.APP` expone `inicio`, `recientes` y `miniaturas` para la ver
 - Un RRPP solo se puede **eliminar si no tiene noches ni entregas**; con
   historial, se conserva como prueba.
 
-## El asesor (pestaña Asesor)
+## El asesor (burbuja flotante)
 
 Un chat donde el dueño pregunta por su negocio y le contesta "un asesor financiero
-de bares de copas". Lo pidió así: que hable con seguridad, que vaya aprendiendo y
-**que no se invente datos**. Es solo interno: no sale en el CSV ni en la impresión.
+de bares de copas". Lo pidió así: que hable con seguridad, que vaya aprendiendo,
+**que no se invente datos** y que **le apunte lo que le dicta** ("Movistar, 45 €,
+ayer"). Es solo interno: no sale en el CSV ni en la impresión.
+
+- **Es una burbuja flotante** (`#ase-burbuja`), no una pestaña: está en todas las
+  pantallas y al tocarla abre el panel del chat (`#ase-panel`), que saluda por el nombre
+  ("¿Qué tal, Gregory? ¿Qué necesitas?"; el nombre se cambia en la rueda ⚙️ del panel,
+  `contable-asesor-nombre`). Va por debajo de los avisos, el visor y la pantalla de
+  bloqueo, y no se imprime. La rueda ⚙️ enseña lo aprendido, el nombre, la clave y la
+  privacidad.
+- **Apuntar es lo único que puede escribir, y nunca solo** (`apuntar_gasto`,
+  `apuntar_cierre`): `APP.asesor.prepararGasto` / `prepararCierre` comprueban lo dictado y
+  devuelven el registro, las líneas de una **tarjeta de confirmación** y **los mismos
+  avisos que el formulario** (factura duplicada, total de trimestre ya guardado, cierre
+  ya apuntado ese día, total del mes ya guardado, desglose que suma más que el total,
+  fecha futura, proveedor sin dar de alta). El dueño ve la tarjeta y **solo se guarda si
+  pulsa Guardar** (`guardarApunte`); con Cancelar no se guarda nada y al modelo se le dice.
+  Si falta el proveedor, el importe o la fecha, no hay tarjeta: se le devuelve que lo
+  pregunte. El registro queda igual que uno del formulario (con `origen: 'asesor'`), el
+  proveedor se escribe como ya está en la app (el dado de alta o el de sus facturas
+  anteriores, porque el informe agrupa por nombre exacto) y el IVA solo se desglosa si se
+  dice; con retención, `total = base + IVA − retención`. **No puede cambiar ni borrar nada
+  ya apuntado, ni apuntar pagos al personal**: no hay herramienta para eso. Tras guardar
+  se repinta la pantalla que se esté viendo (`refrescarPantalla`).
 
 - **Es Claude (Anthropic), llamado desde el navegador** con la clave del propio dueño
   (`contable-asesor-clave` en localStorage). La app no tiene servidor, así que se usa el
@@ -407,21 +429,22 @@ de bares de copas". Lo pidió así: que hable con seguridad, que vaya aprendiend
   `js/vendor/anthropic-sdk.js` (un archivo propio: el arranque sigue sin depender de nada
   externo). Modelo `claude-opus-5-5`, esfuerzo `medium`, y `fallbacks: "default"` (beta
   `server-side-fallback-2026-07-01`) para que una negativa por error se reintente sola.
-  **Sin clave no se envía nada**: la pestaña solo explica cómo activarlo y qué datos salen.
+  **Sin clave no se envía nada**: el panel solo explica cómo activarlo y qué datos salen.
 - **Cada cifra la da la app, no el modelo.** Claude no tiene las cuentas: las pide con
   herramientas que se ejecutan en el móvil (`APP.asesor` en `js/app.js`: `resumenMes`,
   `evolucion`, `ventasPorDia`, `facturas`, `proveedores`, `personalMes`, `trabajador`,
   `impuestosTrimestre`, `avisos`), que reutilizan **las mismas funciones** del Inicio, el
   cuadro de mando y Personal (`datosMesDe`, `desgloseDeuda`, `INFORME.prevision`…). Si se
   cambia una cuenta de la app, el asesor la hereda; no hay que duplicar nada. Las
-  herramientas son **solo de lectura** (no hay ninguna que guarde, cambie o borre datos del
-  negocio) y nunca devuelven fotos. Las listas largas se recortan **diciéndolo** y con los
+  herramientas de consulta son **solo de lectura** y nunca devuelven fotos. Las listas largas se recortan **diciéndolo** y con los
   totales de todo, nunca en silencio.
 - Las cuentas las hace con la herramienta `calcular` (un lector propio de `+ − × ÷` y
   paréntesis, sin `eval`), no "de cabeza".
 - **Debajo de cada respuesta se enseña qué datos consultó** ("📊 Datos consultados en tu
-  app: Resumen de octubre de 2026") o, si no consultó nada, "Respuesta sin consultar datos
-  de la app (conocimiento general del asesor)", y lo que costó aprox. en dólares.
+  app: Resumen de octubre de 2026"), **qué apuntó** ("✍️ Apuntado en la app: Movistar ·
+  45,00 € · 12/11/2026") o, si no hizo ninguna de las dos cosas, "Respuesta sin consultar
+  datos de la app (conocimiento general del asesor)", y lo que costó aprox. en dólares. Si
+  la respuesta falla después de haber guardado algo, el aviso lo dice igualmente.
 - **Va aprendiendo** con las herramientas `recordar` / `olvidar`: notas cortas en
   `contable-asesor-memoria` que se le vuelven a dar en cada pregunta y que el dueño ve y
   puede borrar en "🧠 Lo que el asesor ha aprendido". Lo que guarda a mitad de una
@@ -464,7 +487,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 452 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 473 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad, el asesor (con un Claude
 simulado: no gasta saldo ni necesita clave) y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.

@@ -51,7 +51,6 @@
   <button class="tab" data-tab="personal">👥 Personal</button>
   <button class="tab" data-tab="rrpp">🎤 RRPP</button>
   <button class="tab" data-tab="informe">📊 Informes</button>
-  <button class="tab" data-tab="asesor">💬 Asesor</button>
   <button class="tab" data-tab="ajustes">⚙️</button>
 </nav>
 
@@ -693,62 +692,6 @@
 </section>
 
 <!-- ==================== AJUSTES ==================== -->
-<section id="tab-asesor" class="tab-panel">
-  <div class="card">
-    <h2>💬 Tu asesor</h2>
-    <p class="hint">Escríbele lo que quieras saber de tu negocio y te contesta con los datos de tu app: ventas, gastos, proveedores, personal e impuestos. Debajo de cada respuesta verás qué datos ha consultado.</p>
-
-    <!-- Sin clave: cómo activarlo. No se envía nada hasta que se guarda una clave. -->
-    <div id="ase-config">
-      <p class="per-seccion">Para activarlo (una sola vez)</p>
-      <p class="hint">El asesor funciona con Claude, un servicio de inteligencia artificial de la empresa Anthropic. Se paga por uso, directamente a ellos: unos céntimos por pregunta.</p>
-      <ol class="ase-pasos">
-        <li>Entra en <a href="https://platform.claude.com" target="_blank" rel="noopener">platform.claude.com</a> y crea tu cuenta.</li>
-        <li>Añade saldo (con 5 $ tienes para muchas preguntas).</li>
-        <li>Crea una clave (en inglés, «API key»), cópiala y pégala aquí.</li>
-      </ol>
-      <div class="form-group">
-        <label for="ase-clave">Tu clave de Claude</label>
-        <input type="password" id="ase-clave" placeholder="sk-ant-…" autocomplete="off" autocapitalize="off" spellcheck="false">
-      </div>
-      <button class="btn btn-primary" id="ase-guardar-clave">Guardar la clave y activar</button>
-      <p id="ase-config-msg" class="hint txt-bad" style="margin:8px 0 0"></p>
-      <p class="per-seccion">🔐 Qué pasa con tus datos</p>
-      <p class="hint">Al preguntar, sale de tu móvil hacia Claude <strong>solo lo necesario para responderte</strong>: tu pregunta, la conversación reciente y los números que haga falta consultar (por ejemplo, las ventas del mes o lo que debes a un trabajador). <strong>Nunca las fotos</strong> de tus facturas. La clave, la conversación y lo que el asesor aprende se guardan solo en este dispositivo: no van a la nube de la app ni a las copias de seguridad. Si no pones clave, no se envía nada.</p>
-    </div>
-
-    <div id="ase-chat" class="hidden">
-      <div id="ase-mensajes" class="ase-mensajes"></div>
-      <div id="ase-sugerencias" class="ase-sugerencias">
-        <button class="btn btn-small ase-sugerencia">¿Cómo va este mes?</button>
-        <button class="btn btn-small ase-sugerencia">¿En qué se me va el dinero?</button>
-        <button class="btn btn-small ase-sugerencia">¿Cuánto debo al equipo?</button>
-        <button class="btn btn-small ase-sugerencia">¿Cuánto me tocará pagar de impuestos este trimestre?</button>
-        <button class="btn btn-small ase-sugerencia">¿Qué proveedor me cuesta más?</button>
-      </div>
-      <div class="ase-entrada">
-        <textarea id="ase-texto" rows="2" placeholder="Escribe tu pregunta…"></textarea>
-        <button class="btn btn-primary" id="ase-enviar">Enviar</button>
-      </div>
-      <p class="hint" style="margin:8px 0 0">Contesta con lo que está apuntado en la app: si faltan cierres o facturas, sus cuentas también cojean. La cifra oficial de impuestos es siempre la de tu gestoría.</p>
-
-      <details class="ocr-details">
-        <summary id="ase-memoria-titulo">🧠 Lo que el asesor ha aprendido (0)</summary>
-        <p class="hint" style="margin:6px 0">Lo que le cuentas y merece recordarse lo guarda aquí y lo tiene en cuenta en las siguientes conversaciones. Puedes borrar lo que no quieras.</p>
-        <div id="ase-memoria-lista"></div>
-      </details>
-      <details class="ocr-details">
-        <summary>⚙️ Clave y privacidad</summary>
-        <p class="hint" style="margin:6px 0">Al preguntar, sale de tu móvil hacia Claude (de la empresa Anthropic) solo lo necesario para responderte: tu pregunta, la conversación reciente, lo aprendido y los números que haga falta consultar. Nunca las fotos. La clave, la conversación y lo aprendido se guardan solo en este dispositivo.</p>
-        <div class="form-actions">
-          <button class="btn btn-small" id="ase-borrar-chat">🗑️ Borrar la conversación</button>
-          <button class="btn btn-small" id="ase-quitar-clave">Quitar la clave de este dispositivo</button>
-        </div>
-      </details>
-    </div>
-  </div>
-</section>
-
 <section id="tab-ajustes" class="tab-panel">
   <div class="card">
     <h2>🔐 Seguridad</h2>
@@ -845,6 +788,81 @@
     <img id="visor-img" alt="Documento ampliado" draggable="false">
   </div>
   <p class="visor-ayuda">Pellizca o toca dos veces para ampliar · arrastra para moverte</p>
+</div>
+
+<!-- El asesor: una burbuja flotante, a mano desde cualquier pantalla. Al tocarla
+     se abre el chat. Sin clave no se envía nada: solo explica cómo activarlo. -->
+<button id="ase-burbuja" class="ase-burbuja" aria-label="Abrir el asesor" title="Tu asesor">💬</button>
+<div id="ase-panel" class="ase-panel hidden">
+  <div class="ase-panel-cab">
+    <div style="min-width:0">
+      <div class="ase-panel-titulo">💬 Tu asesor</div>
+      <div id="ase-saludo" class="ase-saludo">¿Qué tal? ¿Qué necesitas?</div>
+    </div>
+    <div class="ase-panel-botones">
+      <button id="ase-ver-ajustes" class="btn btn-small hidden" title="Memoria, clave y privacidad">⚙️</button>
+      <button id="ase-cerrar" class="btn btn-small" aria-label="Cerrar el asesor">✕</button>
+    </div>
+  </div>
+
+  <!-- Sin clave: cómo activarlo. No se envía nada hasta que se guarda una clave. -->
+  <div id="ase-config" class="ase-panel-cuerpo">
+    <p class="hint">Escríbeme lo que quieras saber de tu negocio y te contesto con los datos de tu app: ventas, gastos, proveedores, personal e impuestos. Y si me dictas un gasto o un cierre («Movistar, 45 €, ayer»), te lo apunto.</p>
+    <p class="per-seccion">Para activarlo (una sola vez)</p>
+    <p class="hint">El asesor funciona con Claude, un servicio de inteligencia artificial de la empresa Anthropic. Se paga por uso, directamente a ellos: unos céntimos por pregunta.</p>
+    <ol class="ase-pasos">
+      <li>Entra en <a href="https://platform.claude.com" target="_blank" rel="noopener">platform.claude.com</a> y crea tu cuenta.</li>
+      <li>Añade saldo (con 5 $ tienes para muchas preguntas).</li>
+      <li>Crea una clave (en inglés, «API key»), cópiala y pégala aquí.</li>
+    </ol>
+    <div class="form-group">
+      <label for="ase-clave">Tu clave de Claude</label>
+      <input type="password" id="ase-clave" placeholder="sk-ant-…" autocomplete="off" autocapitalize="off" spellcheck="false">
+    </div>
+    <button class="btn btn-primary" id="ase-guardar-clave">Guardar la clave y activar</button>
+    <p id="ase-config-msg" class="hint txt-bad" style="margin:8px 0 0"></p>
+    <p class="per-seccion">🔐 Qué pasa con tus datos</p>
+    <p class="hint">Al preguntar, sale de tu móvil hacia Claude <strong>solo lo necesario para responderte</strong>: tu pregunta, la conversación reciente y los números que haga falta consultar (por ejemplo, las ventas del mes o lo que debes a un trabajador). <strong>Nunca las fotos</strong> de tus facturas. La clave, la conversación y lo que el asesor aprende se guardan solo en este dispositivo: no van a la nube de la app ni a las copias de seguridad. Si no pones clave, no se envía nada.</p>
+  </div>
+
+  <div id="ase-chat" class="ase-panel-chat hidden">
+    <div id="ase-vista-chat" class="ase-vista">
+      <div id="ase-mensajes" class="ase-mensajes"></div>
+      <div id="ase-sugerencias" class="ase-sugerencias">
+        <button class="btn btn-small ase-sugerencia">¿Cómo va este mes?</button>
+        <button class="btn btn-small ase-sugerencia">¿En qué se me va el dinero?</button>
+        <button class="btn btn-small ase-sugerencia">¿Cuánto debo al equipo?</button>
+        <button class="btn btn-small ase-sugerencia">¿Cuánto me tocará pagar de impuestos este trimestre?</button>
+        <button class="btn btn-small ase-sugerencia">Quiero apuntar un gasto</button>
+      </div>
+      <div class="ase-entrada">
+        <textarea id="ase-texto" rows="2" placeholder="Pregunta o dicta un gasto…"></textarea>
+        <button class="btn btn-primary" id="ase-enviar">Enviar</button>
+      </div>
+    </div>
+
+    <div id="ase-vista-ajustes" class="ase-vista ase-panel-cuerpo hidden">
+      <p class="per-seccion" id="ase-memoria-titulo">🧠 Lo que el asesor ha aprendido (0)</p>
+      <p class="hint" style="margin:0 0 6px">Lo que le cuentas y merece recordarse lo guarda aquí y lo tiene en cuenta en las siguientes conversaciones. Puedes borrar lo que no quieras.</p>
+      <div id="ase-memoria-lista"></div>
+
+      <p class="per-seccion">👋 Cómo te llama</p>
+      <div class="form-row">
+        <div class="form-group"><input type="text" id="ase-nombre" maxlength="40" placeholder="Tu nombre"></div>
+        <button class="btn btn-small" id="ase-guardar-nombre" style="align-self:flex-start;padding:12px">Guardar</button>
+      </div>
+
+      <p class="per-seccion">✍️ Lo que puede apuntar</p>
+      <p class="hint" style="margin:0 0 6px">Solo un gasto o un cierre de caja nuevo, y siempre te enseña antes una tarjeta con lo que va a guardar: nada se guarda si no pulsas Guardar. No puede cambiar ni borrar nada de lo que ya tienes; eso se hace en Consultar.</p>
+
+      <p class="per-seccion">🔐 Clave y privacidad</p>
+      <p class="hint" style="margin:0 0 6px">Al preguntar, sale de tu móvil hacia Claude (de la empresa Anthropic) solo lo necesario para responderte: tu pregunta, la conversación reciente, lo aprendido y los números que haga falta consultar. Nunca las fotos. La clave, la conversación y lo aprendido se guardan solo en este dispositivo. Contesta con lo que está apuntado en la app; la cifra oficial de impuestos es siempre la de tu gestoría.</p>
+      <div class="form-actions">
+        <button class="btn btn-small" id="ase-borrar-chat">🗑️ Borrar la conversación</button>
+        <button class="btn btn-small" id="ase-quitar-clave">Quitar la clave de este dispositivo</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <div id="toast" class="toast hidden"></div>

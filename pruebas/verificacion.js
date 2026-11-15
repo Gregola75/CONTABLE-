@@ -2555,18 +2555,37 @@ TARJETA 450,00`)]);
     await DB.pagoGuardar({ trabajadorSid: ana.sid, fecha: '2026-10-02', importe: 20, notas: 'adelanto', creado: ahora });
   });
 
+  // --- Es una burbuja flotante, a mano desde cualquier pantalla ---
+  await page.click('.tab[data-tab="inicio"]');
+  const burbuja = await page.evaluate(() => {
+    const b = document.querySelector('#ase-burbuja');
+    const r = b.getBoundingClientRect();
+    return { visible: !b.classList.contains('hidden') && r.width > 40 && r.bottom <= innerHeight && r.right <= innerWidth,
+      fija: getComputedStyle(b).position === 'fixed', panelCerrado: document.querySelector('#ase-panel').classList.contains('hidden'),
+      sinPestana: !document.querySelector('.tab[data-tab="asesor"]') };
+  });
+  chk('asesor', 'El asesor es una burbuja flotante en la pantalla (no una pestaña), con el chat cerrado hasta que se toca',
+    burbuja.visible && burbuja.fija && burbuja.panelCerrado && burbuja.sinPestana, JSON.stringify(burbuja));
+  await page.click('.tab[data-tab="personal"]');
+  chk('asesor', 'Y sigue ahí en las demás pantallas',
+    await page.evaluate(() => { const r = document.querySelector('#ase-burbuja').getBoundingClientRect(); return r.width > 40 && r.bottom <= innerHeight; }));
+
   // --- Sin clave: solo se explica cómo activarlo, y no sale nada ---
-  await page.click('.tab[data-tab="asesor"]');
+  await page.click('#ase-burbuja');
   await page.waitForTimeout(300);
+  chk('asesor', 'Al tocarla se abre el chat y saluda por el nombre: "¿Qué tal, Gregory? ¿Qué necesitas?"',
+    await page.evaluate(() => !document.querySelector('#ase-panel').classList.contains('hidden') &&
+      document.querySelector('#ase-burbuja').classList.contains('hidden') &&
+      document.querySelector('#ase-saludo').textContent === '¿Qué tal, Gregory? ¿Qué necesitas?'));
   const sinClave = await page.evaluate(() => ({
     config: !document.querySelector('#ase-config').classList.contains('hidden'),
     chat: !document.querySelector('#ase-chat').classList.contains('hidden'),
     texto: document.querySelector('#ase-config').textContent.replace(/\s+/g, ' ')
   }));
-  chk('asesor', 'Sin clave, la pestaña solo explica cómo activarlo y no hay chat', sinClave.config && !sinClave.chat, JSON.stringify(sinClave).slice(0, 200));
+  chk('asesor', 'Sin clave, solo explica cómo activarlo y no hay chat', sinClave.config && !sinClave.chat, JSON.stringify(sinClave).slice(0, 200));
   chk('asesor', 'Y dice qué pasa con los datos: solo lo necesario, nunca las fotos, y sin clave no se envía nada',
     /Nunca las fotos/.test(sinClave.texto) && /Si no pones clave, no se envía nada/.test(sinClave.texto), sinClave.texto.slice(-400));
-  chk('asesor', 'Abrir la pestaña sin clave no hace ninguna llamada a Claude', llamadasAPI === 0, String(llamadasAPI));
+  chk('asesor', 'Abrirlo sin clave no hace ninguna llamada a Claude', llamadasAPI === 0, String(llamadasAPI));
 
   // --- Una clave mala no se guarda, y se dice ---
   await page.fill('#ase-clave', 'sk-ant-mala');
@@ -2597,8 +2616,10 @@ TARJETA 450,00`)]);
     envio1.cabeceras['authorization'] === 'Bearer ' + CLAVE_BUENA && envio1.cabeceras['anthropic-dangerous-direct-browser-access'] === 'true' && /bar de copas/.test(JSON.stringify(envio1.cuerpo.system)) &&
     /Nunca de memoria ni de una suposición/.test(JSON.stringify(envio1.cuerpo.system)), JSON.stringify(envio1.cuerpo.system).slice(0, 300));
   const nombresHerr = (envio1.cuerpo.tools || []).map(t => t.name).sort().join(',');
-  chk('asesor', 'Se le dan las 12 herramientas (resumen, evolución, ventas, facturas, proveedores, personal, trabajador, impuestos, avisos, calcular, recordar, olvidar)',
-    nombresHerr === 'avisos,calcular,evolucion,facturas,impuestos_trimestre,olvidar,personal_mes,proveedores,recordar,resumen_mes,trabajador,ventas_por_dia', nombresHerr);
+  chk('asesor', 'Se le dan las 14 herramientas: 9 para consultar, la calculadora, recordar y olvidar, y las 2 para apuntar (gasto y cierre)',
+    nombresHerr === 'apuntar_cierre,apuntar_gasto,avisos,calcular,evolucion,facturas,impuestos_trimestre,olvidar,personal_mes,proveedores,recordar,resumen_mes,trabajador,ventas_por_dia', nombresHerr);
+  chk('asesor', 'Ninguna herramienta sirve para cambiar o borrar lo que ya está apuntado',
+    !(envio1.cuerpo.tools || []).some(t => /borrar|eliminar|editar|modificar|cambiar/.test(t.name)));
   const envio2 = apiVistas[1] || { cuerpo: { messages: [] } };
   const resultado1 = (() => {
     try {
@@ -2670,7 +2691,11 @@ TARJETA 450,00`)]);
   // --- Va aprendiendo: lo que se le cuenta se guarda y vuelve en la siguiente pregunta ---
   colaAPI = [usa('toolu_2', 'recordar', { texto: 'Su objetivo de margen es el 25 %' }), dice('Apuntado: tu objetivo de margen es el 25 %.')];
   const chat2 = await preguntarAlAsesor('Mi objetivo de margen es el 25 %, tenlo en cuenta');
+  await page.click('#ase-ver-ajustes');     // la rueda: memoria, nombre, clave y privacidad
+  await page.waitForTimeout(200);
   const memoria = await page.evaluate(() => ({ notas: ASESOR.memoria(), titulo: document.querySelector('#ase-memoria-titulo').textContent, lista: document.querySelector('#ase-memoria-lista').textContent }));
+  await page.click('#ase-ver-ajustes');     // y de vuelta al chat
+  await page.waitForTimeout(200);
   chk('asesor', 'Lo que el dueño le cuenta se guarda en su memoria y se ve en la pantalla',
     memoria.notas.length === 1 && /objetivo de margen es el 25 %/.test(memoria.notas[0].texto) && /\(1\)/.test(memoria.titulo) && /objetivo de margen/.test(memoria.lista) &&
     /Ha guardado una nota en su memoria/.test(chat2), JSON.stringify(memoria).slice(0, 300));
@@ -2684,19 +2709,123 @@ TARJETA 450,00`)]);
     envio5.messages[4].content === '¿Es razonable ese objetivo?' && !/tool_result/.test(JSON.stringify(envio5.messages)), JSON.stringify(envio5.messages).slice(0, 400));
   chk('asesor', 'Una respuesta sin consultar datos lo dice claro: "conocimiento general del asesor"',
     /Respuesta sin consultar datos de la app \(conocimiento general del asesor\)/.test(chat3), chat3.slice(-300));
-  await page.evaluate(() => { document.querySelectorAll('#ase-chat details').forEach(d => { d.open = true; }); });
+  await page.click('#ase-ver-ajustes');
+  await page.waitForTimeout(200);
   await page.click('#ase-memoria-lista .ase-olvidar');
   await page.waitForTimeout(300);
   chk('asesor', 'El dueño puede borrar lo aprendido desde la pantalla',
     await page.evaluate(() => ASESOR.memoria().length === 0 && /\(0\)/.test(document.querySelector('#ase-memoria-titulo').textContent)));
+  // Cómo le llama: se puede cambiar, y el saludo cambia con él
+  await page.fill('#ase-nombre', 'Greg');
+  await page.click('#ase-guardar-nombre');
+  chk('asesor', 'El nombre con el que saluda se puede cambiar', await page.evaluate(() => document.querySelector('#ase-saludo').textContent === '¿Qué tal, Greg? ¿Qué necesitas?'));
+  await page.fill('#ase-nombre', 'Gregory');
+  await page.click('#ase-guardar-nombre');
+  await page.click('#ase-ver-ajustes');
+  await page.waitForTimeout(200);
+
+  // --- Apuntar un gasto dictado: nada se guarda sin que el dueño pulse Guardar ---
+  const dictar = async (texto) => {
+    await page.fill('#ase-texto', texto);
+    await page.click('#ase-enviar');
+    await page.waitForSelector('#ase-mensajes .ase-tarjeta .ase-confirmar', { timeout: 20000 });
+    return (await page.textContent('#ase-mensajes .ase-tarjeta')).replace(/\s+/g, ' ');
+  };
+  const acabar = async () => {
+    await page.waitForFunction(() => !document.querySelector('#ase-enviar').disabled, null, { timeout: 20000 });
+    await page.waitForTimeout(150);
+    return (await page.textContent('#ase-mensajes')).replace(/\s+/g, ' ');
+  };
+  const facturasDe = (nombre) => page.evaluate(async (n) => (await DB.buscar({ tipo: 'factura' })).filter(r => (r.proveedor || '').includes(n))
+    .map(r => ({ proveedor: r.proveedor, nif: r.nif, fecha: r.fecha, total: r.total, base: r.baseImponible, iva: r.ivaCuota, ivaTipo: r.ivaTipo, categoria: r.categoria, personal: r.personal, origen: r.origen })), nombre);
+  const ultimoResultado = () => { try { return JSON.parse(apiVistas[apiVistas.length - 1].cuerpo.messages.slice(-1)[0].content[0].content); } catch (e) { return {}; } };
+
+  colaAPI = [usa('toolu_g1', 'apuntar_gasto', { proveedor: 'Movistar', total: 45, fecha: '2026-11-12', categoria: 'Teléfono/Internet', iva_tipo: 21 }), dice('Hecho: Movistar, 45,00 €, del 12 de noviembre.')];
+  const tarjeta1 = await dictar('Apunta Movistar, 45 euros, del 12 de noviembre');
+  chk('asesor', 'Al dictarle un gasto enseña una tarjeta con lo que va a guardar: proveedor, importe, fecha, tipo e IVA (base 37,19 + IVA 7,81)',
+    /Apuntar este gasto/.test(tarjeta1) && /Movistar/.test(tarjeta1) && /45,00 €/.test(tarjeta1) && /12\/11\/2026/.test(tarjeta1) &&
+    /Teléfono\/Internet/.test(tarjeta1) && /21 % → base 37,19 € \+ IVA 7,81 €/.test(tarjeta1), tarjeta1);
+  chk('asesor', 'Y avisa de que ese proveedor no está dado de alta (irá sin CIF)', /no está dado de alta como proveedor/.test(tarjeta1), tarjeta1);
+  chk('asesor', 'Mientras no se pulsa Guardar, NO hay nada guardado', (await facturasDe('Movistar')).length === 0);
+  await page.click('#ase-mensajes .ase-tarjeta .ase-confirmar');
+  const chatG1 = await acabar();
+  const movistar = await facturasDe('Movistar');
+  chk('asesor', 'Al pulsar Guardar queda la factura completa: Movistar, 45,00, 12/11/2026, Teléfono/Internet, base 37,19 e IVA 7,81',
+    movistar.length === 1 && cerca(movistar[0].total, 45) && movistar[0].fecha === '2026-11-12' && movistar[0].categoria === 'Teléfono/Internet' &&
+    cerca(movistar[0].base, 37.19) && cerca(movistar[0].iva, 7.81) && movistar[0].ivaTipo === 21 && movistar[0].personal === false && movistar[0].origen === 'asesor', JSON.stringify(movistar));
+  chk('asesor', 'Al asesor se le confirma que se guardó, y en el chat queda escrito qué se apuntó',
+    ultimoResultado().guardado === true && /Apuntado en la app: Movistar · 45,00 € · 12\/11\/2026/.test(chatG1), JSON.stringify(ultimoResultado()) + ' ' + chatG1.slice(-300));
+  chk('asesor', 'El gasto nuevo ya cuenta en las cuentas de la app (noviembre: 45,00 de gastos)',
+    cerca(await page.evaluate(async () => (await APP.asesor.resumenMes({ mes: '2026-11' })).gastos_del_negocio), 45));
+
+  // Cancelar: no se guarda nada y el asesor lo sabe
+  colaAPI = [usa('toolu_g2', 'apuntar_gasto', { proveedor: 'Endesa', total: 210.5, fecha: '2026-11-10' }), dice('De acuerdo, no lo apunto.')];
+  const tarjeta2 = await dictar('Apunta Endesa 210,50 del día 10');
+  chk('asesor', 'Si no se dice el IVA, la tarjeta lo deja claro: "sin desglosar"', /IVA\s*sin desglosar/.test(tarjeta2), tarjeta2);
+  await page.click('#ase-mensajes .ase-tarjeta .ase-cancelar');
+  await acabar();
+  chk('asesor', 'Con Cancelar no se guarda nada, y al asesor se le dice que el dueño lo canceló',
+    (await facturasDe('Endesa')).length === 0 && ultimoResultado().guardado === false && /Cancelar/.test(ultimoResultado().motivo || ''), JSON.stringify(ultimoResultado()));
+
+  // El mismo gasto otra vez: el aviso de siempre (se contaría dos veces), y decide el dueño
+  colaAPI = [usa('toolu_g3', 'apuntar_gasto', { proveedor: 'movistar', total: 45, fecha: '2026-11-12' }), dice('No lo he apuntado.')];
+  const tarjeta3 = await dictar('Apunta otra vez Movistar 45 del 12');
+  chk('asesor', 'Si ya hay una factura igual, la tarjeta avisa de que se contaría DOS VECES antes de guardar',
+    /Ya hay una factura de «Movistar» del 12\/11\/2026 por 45,00 €/.test(tarjeta3) && /DOS VECES/.test(tarjeta3), tarjeta3);
+  await page.click('#ase-mensajes .ase-tarjeta .ase-cancelar');
+  await acabar();
+
+  // Un proveedor dado de alta se reconoce: se guarda con su nombre, su CIF y su categoría
+  await page.evaluate(async () => { await DB.provGuardar({ nombre: 'Endesa Energía S.A.', nif: 'A81948077', categoria: 'Luz', creado: new Date().toISOString() }); });
+  colaAPI = [usa('toolu_g4', 'apuntar_gasto', { proveedor: 'endesa', total: 210.5, fecha: '2026-11-10', iva_tipo: 21, gasto_de_casa: false }), dice('Apuntado.')];
+  const tarjeta4 = await dictar('Ahora sí, apunta Endesa 210,50 del día 10 con IVA del 21');
+  await page.click('#ase-mensajes .ase-tarjeta .ase-confirmar');
+  await acabar();
+  const endesa = await facturasDe('Endesa');
+  chk('asesor', 'Un proveedor dado de alta se reconoce: se guarda con su nombre completo, su CIF y su categoría (Luz), sin aviso de proveedor nuevo',
+    endesa.length === 1 && endesa[0].proveedor === 'Endesa Energía S.A.' && endesa[0].nif === 'A81948077' && endesa[0].categoria === 'Luz' &&
+    cerca(endesa[0].base, 173.97) && cerca(endesa[0].iva, 36.53) && /A81948077/.test(tarjeta4) && !/no está dado de alta/.test(tarjeta4), JSON.stringify(endesa) + tarjeta4);
+
+  // Si falta un dato, no hay tarjeta ni se guarda: se le dice al asesor que lo pregunte
+  colaAPI = [usa('toolu_g5', 'apuntar_gasto', { proveedor: 'Vodafone', total: 0, fecha: '2026-02-31' }), dice('¿De cuánto es la factura?')];
+  await preguntarAlAsesor('Apunta una factura de Vodafone');
+  chk('asesor', 'Sin importe (o con una fecha que no existe) no se guarda nada ni se enseña tarjeta: se le pide que lo pregunte',
+    ultimoResultado().guardado === false && /Falta el importe total/.test(ultimoResultado().motivo || '') && (await facturasDe('Vodafone')).length === 0 &&
+    await page.evaluate(() => !document.querySelector('#ase-mensajes .ase-tarjeta')), JSON.stringify(ultimoResultado()));
+
+  // Un alquiler con retención: el total pagado ya lleva la retención descontada
+  const alquiler = await page.evaluate(async () => {
+    const p = await APP.asesor.prepararGasto({ proveedor: 'Inmobiliaria Sol', total: 1020, fecha: '2026-11-01', categoria: 'Alquiler', iva_tipo: 21, retencion_tipo: 19 });
+    return { base: p.registro.baseImponible, iva: p.registro.ivaCuota, ret: p.registro.retCuota, total: p.registro.total };
+  });
+  chk('asesor', 'Alquiler con retención: 1.020 pagados = base 1.000 + IVA 210 − retención 190',
+    cerca(alquiler.base, 1000) && cerca(alquiler.iva, 210) && cerca(alquiler.ret, 190) && cerca(alquiler.base + alquiler.iva - alquiler.ret, alquiler.total), JSON.stringify(alquiler));
+
+  // --- Apuntar un cierre de caja dictado ---
+  colaAPI = [usa('toolu_c1', 'apuntar_cierre', { fecha: '2026-11-10', total: 1200, efectivo: 500, tarjeta: 700 }), dice('Apuntado el cierre del 10: 1.200,00 €.')];
+  const tarjetaC = await dictar('El día 10 hicimos 1200, 500 en efectivo y 700 con tarjeta');
+  chk('asesor', 'Un cierre dictado también pasa por la tarjeta: día, ventas, efectivo y tarjeta',
+    /Apuntar este cierre de caja/.test(tarjetaC) && /10\/11\/2026/.test(tarjetaC) && /1\.?200,00 €/.test(tarjetaC) && /Efectivo\s*500,00 €/.test(tarjetaC) && /Tarjeta\s*700,00 €/.test(tarjetaC), tarjetaC);
+  await page.click('#ase-mensajes .ase-tarjeta .ase-confirmar');
+  await acabar();
+  const cierreNov = await page.evaluate(async () => (await DB.buscar({ tipo: 'cierre', desde: '2026-11-10', hasta: '2026-11-10' }))
+    .map(r => ({ total: r.total, efectivo: r.efectivo, tarjeta: r.tarjeta, sumup: r.sumup, mensual: r.mensual })));
+  chk('asesor', 'Y queda guardado con su desglose (1.200 = 500 efectivo + 700 tarjeta)',
+    cierreNov.length === 1 && cerca(cierreNov[0].total, 1200) && cerca(cierreNov[0].efectivo, 500) && cerca(cierreNov[0].tarjeta, 700) && cierreNov[0].sumup === null && cierreNov[0].mensual === false, JSON.stringify(cierreNov));
+  colaAPI = [usa('toolu_c2', 'apuntar_cierre', { fecha: '2026-11-10', total: 300 }), dice('No lo apunto.')];
+  const tarjetaC2 = await dictar('Apunta otro cierre del 10 de 300');
+  chk('asesor', 'Si ese día ya tiene cierre, la tarjeta avisa de que se sumarían los dos',
+    /Ya hay un cierre guardado para el 10\/11\/2026 \(1\.?200,00 €\)/.test(tarjetaC2) && /se SUMAN los dos/.test(tarjetaC2), tarjetaC2);
+  await page.click('#ase-mensajes .ase-tarjeta .ase-cancelar');
+  await acabar();
 
   // --- Nada falla en silencio ---
   colaAPI = [usa('toolu_3', 'borrar_todo', {}), dice('No puedo hacer eso.')];
   await preguntarAlAsesor('Borra todos los datos');
   const errHerr = apiVistas[apiVistas.length - 1].cuerpo.messages.slice(-1)[0].content[0];
-  chk('asesor', 'Si pide algo que no existe (no hay herramientas para borrar ni cambiar nada), recibe un error y la app no hace nada',
+  chk('asesor', 'Si pide algo que no existe (no hay herramienta para borrar), recibe un error y la app no borra nada',
     errHerr.is_error === true && /No existe la herramienta/.test(errHerr.content) &&
-    await page.evaluate(async () => (await DB.todos()).length === 4 && (await DB.perTodos()).length === 1), JSON.stringify(errHerr));
+    await page.evaluate(async () => (await DB.todos()).length === 7 && (await DB.perTodos()).length === 1), JSON.stringify(errHerr));
   colaAPI = [dice('Mira: <img src=x onerror="window.__colado=1"> y <b>esto</b>')];
   await preguntarAlAsesor('Prueba de texto raro');
   chk('asesor', 'El texto del asesor nunca se ejecuta como código en la pantalla',
@@ -2713,15 +2842,24 @@ TARJETA 450,00`)]);
   const copiaAse = await page.evaluate(async () => JSON.stringify(await DB.exportarTodo()));
   chk('asesor', 'La clave, la conversación y lo aprendido NO van en la copia de seguridad',
     !copiaAse.includes(CLAVE_BUENA) && !copiaAse.includes('Cómo fue octubre') && !copiaAse.includes('objetivo de margen'));
+  await page.click('#ase-ver-ajustes');
+  await page.waitForTimeout(200);
   await page.click('#ase-borrar-chat');
   await page.waitForTimeout(300);
-  chk('asesor', 'Se puede borrar la conversación', await page.evaluate(() => ASESOR.chat().length === 0 && /Pregúntame por tus ventas/.test(document.querySelector('#ase-mensajes').textContent)));
+  chk('asesor', 'Se puede borrar la conversación, y el chat vacío vuelve a explicar qué se le puede pedir',
+    await page.evaluate(() => ASESOR.chat().length === 0 && /Pregúntame cómo va el mes/.test(document.querySelector('#ase-mensajes').textContent) &&
+      /te lo apunto/.test(document.querySelector('#ase-mensajes').textContent)));
+  await page.click('#ase-ver-ajustes');
+  await page.waitForTimeout(200);
   await page.click('#ase-quitar-clave');
   await page.waitForTimeout(300);
   const llamadasAntes = llamadasAPI;
   chk('asesor', 'Y quitar la clave: el chat se apaga y vuelve la pantalla de activación',
     await page.evaluate(() => !localStorage.getItem('contable-asesor-clave') && !document.querySelector('#ase-config').classList.contains('hidden') &&
       document.querySelector('#ase-chat').classList.contains('hidden')) && llamadasAPI === llamadasAntes);
+  await page.click('#ase-cerrar');
+  chk('asesor', 'La ✕ cierra el chat y vuelve la burbuja',
+    await page.evaluate(() => document.querySelector('#ase-panel').classList.contains('hidden') && !document.querySelector('#ase-burbuja').classList.contains('hidden')));
   await page.unroute('https://api.anthropic.com/**');
 
   // ══════════════ 10. ERRORES DE JAVASCRIPT ══════════════

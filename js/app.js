@@ -154,16 +154,28 @@
       $$('.tab-panel').forEach(p => p.classList.remove('active'));
       btn.classList.add('active');
       $('#tab-' + btn.dataset.tab).classList.add('active');
-      if (btn.dataset.tab === 'inicio') pintarInicio();
-      if (btn.dataset.tab === 'ajustes') { pintarStats(); pintarSeguridad(); pintarNube(); }
-      if (btn.dataset.tab === 'consultar') buscar();
-      if (btn.dataset.tab === 'personal') pintarPersonal();
-      if (btn.dataset.tab === 'rrpp') pintarRRPPTab();
-      if (btn.dataset.tab === 'asesor' && window.ASESOR) window.ASESOR.abrir();
-      if (btn.dataset.tab === 'cierres') { pintarFacturacion(); pintarFacturacionTrimestre(); }
-      if (btn.dataset.tab === 'informe') pintarResumen();
+      pintarPestana(btn.dataset.tab);
     });
   });
+
+  function pintarPestana(nombre) {
+    if (nombre === 'inicio') pintarInicio();
+    if (nombre === 'ajustes') { pintarStats(); pintarSeguridad(); pintarNube(); }
+    if (nombre === 'consultar') buscar();
+    if (nombre === 'personal') pintarPersonal();
+    if (nombre === 'rrpp') pintarRRPPTab();
+    if (nombre === 'cierres') { pintarFacturacion(); pintarFacturacionTrimestre(); }
+    if (nombre === 'informe') pintarResumen();
+  }
+
+  /* Tras guardar algo desde fuera de los formularios (el asesor), la pantalla
+     que se está viendo tiene que enseñar ya el dato nuevo. */
+  function refrescarPantalla() {
+    const activa = $('.tab.active');
+    if (activa) pintarPestana(activa.dataset.tab);
+    pintarRecientes();
+    cargarProveedores();
+  }
 
   /* ---------- PDF: convertir la primera página en imagen ---------- */
 
@@ -4860,10 +4872,20 @@
      Todo lo que el asesor dice con cifras sale de aquí: son las MISMAS cuentas
      que pintan el Inicio, el cuadro de mando y Personal, devueltas como datos
      sueltos (sin HTML ni fotos). El asesor no calcula el negocio por su cuenta:
-     pregunta aquí y repite lo que le devuelven. Solo lectura: nada de esto
-     guarda ni borra. Los importes van redondeados al céntimo. */
+     pregunta aquí y repite lo que le devuelven. Las consultas son de solo
+     lectura; lo único que puede escribir es un gasto o un cierre nuevo, y solo
+     después de que el dueño lo confirme en pantalla (ver "Apuntar" más abajo).
+     No puede cambiar ni borrar nada. Los importes van redondeados al céntimo. */
   const esMes = (m) => typeof m === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(m);
   const esFecha = (f) => typeof f === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(f);
+  // Una fecha que existe de verdad (el 31 de febrero no) y de este siglo
+  const esFechaReal = (f) => {
+    if (!esFecha(f)) return false;
+    const d = new Date(f + 'T00:00:00');
+    return !isNaN(d) && d.getFullYear() === +f.slice(0, 4) && d.getMonth() + 1 === +f.slice(5, 7) && d.getDate() === +f.slice(8) && +f.slice(0, 4) >= 2000;
+  };
+  // Las mismas categorías que el formulario de facturas
+  const CATEGORIAS_GASTO = ['Mercancía', 'Alquiler', 'Luz', 'Agua', 'Teléfono/Internet', 'Seguros', 'Personal', 'Reparaciones', 'Limpieza', 'Otros'];
   const pctDe = (parte, total) => total > 0 ? Math.round(parte / total * 1000) / 10 : null;
   const textoPlano = (html) => {
     const d = document.createElement('div');
@@ -5184,6 +5206,126 @@
           'Un IVA a pagar negativo significa que sale a compensar o devolver.'
         ]
       };
+    },
+
+    /* ----- Apuntar: lo único que el asesor puede escribir -----
+       Nunca guarda por su cuenta. "preparar" comprueba lo que le han dictado y
+       devuelve el registro, las líneas de la tarjeta que se le enseña al dueño y
+       los MISMOS avisos que daría el formulario (duplicado, doble cuenta…).
+       Solo cuando el dueño pulsa Guardar en esa tarjeta se llama a "guardar". */
+    async prepararGasto({ proveedor, total, fecha, categoria, iva_tipo, retencion_tipo, gasto_de_casa, notas } = {}) {
+      const nombre = String(proveedor || '').replace(/\s+/g, ' ').trim();
+      if (nombre.length < 2) return { valido: false, motivo: 'Falta el proveedor (a quién se le ha pagado). Pregúntaselo al dueño.' };
+      total = r2(Number(total));
+      if (!(total > 0)) return { valido: false, motivo: 'Falta el importe total del gasto (un número mayor que cero). Pregúntaselo al dueño.' };
+      if (!esFechaReal(fecha)) return { valido: false, motivo: 'Falta la fecha del gasto o no es una fecha de verdad (formato AAAA-MM-DD). Pregúntasela al dueño.' };
+
+      const avisos = [];
+      // El nombre se escribe como ya está en la app: el del proveedor dado de alta
+      // o, si no, el de sus facturas anteriores. El informe agrupa por nombre
+      // exacto, y "movistar" y "Movistar" saldrían como dos proveedores.
+      let prov = await reconocerProveedor(nombre, '');
+      if (!prov) {
+        const anterior = (await DB.buscar({ tipo: 'factura' })).find(r => normalizarNombre(r.proveedor) === normalizarNombre(nombre));
+        if (anterior) prov = { nombre: anterior.proveedor, nif: anterior.nif || '', categoria: anterior.categoria || '' };
+      }
+      const nombreFinal = prov ? prov.nombre : nombre;
+      if (!prov || !prov.nif) avisos.push(`«${nombreFinal}» no está dado de alta como proveedor: se guarda sin CIF. Para que el informe de la gestoría lleve su CIF, dalo de alta en Facturas.`);
+
+      const pedida = String(categoria || '').trim().toLowerCase();
+      const cat = CATEGORIAS_GASTO.find(c => c.toLowerCase() === pedida) ||
+        (pedida && CATEGORIAS_GASTO.find(c => c.toLowerCase().includes(pedida) || pedida.includes(c.toLowerCase().split('/')[0]))) ||
+        (prov && prov.categoria) || 'Otros';
+
+      // IVA y retención: solo si se dicen. El total pagado ya lleva la retención
+      // descontada: total = base + IVA − retención.
+      const iva = [21, 10, 5, 4, 0].includes(Number(iva_tipo)) && iva_tipo !== null && iva_tipo !== '' && iva_tipo !== undefined ? Number(iva_tipo) : null;
+      const ret = [19, 15, 7].includes(Number(retencion_tipo)) ? Number(retencion_tipo) : null;
+      let base = null, ivaCuota = null, retCuota = null;
+      if (iva !== null) {
+        base = r2(total / (1 + iva / 100 - (ret || 0) / 100));
+        retCuota = ret ? r2(base * ret / 100) : null;
+        ivaCuota = r2(total - base + (retCuota || 0));
+      } else if (ret) {
+        return { valido: false, motivo: 'Para apuntar una retención hace falta saber también el tipo de IVA de la factura. Pregúntaselo al dueño.' };
+      }
+
+      const hoy = hoyISO();
+      if (fecha > hoy) avisos.push(`La fecha (${fmtFecha(fecha)}) es posterior a hoy. Comprueba que es la correcta.`);
+      const iguales = (await DB.buscar({ tipo: 'factura', desde: fecha, hasta: fecha }))
+        .filter(r => Math.abs((r.total || 0) - total) < 0.005 && normalizarNombre(r.proveedor) === normalizarNombre(nombreFinal));
+      if (iguales.length) avisos.push(`Ya hay una factura de «${nombreFinal}» del ${fmtFecha(fecha)} por ${INFORME.eur(total)}. Si guardas esta, ese gasto y su IVA se contarán DOS VECES en el informe.`);
+      const tri = triDe(fecha);
+      const triFecha = fechaDeTrimestre(tri.anio, tri.t);
+      const totalTri = (await DB.buscar({ tipo: 'factura', desde: triFecha, hasta: triFecha }))
+        .filter(r => r.trimestral && normalizarNombre(r.proveedor) === normalizarNombre(nombreFinal));
+      if (totalTri.length) avisos.push(`«${nombreFinal}» ya tiene guardado el TOTAL del ${etiquetaTrimestre(fecha)}. Si además guardas esta factura suelta, se contaría DOS VECES en el informe.`);
+
+      const nota = String(notas || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+      const registro = {
+        creado: new Date().toISOString(), tipo: 'factura', fecha, trimestral: false,
+        proveedor: nombreFinal, nif: prov ? (prov.nif || '') : '', categoria: cat, total,
+        baseImponible: base, ivaTipo: iva, ivaCuota, ivaDesglose: null,
+        retTipo: ret, retCuota, personal: !!gasto_de_casa, notas: nota,
+        ocrTexto: '', origen: 'asesor'
+      };
+      const lineas = [
+        ['Proveedor', nombreFinal + (prov && prov.nif ? ` (${prov.nif})` : '')],
+        ['Importe total', INFORME.eur(total)],
+        ['Fecha', fmtFecha(fecha)],
+        ['Tipo de gasto', cat],
+        ['IVA', iva === null ? 'sin desglosar (la previsión lo estimará)' : `${iva} % → base ${INFORME.eur(base)} + IVA ${INFORME.eur(ivaCuota)}`]
+      ];
+      if (ret) lineas.push(['Retención', `${ret} % → ${INFORME.eur(retCuota)}`]);
+      if (registro.personal) lineas.push(['Gasto de casa', 'sí: va aparte, no resta del negocio']);
+      if (nota) lineas.push(['Nota', nota]);
+      return { valido: true, titulo: 'Apuntar este gasto', registro, lineas, avisos, resumen: `${nombreFinal} · ${INFORME.eur(total)} · ${fmtFecha(fecha)}` };
+    },
+
+    async prepararCierre({ fecha, total, efectivo, tarjeta, sumup, notas } = {}) {
+      if (!esFechaReal(fecha)) return { valido: false, motivo: 'Falta la fecha del cierre o no es una fecha de verdad (formato AAAA-MM-DD). Pregúntasela al dueño.' };
+      const num = (v) => (v === null || v === undefined || v === '' || isNaN(Number(v))) ? null : r2(Number(v));
+      const ef = num(efectivo), tj = num(tarjeta), su = num(sumup);
+      const partes = [ef, tj, su].filter(n => n !== null);
+      if (partes.some(n => n < 0)) return { valido: false, motivo: 'Un importe del desglose es negativo. Revísalo con el dueño.' };
+      const sumaPartes = r2(partes.reduce((s, n) => s + n, 0));
+      let tot = num(total);
+      if (tot === null && partes.length) tot = sumaPartes;   // como el formulario: el total sale de la suma
+      if (tot === null || tot < 0) return { valido: false, motivo: 'Falta el total de ventas del cierre. Pregúntaselo al dueño.' };
+
+      const avisos = [];
+      const hoy = hoyISO();
+      if (fecha > hoy) avisos.push(`La fecha (${fmtFecha(fecha)}) es posterior a hoy. Comprueba que es la correcta.`);
+      const delDia = await DB.buscar({ tipo: 'cierre', desde: fecha, hasta: fecha });
+      const yaHay = delDia.filter(r => !r.mensual);
+      if (yaHay.length) avisos.push(`Ya hay un cierre guardado para el ${fmtFecha(fecha)} (${INFORME.eur(yaHay.reduce((s, r) => s + (r.total || 0), 0))}). Si guardas otro, se SUMAN los dos.`);
+      const mes = fecha.slice(0, 7);
+      const totalMensual = (await DB.buscar({ tipo: 'cierre', desde: mes + '-01', hasta: mes + '-31' })).find(r => r.mensual);
+      if (totalMensual) avisos.push(`${mesEnLetras(fecha)} ya tiene guardado el TOTAL DEL MES (${INFORME.eur(totalMensual.total)}). Si añades además este cierre, los ingresos se contarían DOS VECES en el informe.`);
+      if (partes.length && sumaPartes > tot + 0.05) avisos.push(`El desglose suma ${INFORME.eur(sumaPartes)}, más que el total de ventas (${INFORME.eur(tot)}). Revisa los números.`);
+
+      const nota = String(notas || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+      const registro = {
+        creado: new Date().toISOString(), tipo: 'cierre', fecha, mensual: false, proveedor: '',
+        total: tot, efectivo: ef, tarjeta: tj, sumup: su, notas: nota, ocrTexto: '', origen: 'asesor'
+      };
+      const lineas = [['Día', `${diaSemanaDe(fecha)} ${fmtFecha(fecha)}`], ['Ventas', INFORME.eur(tot)]];
+      if (ef !== null) lineas.push(['Efectivo', INFORME.eur(ef)]);
+      if (tj !== null) lineas.push(['Tarjeta', INFORME.eur(tj)]);
+      if (su !== null) lineas.push(['SumUp', INFORME.eur(su)]);
+      if (nota) lineas.push(['Nota', nota]);
+      return { valido: true, titulo: 'Apuntar este cierre de caja', registro, lineas, avisos, resumen: `Cierre del ${fmtFecha(fecha)} · ${INFORME.eur(tot)}` };
+    },
+
+    /* Guarda lo que "preparar" devolvió y el dueño ha confirmado en la tarjeta */
+    async guardarApunte(registro) {
+      if (!registro || (registro.tipo !== 'factura' && registro.tipo !== 'cierre') || !esFechaReal(registro.fecha) ||
+          typeof registro.total !== 'number' || !(registro.total >= 0)) {
+        throw new Error('El apunte no está completo: no se ha guardado nada.');
+      }
+      const id = await DB.guardar({ ...registro });
+      refrescarPantalla();
+      return id;
     },
 
     /* Los avisos que la app enseña en el Inicio */
