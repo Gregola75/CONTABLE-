@@ -6,13 +6,20 @@ de verdad que **las cuentas salen bien y que no se pierde nada**.
 ## Cómo ejecutarlas
 
 ```bash
-npm install playwright-core     # solo la primera vez
+cd pruebas && npm install      # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
 Al final dice `✅ TODO CORRECTO` o lista los fallos encontrados.
 
-## Qué se comprueba (498 comprobaciones)
+## Qué se comprueba (513 comprobaciones)
+
+**Avisos en el móvil** — qué dice la notificación diaria (falta el cierre de ayer, días sin
+marcar), que no reclama el cierre de un día en que el local no abre, que por defecto no
+enseña importes ni nombres, que el código del móvil lo entiende el programa de envío y
+sirve para firmar el toque, que ese toque no lleva ningún dato, y —registrando el servicio
+en segundo plano de verdad— que lee los datos del móvil y enseña la notificación. **No
+comprueba el envío real desde GitHub.**
 
 **El asesor (chat)** — con un Claude simulado, así que no gasta saldo ni necesita
 clave: que sin clave no sale nada del móvil, que una clave mala no se guarda, que cada

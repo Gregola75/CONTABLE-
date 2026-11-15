@@ -1,0 +1,43 @@
+# El aviso diario de WanderContable.
+# Una vez al día manda un "toque" vacío a los móviles apuntados. No lee ni recibe
+# ninguna cuenta: al llegar, es el propio móvil el que mira sus datos y escribe
+# la notificación. Los móviles se apuntan pegando su código (Ajustes → Avisos en
+# el móvil) en el secreto AVISOS_MOVIL de este repositorio.
+name: Aviso diario
+
+on:
+  schedule:
+    # Hora de GitHub (UTC): las 14:00 son las 15:00 en España en invierno y las
+    # 16:00 en verano. GitHub puede retrasarlo un rato. Para otra hora, cambia el 14.
+    - cron: '0 14 * * *'
+  workflow_dispatch:   # el botón "Run workflow", para mandar uno de prueba ahora
+
+permissions:
+  contents: read
+  actions: write       # solo para el paso que evita que GitHub apague la tarea
+
+jobs:
+  avisar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Instalar lo necesario para enviar avisos
+        run: npm install --no-audit --no-fund --prefix avisos web-push@4.0.0
+      - name: Mandar el toque a los móviles
+        run: node avisos/enviar.js
+        env:
+          AVISOS_MOVIL: ${{ secrets.AVISOS_MOVIL }}
+          AVISOS_MOVIL_2: ${{ secrets.AVISOS_MOVIL_2 }}
+          AVISOS_MOVIL_3: ${{ secrets.AVISOS_MOVIL_3 }}
+      - name: Que GitHub no apague la tarea por inactividad
+        # GitHub desactiva las tareas programadas de un repositorio que pasa
+        # 60 días sin cambios; volver a activarla reinicia esa cuenta.
+        if: always()
+        run: gh workflow enable avisos.yml
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}

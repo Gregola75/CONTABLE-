@@ -21,6 +21,8 @@ desde la rama por defecto del repositorio.
 | `js/app.js` | Lógica de la interfaz y todos los cálculos de personal |
 | `js/asesor.js` | El asesor: chat con Claude que contesta con los datos de la app (ver más abajo) |
 | `js/vendor/anthropic-sdk.js` | SDK oficial de Anthropic empaquetado en un archivo (no editar; la cabecera dice cómo rehacerlo) |
+| `js/avisos.js` + `js/avisos-parte.js` | Avisos en el móvil: activar las notificaciones y qué dice el aviso diario (ver más abajo) |
+| `avisos/enviar.js` + `.github/workflows/avisos.yml` | El "toque" diario que GitHub manda a los móviles apuntados |
 | `js/seguridad.js` | PIN de acceso, huella y cifrado de las copias de seguridad |
 | `sw.js` | Service worker (caché offline) |
 | `pruebas/` | Verificación de la app (ver más abajo) |
@@ -498,6 +500,42 @@ impresión.
 - El tono y las reglas están en `INSTRUCCIONES` (`js/asesor.js`). Si se cambia una regla de
   negocio que el asesor deba conocer (cómo cuenta la app), hay que actualizarla también ahí.
 
+## Avisos en el móvil (notificación diaria con la app cerrada)
+
+Lo pidió el dueño ("enviarme notificaciones de cómo va todo o alguna alerta") y **lo más
+barato posible**: cuesta 0 € y no necesita servidor propio, tarjeta ni la nube de la app.
+
+- **Las cuentas no salen del móvil.** Una tarea programada de GitHub
+  (`.github/workflows/avisos.yml`, una vez al día; `workflow_dispatch` para probar) ejecuta
+  `avisos/enviar.js`, que manda a cada móvil apuntado un "toque" **vacío** (`{"tipo":"parte"}`)
+  con la librería `web-push`. Al recibirlo, el service worker (`sw.js`, evento `push`) lee en
+  el propio teléfono los cierres y el personal de IndexedDB y escribe la notificación con
+  `PARTE_AVISOS.calcular` (`js/avisos-parte.js`, compartido con la página). GitHub no lee ni
+  recibe ningún dato del negocio, y no hay ninguna llave con acceso a las cuentas.
+- **Qué dice el aviso** (un resumen sencillo, no las cuentas completas de `app.js`): si
+  falta el cierre de ayer —salvo que ese mes se lleve con el total del mes o que el local
+  no abra ese día de la semana (ningún cierre en ese día en las últimas 8 semanas)— y si hay
+  trabajadores con días ya pasados sin marcar (mismo margen de un día que el aviso del
+  Inicio). Sin nada pendiente dice "Todo apuntado ✓" y no suena. Si se cambia en `app.js`
+  desde cuándo un día sin marcar no se paga (`MES_SUELDO_POR_MES`), cambiarlo también aquí.
+- **Por defecto no enseña importes ni nombres**: una notificación se lee con el móvil
+  bloqueado, sin pasar por el PIN. El dueño puede activar el detalle en Ajustes (se guarda
+  en la caché `contable-avisos-v1`, que es de donde lo lee el service worker; esa caché no
+  se borra al actualizar).
+- **Apuntar un móvil** (Ajustes → "🔔 Avisos en el móvil", `js/avisos.js`): al activar se
+  pide el permiso, se crea **en el dispositivo** un par de claves (`generarClaves`, P-256) y
+  la dirección de avisos del móvil, y se enseña un código (dirección + claves) que el dueño
+  pega una vez en el secreto `AVISOS_MOVIL` del repositorio (`AVISOS_MOVIL_2` / `_3` para
+  más móviles). El código solo sirve para mandar un aviso a ese móvil. Si la dirección
+  cambia, la tarjeta avisa de que hay que copiarlo de nuevo; si el envío falla con 404/410
+  la tarea de GitHub falla diciéndolo (y GitHub manda un correo).
+- Solo funciona con https y navegador con avisos web (Android con Chrome; en iPhone, con la
+  app en la pantalla de inicio). Donde no se puede, la tarjeta lo dice.
+- La tarea se vuelve a activar a sí misma en cada ejecución (`gh workflow enable`) para que
+  GitHub no la apague a los 60 días sin cambios en el repositorio.
+- Las pruebas registran el service worker de verdad y comprueban la notificación; **no
+  comprueban el envío real desde GitHub** (necesita un móvil apuntado).
+
 ## Sincronización en la nube
 
 Firebase del propio usuario (proyecto `wandercontable`), con reglas que solo
@@ -523,9 +561,9 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 498 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 513 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad, el asesor (con un Claude
-simulado: no gasta saldo ni necesita clave) y la sincronización.
+simulado: no gasta saldo ni necesita clave), los avisos del móvil y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.
 
 ## Estilo

@@ -3027,6 +3027,132 @@ TARJETA 450,00`)]);
     await page.evaluate(() => document.querySelector('#ase-panel').classList.contains('hidden') && !document.querySelector('#ase-burbuja').classList.contains('hidden')));
   await page.unroute('https://api.anthropic.com/**');
 
+  // ══════════════ 9r. AVISOS EN EL MÓVIL (notificación diaria, app cerrada) ══════════════
+  // GitHub manda cada día un "toque" vacío al móvil y es el móvil el que mira
+  // sus datos y escribe el aviso: las cuentas no salen del teléfono. Aquí se
+  // comprueba qué dice el aviso, que por defecto no enseña importes ni nombres,
+  // que el código del móvil es válido para enviar y que el servicio en segundo
+  // plano lee de verdad los datos guardados.
+  console.log('\n═══ 9r. AVISOS EN EL MÓVIL ═══');
+  await limpiar();
+  const avisoDe = (datos) => page.evaluate(({ registros, personal, hoy, opciones }) => PARTE_AVISOS.calcular(registros, personal, hoy, opciones), datos);
+  const diasDe = (desde, hasta, salvo = () => false) => {
+    const lista = [];
+    for (let d = new Date(desde + 'T00:00:00'); d <= new Date(hasta + 'T00:00:00'); d.setDate(d.getDate() + 1)) {
+      const f = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      if (!salvo(d, f)) lista.push(f);
+    }
+    return lista;
+  };
+  const cierresDe = (fechas) => fechas.map(f => ({ tipo: 'cierre', fecha: f, total: 1000 }));
+  const HOY = '2026-11-17';   // martes; "ayer" es el lunes 16
+  const jef = { nombre: 'Jeferson', inicio: '2026-11-01', dias: diasDe('2026-11-01', '2026-11-10'), descansos: [], faltas: [], tardes: [] };
+  const casoA = { registros: cierresDe(diasDe('2026-11-01', '2026-11-14')), personal: [jef], hoy: HOY, opciones: {} };
+  const avA = await avisoDe(casoA);
+  chk('avisos', 'El aviso dice lo pendiente: falta el cierre de ayer (lunes) y hay un trabajador con días sin marcar',
+    avA.hayAvisos && avA.titulo === '📣 2 avisos pendientes' && /Falta el cierre de ayer \(lunes\) · hay 1 trabajador con días sin marcar\./.test(avA.cuerpo), JSON.stringify(avA));
+  chk('avisos', 'Por defecto NO enseña importes ni nombres (se lee con el móvil bloqueado)',
+    !/€/.test(avA.cuerpo) && !/Jeferson/.test(avA.cuerpo) && /Toca para ver cómo va el mes/.test(avA.cuerpo), avA.cuerpo);
+  const avB = await avisoDe({ ...casoA, opciones: { detalle: true } });
+  chk('avisos', 'Si el dueño lo activa, sí: "Jeferson tiene días sin marcar" y "Noviembre: 14.000,00 € en 14 noches"',
+    /Jeferson tiene días sin marcar/.test(avB.cuerpo) && /Noviembre: 14\.000,00 € en 14 noches\./.test(avB.cuerpo), avB.cuerpo);
+  const sinLunes = cierresDe(diasDe('2026-09-22', '2026-11-15', (d) => d.getDay() === 1));
+  const avC = await avisoDe({ registros: sinLunes, personal: [], hoy: HOY, opciones: {} });
+  chk('avisos', 'Si el local nunca abre ese día de la semana (los lunes), no reclama su cierre',
+    !avC.hayAvisos && /Todo apuntado ✓/.test(avC.cuerpo) && avC.titulo === '📣 Parte de hoy', JSON.stringify(avC));
+  const avC2 = await avisoDe({ registros: sinLunes, personal: [], hoy: '2026-11-19', opciones: {} });
+  chk('avisos', 'Pero si es un día que sí abre (miércoles) y no hay cierre, lo reclama', avC2.hayAvisos && /falta el cierre de ayer \(miércoles\)/i.test(avC2.cuerpo), JSON.stringify(avC2));
+  const avD = await avisoDe({ registros: [{ tipo: 'cierre', fecha: '2026-11-01', total: 20000, mensual: true }], personal: [], hoy: HOY, opciones: {} });
+  chk('avisos', 'Un mes apuntado con el total del mes no reclama cierres diarios', !avD.hayAvisos, JSON.stringify(avD));
+  const avE = await avisoDe({
+    registros: cierresDe(diasDe('2026-11-01', '2026-11-16')),
+    personal: [
+      { nombre: 'Al día', inicio: '2026-11-01', dias: diasDe('2026-11-01', '2026-11-12'), descansos: ['2026-11-13'], faltas: ['2026-11-14'], tardes: [{ fecha: '2026-11-15', horas: 1 }] },
+      { nombre: 'Nuevo', inicio: '2026-11-16', dias: [] },
+      { nombre: 'Promo', esRRPP: true, inicio: '2026-11-01', noches: [] },
+      { nombre: 'Viejo', liquidado: '2026-11-05', inicio: '2026-11-01', dias: [] }
+    ], hoy: HOY, opciones: { detalle: true }
+  });
+  chk('avisos', 'Con todo apuntado dice "Todo apuntado ✓"; un descanso, una falta o un retraso cuentan como marcados, y no cuentan los RRPP, los liquidados ni los días de antes de empezar',
+    !avE.hayAvisos && /Todo apuntado ✓\. Noviembre: 16\.000,00 € en 16 noches\./.test(avE.cuerpo), JSON.stringify(avE));
+
+  // El código del móvil: claves creadas en el dispositivo, válidas para enviar
+  const claves = await page.evaluate(() => AVISOS.generarClaves());
+  const b64aBytes = (t) => Buffer.from(t.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+  chk('avisos', 'Las claves del móvil se crean en el propio dispositivo y tienen el formato de un aviso web (pública de 65 bytes, privada de 32)',
+    b64aBytes(claves.publica).length === 65 && b64aBytes(claves.publica)[0] === 4 && b64aBytes(claves.privada).length === 32, JSON.stringify(claves).slice(0, 80));
+  const webpush = require('web-push');
+  const { leerMoviles } = require('../avisos/enviar.js');
+  const ecdh = require('crypto').createECDH('prime256v1'); ecdh.generateKeys();
+  const aB64url = (b) => b.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const suscripcionFalsa = { endpoint: 'https://fcm.googleapis.com/fcm/send/prueba', keys: { p256dh: aB64url(ecdh.getPublicKey()), auth: aB64url(require('crypto').randomBytes(16)) } };
+  const codigo = await page.evaluate(({ s, c }) => AVISOS.codigoDe(s, c), { s: suscripcionFalsa, c: claves });
+  const leidos = leerMoviles({ AVISOS_MOVIL: codigo });
+  let peticion = null, errPeticion = '';
+  try { peticion = webpush.generateRequestDetails(leidos.moviles[0].suscripcion, JSON.stringify({ tipo: 'parte' }), { vapidDetails: leidos.moviles[0].vapid, TTL: 43200 }); }
+  catch (e) { errPeticion = e.message; }
+  chk('avisos', 'El código que se copia a GitHub lo entiende el programa de envío y sirve para firmar el toque al móvil',
+    leidos.errores.length === 0 && leidos.moviles.length === 1 && !!peticion && peticion.endpoint === suscripcionFalsa.endpoint && /^vapid /.test(peticion.headers.Authorization || ''),
+    errPeticion || JSON.stringify(leidos.errores));
+  chk('avisos', 'El toque que se envía va vacío de cuentas: el código no lleva ningún dato del negocio y el mensaje solo dice {"tipo":"parte"}',
+    Object.keys(JSON.parse(codigo)).sort().join(',') === 'app,suscripcion,v,vapid' && !/ventas|total|trabajador/i.test(codigo));
+  const malos = leerMoviles({ AVISOS_MOVIL: codigo.slice(0, 60), AVISOS_MOVIL_2: JSON.stringify({ suscripcion: { endpoint: 'http://x' } }) });
+  chk('avisos', 'Un código pegado a medias o incompleto se rechaza diciéndolo, y sin ningún móvil apuntado no hay nada que enviar',
+    malos.moviles.length === 0 && malos.errores.length === 2 && /no se ha pegado entero/.test(malos.errores[0]) && /le faltan datos/.test(malos.errores[1]) &&
+    leerMoviles({}).moviles.length === 0 && leerMoviles({}).errores.length === 0, JSON.stringify(malos.errores));
+
+  // En Ajustes: aquí (copia de pruebas, sin https) dice que no está disponible, sin romperse
+  await page.click('.tab[data-tab="ajustes"]');
+  await page.waitForTimeout(400);
+  const tarjetaAvisos = await page.evaluate(() => ({
+    estado: document.querySelector('#avi-estado').textContent, msg: document.querySelector('#avi-msg').textContent,
+    activar: !document.querySelector('#avi-activar').classList.contains('hidden'),
+    texto: document.querySelector('#avi-estado').closest('.card').textContent.replace(/\s+/g, ' ')
+  }));
+  chk('avisos', 'Ajustes tiene la tarjeta "Avisos en el móvil", que explica que las cuentas no salen del móvil; donde no se puede activar lo dice claro',
+    /Avisos en el móvil/.test(tarjetaAvisos.texto) && /tus cuentas no salen del móvil/.test(tarjetaAvisos.texto) && /No disponible aquí/.test(tarjetaAvisos.estado) &&
+    /solo funcionan en la app publicada/.test(tarjetaAvisos.msg) && !tarjetaAvisos.activar, JSON.stringify(tarjetaAvisos).slice(0, 400));
+
+  // El servicio en segundo plano de verdad: lee los datos guardados y escribe el aviso
+  await page.context().grantPermissions(['notifications'], { origin: 'http://localhost:8904' });
+  const enSegundoPlano = await page.evaluate(async () => {
+    const p2 = (n) => String(n).padStart(2, '0');
+    const d = new Date(); const mes = `${d.getFullYear()}-${p2(d.getMonth() + 1)}`;
+    const ahora = new Date().toISOString();
+    await DB.guardar({ tipo: 'cierre', fecha: `${mes}-01`, total: 1234.5, proveedor: '', creado: ahora });
+    await DB.guardar({ tipo: 'factura', fecha: `${mes}-01`, proveedor: 'No debe leerse', total: 99, creado: ahora });
+    await DB.perGuardar({ nombre: 'Sin Marcar', sueldoMensual: 900, inicio: `${mes}-01`, dias: [], tardes: [], faltas: [], descansos: [], notasDias: [], creado: ahora });
+    const reg = await navigator.serviceWorker.register('sw.js');
+    await navigator.serviceWorker.ready;
+    const activo = () => new Promise(res => { const t = setInterval(() => { if (reg.active && reg.active.state === 'activated') { clearInterval(t); res(reg.active); } }, 50); });
+    const sw = await activo();
+    const pedir = (tipo) => new Promise((res, rej) => {
+      const canal = new MessageChannel();
+      canal.port1.onmessage = (e) => res(e.data);
+      setTimeout(() => rej(new Error('el servicio no contestó')), 8000);
+      sw.postMessage({ tipo }, [canal.port2]);
+    });
+    const sinDetalle = await pedir('calcular-aviso');
+    await (await caches.open('contable-avisos-v1')).put('./__avisos-ajustes', new Response(JSON.stringify({ detalle: true })));
+    const conDetalle = await pedir('calcular-aviso');
+    const esperado = PARTE_AVISOS.calcular(
+      (await DB.todos()).filter(r => r.tipo === 'cierre'), await DB.perTodos(), PARTE_AVISOS.hoy(), { detalle: true });
+    const prueba = await pedir('probar-aviso');
+    const notis = (await reg.getNotifications()).map(n => ({ titulo: n.title, cuerpo: n.body, tag: n.tag }));
+    (await reg.getNotifications()).forEach(n => n.close());
+    await reg.unregister();
+    for (const k of await caches.keys()) await caches.delete(k);
+    return { sinDetalle, conDetalle, esperado, prueba, notis };
+  });
+  chk('avisos', 'El servicio en segundo plano lee los cierres y el personal guardados en el móvil y escribe el mismo aviso que calcula la app',
+    enSegundoPlano.conDetalle.ok && enSegundoPlano.conDetalle.aviso.cuerpo === enSegundoPlano.esperado.cuerpo && /1\.?234,50 €/.test(enSegundoPlano.conDetalle.aviso.cuerpo) &&
+    !/Abre la app para ver cómo va todo/.test(enSegundoPlano.conDetalle.aviso.cuerpo), JSON.stringify(enSegundoPlano).slice(0, 600));
+  chk('avisos', 'Y respeta el ajuste: sin activar el detalle, el aviso no lleva importes ni nombres',
+    enSegundoPlano.sinDetalle.ok && !/€/.test(enSegundoPlano.sinDetalle.aviso.cuerpo) && !/Sin Marcar/.test(enSegundoPlano.sinDetalle.aviso.cuerpo), JSON.stringify(enSegundoPlano.sinDetalle));
+  chk('avisos', '"Probar el aviso ahora" enseña la notificación de verdad en el móvil',
+    enSegundoPlano.prueba.ok && enSegundoPlano.notis.length === 1 && enSegundoPlano.notis[0].tag === 'contable-parte' &&
+    enSegundoPlano.notis[0].titulo === enSegundoPlano.prueba.aviso.titulo && enSegundoPlano.notis[0].cuerpo === enSegundoPlano.prueba.aviso.cuerpo, JSON.stringify(enSegundoPlano.notis));
+
   // ══════════════ 10. ERRORES DE JAVASCRIPT ══════════════
   console.log('\n═══ 10. ESTABILIDAD ═══');
   chk('estabilidad', 'Ningún error de JavaScript durante toda la verificación',

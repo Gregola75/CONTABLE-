@@ -695,7 +695,7 @@
 <section id="tab-ajustes" class="tab-panel">
   <div class="card">
     <h2>🔐 Seguridad</h2>
-    <p class="hint">Tus datos se quedan en este dispositivo (solo salen si tú activas la nube o el asesor, y cada uno explica qué envía). Con el PIN, nadie que coja tu teléfono podrá abrir la app ni ver tus facturas.</p>
+    <p class="hint">Tus datos se quedan en este dispositivo (solo salen si tú activas la nube o el asesor, y cada uno explica qué envía; los avisos del móvil no envían nada). Con el PIN, nadie que coja tu teléfono podrá abrir la app ni ver tus facturas.</p>
     <div id="sec-estado" class="stat-linea"></div>
     <div class="form-actions">
       <button class="btn btn-primary" id="sec-activar">🔒 Activar PIN de acceso</button>
@@ -704,6 +704,37 @@
       <button class="btn btn-secondary hidden" id="sec-cambiar">✏️ Cambiar PIN</button>
       <button class="btn btn-danger hidden" id="sec-desactivar">Quitar el PIN</button>
       <button class="btn btn-ghost hidden" id="sec-bloquear">🔒 Bloquear ahora</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>🔔 Avisos en el móvil</h2>
+    <p class="hint">Una notificación al día, aunque tengas la app cerrada: si falta el cierre de ayer o hay trabajadores con días sin marcar. Es gratis y <strong>tus cuentas no salen del móvil</strong>: GitHub solo le manda un «toque» y es tu teléfono el que mira sus datos y escribe el aviso.</p>
+    <div id="avi-estado" class="stat-linea"></div>
+    <p id="avi-msg" class="hint txt-bad" style="margin:8px 0 0"></p>
+    <label class="check-linea">
+      <input type="checkbox" id="avi-detalle">
+      <span>Enseñar en el aviso cuánto llevo vendido y los nombres de los trabajadores <small>(se vería con el móvil bloqueado, sin pasar por el PIN)</small></span>
+    </label>
+    <div class="form-actions">
+      <button class="btn btn-primary hidden" id="avi-activar">🔔 Activar avisos en este móvil</button>
+    </div>
+    <div id="avi-codigo-wrap" class="hidden">
+      <p class="per-seccion">Para que empiecen a llegar (una sola vez)</p>
+      <ol class="ase-pasos">
+        <li>Pulsa <strong>Copiar el código</strong>.</li>
+        <li><a id="avi-enlace" href="https://github.com" target="_blank" rel="noopener">Abrir los secretos de tu repositorio en GitHub</a> (pide entrar con tu cuenta).</li>
+        <li>En <strong>Name</strong> escribe <strong>AVISOS_MOVIL</strong>, en <strong>Secret</strong> pega el código y pulsa <strong>Add secret</strong>.</li>
+      </ol>
+      <textarea id="avi-codigo" class="avi-codigo" rows="3" readonly></textarea>
+      <div class="form-actions">
+        <button class="btn btn-secondary" id="avi-copiar">📋 Copiar el código</button>
+      </div>
+      <p class="hint" style="margin:8px 0 0">El código solo sirve para mandarle un aviso a este móvil: no da acceso a ningún dato. Llega una vez al día, por la tarde. Si cambias de móvil o reinstalas la app, repite estos pasos.</p>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-small hidden" id="avi-probar">Probar el aviso ahora</button>
+      <button class="btn btn-small hidden" id="avi-desactivar">🔕 Desactivar los avisos en este móvil</button>
     </div>
   </div>
 
@@ -883,5 +914,7 @@
 <script src="js/report.js"></script>
 <script src="js/app.js"></script>
 <script src="js/asesor.js"></script>
+<script src="js/avisos-parte.js"></script>
+<script src="js/avisos.js"></script>
 </body>
 </html>

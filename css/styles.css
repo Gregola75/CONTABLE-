@@ -1112,6 +1112,20 @@ body.ase-abierto { overflow: hidden; }
 .ase-pasos li { margin-bottom: 6px; }
 .ase-pasos a { color: var(--plata); }
 
+/* Avisos en el móvil: el código que se copia a GitHub */
+.avi-codigo {
+  width: 100%;
+  padding: 10px;
+  border: 1.5px solid var(--borde);
+  border-radius: 10px;
+  background: #0f0f12;
+  color: var(--texto-sec);
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: .7rem;
+  word-break: break-all;
+  resize: none;
+}
+
 /* Impresión del informe: papel blanco, texto negro */
 @media print {
   .app-header, .tabs, .form-actions, .card:not(#informe-resultado), .toast, .modal, .lock, .visor, .ase-burbuja, .ase-panel { display: none !important; }
