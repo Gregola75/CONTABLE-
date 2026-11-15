@@ -159,6 +159,7 @@
       if (btn.dataset.tab === 'consultar') buscar();
       if (btn.dataset.tab === 'personal') pintarPersonal();
       if (btn.dataset.tab === 'rrpp') pintarRRPPTab();
+      if (btn.dataset.tab === 'asesor' && window.ASESOR) window.ASESOR.abrir();
       if (btn.dataset.tab === 'cierres') { pintarFacturacion(); pintarFacturacionTrimestre(); }
       if (btn.dataset.tab === 'informe') pintarResumen();
     });
@@ -4855,7 +4856,348 @@
     })));
   }
 
-  window.APP = { inicio: pintarInicio, recientes: pintarRecientes, miniaturas: crearMiniaturasQueFaltan, semanas: semanasSinDescanso,
+  /* ---------- DATOS PARA EL ASESOR (el chat de la pestaña Asesor) ----------
+     Todo lo que el asesor dice con cifras sale de aquí: son las MISMAS cuentas
+     que pintan el Inicio, el cuadro de mando y Personal, devueltas como datos
+     sueltos (sin HTML ni fotos). El asesor no calcula el negocio por su cuenta:
+     pregunta aquí y repite lo que le devuelven. Solo lectura: nada de esto
+     guarda ni borra. Los importes van redondeados al céntimo. */
+  const esMes = (m) => typeof m === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(m);
+  const esFecha = (f) => typeof f === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(f);
+  const pctDe = (parte, total) => total > 0 ? Math.round(parte / total * 1000) / 10 : null;
+  const textoPlano = (html) => {
+    const d = document.createElement('div');
+    d.innerHTML = html;
+    d.querySelectorAll('button').forEach(b => b.remove());
+    return d.textContent.replace(/\s+/g, ' ').trim();
+  };
+
+  const DATOS_ASESOR = {
+    /* Un mes entero: ventas, gastos, personal y lo que queda */
+    async resumenMes({ mes } = {}) {
+      if (!esMes(mes)) mes = hoyISO().slice(0, 7);
+      const [regs, trabajadores] = await Promise.all([DB.todos(), DB.perTodos()]);
+      const d = datosMesDe(regs, trabajadores, mes);
+      const ant = datosMesDe(regs, trabajadores, mesAnteriorDe(mes));
+      const cierresMes = regs.filter(r => r.tipo === 'cierre' && (r.fecha || '').startsWith(mes));
+      const fp = formasDePago(cierresMes);
+      const dias = Object.entries(d.porDia).sort((a, b) => a[0].localeCompare(b[0]));
+      const mejor = dias.slice().sort((a, b) => b[1] - a[1])[0];
+      const peor = dias.slice().sort((a, b) => a[1] - b[1])[0];
+      const hoy = hoyISO();
+      const sinCierre = [];
+      if (mes === hoy.slice(0, 7) && !d.mensual) {
+        for (let dia = 1; dia < +hoy.slice(8); dia++) {
+          const f = `${mes}-${String(dia).padStart(2, '0')}`;
+          if (!d.porDia[f]) sinCierre.push(f);
+        }
+      }
+      const costes = r2(d.gastos + d.personal);
+      return {
+        mes,
+        mes_en_curso: mes === hoy.slice(0, 7),
+        hay_datos: d.cierres > 0 || d.mensual || d.facturas > 0 || d.personal > 0,
+        ventas: d.ingresos,
+        dias_con_cierre: d.cierres,
+        ventas_apuntadas_como_total_del_mes: d.mensual,
+        media_por_dia_con_cierre: d.cierres ? r2(dias.reduce((s, x) => s + x[1], 0) / d.cierres) : null,
+        mejor_dia: mejor ? { fecha: mejor[0], dia: diaSemanaDe(mejor[0]), ventas: mejor[1] } : null,
+        dia_mas_flojo: peor && dias.length > 1 ? { fecha: peor[0], dia: diaSemanaDe(peor[0]), ventas: peor[1] } : null,
+        dias_pasados_sin_cierre: sinCierre,
+        como_entro_el_dinero: { efectivo: fp.efectivo, tarjeta: fp.tarjeta, sumup: fp.sumup, sin_desglosar: fp.sinDesglosar },
+        gastos_del_negocio: d.gastos,
+        gastos_pct_ventas: pctDe(d.gastos, d.ingresos),
+        num_facturas: d.facturas,
+        facturas_sin_desglose_de_iva: d.sinIVA,
+        gastos_por_categoria: Object.entries(d.porCategoria).sort((a, b) => b[1] - a[1])
+          .map(([categoria, total]) => ({ categoria, total, pct_ventas: pctDe(total, d.ingresos) })),
+        gastos_por_proveedor: Object.entries(d.porProveedor).sort((a, b) => b[1].total - a[1].total)
+          .map(([proveedor, p]) => ({ proveedor, categoria: p.categoria, total: p.total, facturas: p.facturas, pct_ventas: pctDe(p.total, d.ingresos) })),
+        personal_devengado: d.personal,
+        personal_pct_ventas: pctDe(d.personal, d.ingresos),
+        todos_los_costes: costes,
+        costes_pct_ventas: pctDe(costes, d.ingresos),
+        lo_que_queda: d.beneficio,
+        margen_pct: pctDe(d.beneficio, d.ingresos),
+        gastos_de_casa_aparte: d.casa,
+        mes_anterior: { mes: ant.mes, ventas: ant.ingresos, dias_con_cierre: ant.cierres, gastos_del_negocio: ant.gastos, personal_devengado: ant.personal, lo_que_queda: ant.beneficio, margen_pct: pctDe(ant.beneficio, ant.ingresos) },
+        notas: [
+          'personal_devengado es lo que le corresponde al equipo ese mes (sueldos, comisiones, bonos y RRPP), no lo que ya se ha pagado.',
+          'lo_que_queda = ventas − gastos_del_negocio − personal_devengado. Los gastos de casa no restan.',
+          'Las ventas son las de los cierres de caja apuntados; los gastos, las facturas cargadas. Lo que no esté apuntado no cuenta.'
+        ]
+      };
+    },
+
+    /* Los cierres de caja de un periodo, día a día */
+    async ventasPorDia({ desde, hasta } = {}) {
+      const hoy = hoyISO();
+      if (!esFecha(hasta)) hasta = hoy;
+      if (!esFecha(desde)) desde = hasta.slice(0, 7) + '-01';
+      const cierres = (await DB.buscar({ tipo: 'cierre', desde, hasta }))
+        .sort((a, b) => (a.fecha || '').localeCompare(b.fecha || ''));
+      const diarios = cierres.filter(c => !c.mensual);
+      const fp = formasDePago(cierres);
+      const porMes = {};
+      cierres.forEach(c => { const m = (c.fecha || '').slice(0, 7); porMes[m] = r2((porMes[m] || 0) + (c.total || 0)); });
+      const semana = {};
+      diarios.forEach(c => {
+        const d = diaSemanaDe(c.fecha);
+        if (!semana[d]) semana[d] = { total: 0, dias: 0 };
+        semana[d].total += (c.total || 0); semana[d].dias++;
+      });
+      const LIMITE = 120;
+      const fila = (c) => {
+        const f = { fecha: c.fecha, dia: diaSemanaDe(c.fecha), ventas: r2(c.total || 0) };
+        if (c.efectivo) f.efectivo = r2(c.efectivo);
+        if (c.tarjeta) f.tarjeta = r2(c.tarjeta);
+        if (c.sumup) f.sumup = r2(c.sumup);
+        if (c.notas) f.notas = String(c.notas).slice(0, 120);
+        return f;
+      };
+      return {
+        desde, hasta,
+        total_ventas: fp.total,
+        dias_con_cierre: diarios.length,
+        media_por_dia_con_cierre: diarios.length ? r2(diarios.reduce((s, c) => s + (c.total || 0), 0) / diarios.length) : null,
+        como_entro_el_dinero: { efectivo: fp.efectivo, tarjeta: fp.tarjeta, sumup: fp.sumup, sin_desglosar: fp.sinDesglosar },
+        por_mes: Object.entries(porMes).sort().map(([mes, ventas]) => ({ mes, ventas })),
+        media_por_dia_de_la_semana: Object.entries(semana).map(([dia, x]) => ({ dia, media: r2(x.total / x.dias), dias_contados: x.dias })),
+        meses_apuntados_solo_con_el_total: cierres.filter(c => c.mensual).map(c => ({ mes: (c.fecha || '').slice(0, 7), ventas: r2(c.total || 0) })),
+        dias: diarios.length <= LIMITE ? diarios.map(fila) : undefined,
+        aviso: diarios.length > LIMITE ? `Son ${diarios.length} días: no se listan uno a uno. Pide un periodo más corto para ver el detalle de cada día.` : undefined
+      };
+    },
+
+    /* Las facturas de gasto, con filtros */
+    async facturas({ desde, hasta, proveedor, categoria, orden } = {}) {
+      const filtros = { tipo: 'factura' };
+      if (esFecha(desde)) filtros.desde = desde;
+      if (esFecha(hasta)) filtros.hasta = hasta;
+      if (proveedor) filtros.proveedor = String(proveedor);
+      let lista = await DB.buscar(filtros);
+      if (categoria) lista = lista.filter(r => (r.categoria || 'Otros').toLowerCase().includes(String(categoria).toLowerCase()));
+      if (orden === 'importe') lista = lista.slice().sort((a, b) => (b.total || 0) - (a.total || 0));
+      const negocio = lista.filter(r => !r.personal);
+      const casa = lista.filter(r => r.personal);
+      const suma = (l, campo) => r2(l.reduce((s, r) => s + (typeof r[campo] === 'number' ? r[campo] : 0), 0));
+      const LIMITE = 60;
+      return {
+        filtros: { desde: filtros.desde || null, hasta: filtros.hasta || null, proveedor: proveedor || null, categoria: categoria || null },
+        encontradas: lista.length,
+        total_negocio: suma(negocio, 'total'),
+        total_de_casa_aparte: suma(casa, 'total'),
+        iva_soportado_detectado: suma(negocio, 'ivaCuota'),
+        retenciones_detectadas: suma(negocio, 'retCuota'),
+        facturas_sin_desglose_de_iva: negocio.filter(r => typeof r.ivaCuota !== 'number').length,
+        mostradas: Math.min(lista.length, LIMITE),
+        aviso: lista.length > LIMITE ? `Hay ${lista.length} facturas; se listan ${LIMITE} (${orden === 'importe' ? 'las más grandes' : 'las más recientes'}). Los totales de arriba SÍ son de todas.` : undefined,
+        lista: lista.slice(0, LIMITE).map(r => {
+          const f = { fecha: r.fecha, proveedor: (r.proveedor || 'Sin proveedor').trim() || 'Sin proveedor', categoria: r.categoria || 'Otros', total: r2(r.total || 0) };
+          if (typeof r.baseImponible === 'number') f.base = r2(r.baseImponible);
+          if (typeof r.ivaCuota === 'number') f.iva = r2(r.ivaCuota);
+          if (typeof r.retCuota === 'number' && r.retCuota) f.retencion = r2(r.retCuota);
+          if (r.personal) f.gasto_de_casa = true;
+          if (r.trimestral) f.total_de_un_trimestre = true;
+          if (r.notas) f.notas = String(r.notas).slice(0, 120);
+          return f;
+        })
+      };
+    },
+
+    /* Cuánto se gasta con cada proveedor en un periodo */
+    async proveedores({ desde, hasta } = {}) {
+      const stats = await INFORME.estadisticas(esFecha(desde) ? desde : '', esFecha(hasta) ? hasta : '');
+      const total = r2(stats.reduce((s, p) => s + p.total, 0));
+      const LIMITE = 40;
+      return {
+        desde: esFecha(desde) ? desde : null, hasta: esFecha(hasta) ? hasta : null,
+        total_gastos_negocio: total,
+        num_proveedores: stats.length,
+        aviso: stats.length > LIMITE ? `Hay ${stats.length} proveedores; se listan los ${LIMITE} que más pesan. El total es de todos.` : undefined,
+        proveedores: stats.slice(0, LIMITE).map(p => ({
+          proveedor: p.nombre, total: p.total, facturas: p.facturas, pct_del_gasto: pctDe(p.total, total),
+          media_por_factura: p.mediaFactura, media_por_mes_con_factura: p.mediaMes,
+          por_mes: p.meses.map(m => ({ mes: m, total: r2(p.porMes[m]) }))
+        })),
+        nota: 'Solo gastos del negocio (los de casa no entran).'
+      };
+    },
+
+    /* Los últimos meses, uno al lado del otro */
+    async evolucion({ meses } = {}) {
+      const n = Math.max(2, Math.min(24, Math.round(+meses) || 6));
+      const [regs, trabajadores] = await Promise.all([DB.todos(), DB.perTodos()]);
+      const lista = [];
+      let mes = hoyISO().slice(0, 7);
+      for (let i = 0; i < n; i++) { lista.unshift(mes); mes = mesAnteriorDe(mes); }
+      return {
+        mes_en_curso: hoyISO().slice(0, 7),
+        meses: lista.map(m => {
+          const d = datosMesDe(regs, trabajadores, m);
+          return { mes: m, ventas: d.ingresos, dias_con_cierre: d.cierres, gastos_del_negocio: d.gastos, personal_devengado: d.personal, lo_que_queda: d.beneficio, margen_pct: pctDe(d.beneficio, d.ingresos) };
+        }),
+        nota: 'El mes en curso está sin terminar: no lo compares entero con los cerrados.'
+      };
+    },
+
+    /* El equipo en un mes: lo que le corresponde a cada uno y lo que se le debe hoy */
+    async personalMes({ mes } = {}) {
+      if (!esMes(mes)) mes = hoyISO().slice(0, 7);
+      const [regs, todos, pagos] = await Promise.all([DB.todos(), DB.perTodos(), DB.pagoTodos()]);
+      const rrpps = todos.filter(t => t.esRRPP);
+      const cierresMes = regs.filter(r => r.tipo === 'cierre' && (r.fecha || '').startsWith(mes));
+      const cierresDeMes = cierresDesde(regs);
+      const trabajadores = [];
+      let debesTotal = 0;
+      for (const t of todos.filter(x => !x.esRRPP)) {
+        const pagosT = pagos.filter(p => p.trabajadorSid === t.sid);
+        const ventasDet = ventasParaTrabajador(t, cierresMes, mes, true, rrpps);
+        const c = calcularMes(t, ventasDet.total, pagosT.filter(p => (p.fecha || '').startsWith(mes)), mes);
+        if (t.liquidado && !c.devengado && !c.entregado) continue;
+        const deuda = await desgloseDeuda(t, pagosT, cierresDeMes, false, rrpps);
+        if (!t.liquidado && deuda.total > 0) debesTotal += deuda.total;
+        trabajadores.push({
+          nombre: t.nombre,
+          estado: t.liquidado ? 'liquidado (ya no trabaja, cuenta cerrada)' : (t.fin ? `de baja desde ${t.fin}, pendiente de liquidar` : 'en activo'),
+          comenzo: t.inicio || null,
+          sueldo_al_mes: c.cond.sueldoMensual,
+          precio_del_dia_este_mes: c.precioDia,
+          dias_trabajados: c.dias.length,
+          dias_de_descanso: c.descanso,
+          dias_que_no_vino: c.faltas,
+          dias_pasados_sin_marcar: c.sinMarcar,
+          retrasos: c.tardes.length ? { dias: c.tardes.length, horas: c.horasTarde, descontado: c.descuentoTardes } : null,
+          fijo: c.fijo,
+          facturado_en_sus_dias: ventasDet.total,
+          objetivos: tramosDe(condDe(t, c)).map(x => ({ objetivo: x.objetivo, porcentaje: x.porcentaje })),
+          comision: c.comision,
+          bonos: c.bono,
+          le_corresponde_este_mes: c.devengado,
+          entregado_este_mes: c.entregado,
+          pendiente_total_a_dia_de_hoy: deuda.total,
+          semanas_sin_dia_libre: semanasSinDescanso(t, mes).map(s => `${s.desde} a ${s.hasta}`)
+        });
+      }
+      const promotores = rrpps.map(r => {
+        const pagosR = pagos.filter(p => p.trabajadorSid === r.sid);
+        const semanas = semanasRRPP(r);
+        const devengado = r2(semanas.reduce((s, w) => s + w.total, 0));
+        const entregado = r2(pagosR.reduce((s, p) => s + (p.importe || 0), 0));
+        return {
+          nombre: r.nombre,
+          comenzo: r.inicio || null,
+          semanas_del_mes: semanas.filter(w => w.lunes.startsWith(mes)).reverse()
+            .map(w => ({ del: w.lunes, al: w.hasta, noches: w.noches.length, ventas: w.ventas, comision: w.comision, bonos: w.bonos, total: w.total })),
+          pendiente_total_a_dia_de_hoy: r2(devengado - entregado)
+        };
+      });
+      return {
+        mes,
+        trabajadores,
+        debes_al_equipo_en_total: r2(debesTotal),
+        rrpp: promotores,
+        coste_rrpp_del_mes: costeRRPPDe(rrpps, mes),
+        notas: [
+          'pendiente_total_a_dia_de_hoy arrastra todos los meses: lo que le corresponde desde que empezó menos todas las entregas.',
+          'Un pendiente negativo significa que se le ha adelantado de más.',
+          'Desde octubre de 2026 el sueldo es por mes: el día vale sueldo ÷ los días que tiene el mes, y se pagan los días trabajados y los de descanso marcados.'
+        ]
+      };
+    },
+
+    /* La cuenta completa de una persona: mes a mes y todas las entregas */
+    async trabajador({ nombre } = {}) {
+      const busca = String(nombre || '').trim().toLowerCase();
+      const [regs, todos, pagos] = await Promise.all([DB.todos(), DB.perTodos(), DB.pagoTodos()]);
+      const nombres = todos.map(t => t.nombre);
+      if (!busca) return { encontrado: false, motivo: 'Falta el nombre.', personas_apuntadas: nombres };
+      const candidatos = todos.filter(t => (t.nombre || '').toLowerCase().includes(busca));
+      const exacto = candidatos.filter(t => (t.nombre || '').toLowerCase() === busca);
+      const elegidos = exacto.length ? exacto : candidatos;
+      if (elegidos.length !== 1) {
+        return { encontrado: false, motivo: elegidos.length ? 'Hay varias personas que coinciden: pregunta cuál.' : 'No hay nadie apuntado con ese nombre.', coinciden: elegidos.map(t => t.nombre), personas_apuntadas: nombres };
+      }
+      const t = elegidos[0];
+      const pagosT = pagos.filter(p => p.trabajadorSid === t.sid).sort((a, b) => (a.fecha || '').localeCompare(b.fecha || ''));
+      const entregas = pagosT.map(p => ({ fecha: p.fecha || null, importe: r2(p.importe || 0), nota: p.notas || undefined }));
+      const totalEntregado = r2(pagosT.reduce((s, p) => s + (p.importe || 0), 0));
+      if (t.esRRPP) {
+        const semanas = semanasRRPP(t).reverse();
+        const devengado = r2(semanas.reduce((s, w) => s + w.total, 0));
+        return {
+          encontrado: true, nombre: t.nombre, tipo: 'RRPP (promotor)', comenzo: t.inicio || null,
+          semanas: semanas.map(w => ({ del: w.lunes, al: w.hasta, ventas: w.ventas, comision: w.comision, bonos: w.bonos, total: w.total })),
+          le_corresponde_en_total: devengado, entregado_en_total: totalEntregado, entregas,
+          pendiente_a_dia_de_hoy: r2(devengado - totalEntregado)
+        };
+      }
+      const rrpps = todos.filter(x => x.esRRPP);
+      const deuda = await desgloseDeuda(t, pagosT, cierresDesde(regs), true, rrpps);
+      return {
+        encontrado: true, nombre: t.nombre, tipo: 'trabajador',
+        estado: t.liquidado ? `liquidado el ${t.liquidado}` : (t.fin ? `de baja desde ${t.fin}, pendiente de liquidar` : 'en activo'),
+        comenzo: t.inicio || null, dejo_de_trabajar: t.fin || null,
+        sueldos: periodosSueldo(t).map(p => ({ sueldo_al_mes: p.sueldo, desde: p.desde || 'desde que empezó', hasta: p.hasta || 'hoy' })),
+        meses: deuda.meses.map(m => ({
+          mes: m.mes, dias_trabajados: m.calc.dias.length, dias_de_descanso: m.calc.descanso, dias_que_no_vino: m.calc.faltas.length,
+          fijo: m.calc.fijo, comision: m.calc.comision, bonos: m.calc.bono, le_correspondio: m.devengado,
+          entregado_ese_mes: m.entregado, queda_sin_cubrir: m.pendiente
+        })),
+        le_corresponde_en_total: r2(deuda.meses.reduce((s, m) => s + m.devengado, 0)),
+        entregado_en_total: totalEntregado, entregas,
+        pendiente_a_dia_de_hoy: deuda.total,
+        nota: 'queda_sin_cubrir reparte las entregas empezando por el mes más antiguo.'
+      };
+    },
+
+    /* El trimestre: lo que va a la gestoría y la previsión interna de impuestos */
+    async impuestosTrimestre({ anio, trimestre } = {}) {
+      const hoy = new Date();
+      anio = Math.round(+anio) || hoy.getFullYear();
+      trimestre = Math.round(+trimestre);
+      if (!(trimestre >= 1 && trimestre <= 4)) trimestre = Math.floor(hoy.getMonth() / 3) + 1;
+      const cfg = leerConfig();
+      const inf = await INFORME.generar(anio, trimestre);
+      const p = INFORME.prevision(inf, cfg);
+      const faltan = INFORME.queFaltaDe(await DB.todos(), anio, trimestre);
+      const trimestreActual = anio === hoy.getFullYear() && trimestre === Math.floor(hoy.getMonth() / 3) + 1;
+      return {
+        anio, trimestre, desde: inf.desde, hasta: inf.hasta,
+        trimestre_sin_terminar: trimestreActual,
+        ingresos_por_mes: inf.meses.map(m => ({ mes: INFORME.MESES[m], ventas: r2(inf.ingresosPorMes[m].total), dias_con_cierre: inf.ingresosPorMes[m].dias })),
+        total_ingresos: r2(inf.totalIngresos),
+        total_gastos_negocio: r2(inf.totalGastos),
+        gastos_de_casa_aparte: r2(inf.totalPersonales),
+        prevision_orientativa: {
+          iva_de_las_ventas: p.ivaRepercutido, iva_de_los_gastos: p.ivaSoportado, iva_a_pagar_modelo_303: p.ivaResultado,
+          retenciones_a_ingresar_modelo_115_111: p.retenciones,
+          beneficio_sin_iva: p.beneficio, irpf_estimado_modelo_130: p.irpfEstimado,
+          total_previsto_a_pagar: p.totalPrevisto,
+          facturas_con_iva_estimado: p.facturasEstimadas, num_facturas: p.numFacturas
+        },
+        supuestos: { iva_ventas_pct: cfg.ivaVentas, iva_gastos_estimado_pct: cfg.ivaGastos, irpf_pct: cfg.irpfActivo ? cfg.irpf : null },
+        gastos_habituales_que_pueden_faltar: faltan.map(f => ({ proveedor: f.proveedor, categoria: f.categoria || undefined, meses_sin_factura: f.meses })),
+        notas: [
+          'La previsión es ORIENTATIVA e interna: la cifra oficial la calcula la gestoría.',
+          'El coste de personal NO entra en esta previsión (la app no lleva nóminas ni seguros sociales).',
+          'Un IVA a pagar negativo significa que sale a compensar o devolver.'
+        ]
+      };
+    },
+
+    /* Los avisos que la app enseña en el Inicio */
+    async avisos() {
+      const mes = hoyISO().slice(0, 7);
+      const [regs, trabajadores] = await Promise.all([DB.todos(), DB.perTodos()]);
+      const d = datosMesDe(regs, trabajadores, mes);
+      const equipo = await deudaConElEquipo(cierresDesde(regs));
+      const alertas = await alertasDelMes(mes, d, regs, equipo);
+      return { mes, avisos: alertas.map(textoPlano) };
+    }
+  };
+
+  window.APP = { asesor: DATOS_ASESOR, inicio: pintarInicio, recientes: pintarRecientes, miniaturas: crearMiniaturasQueFaltan, semanas: semanasSinDescanso,
     rrppSemana: calcularSemanaRRPP, rrppNoche: guardarNocheRRPP, datosMes,
     rrppCuenta: async (nombre) => {
       const r = (await DB.perTodos()).find(x => x.nombre === nombre);

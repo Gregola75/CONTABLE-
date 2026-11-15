@@ -11,7 +11,10 @@ function chk(area, nombre, condicion, detalle = '') {
 const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < tol;
 
 (async () => {
-  const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' });
+  // El navegador: el de CHROME_PATH si está definido; si no, el primero que exista
+  const CHROME = [process.env.CHROME_PATH, '/opt/pw-browsers/chromium', '/opt/pw-browsers/chromium-1194/chrome-linux/chrome']
+    .find(r => r && require('fs').existsSync(r) && require('fs').statSync(r).isFile());
+  const browser = await chromium.launch(CHROME ? { executablePath: CHROME } : {});
   const page = await browser.newPage({ viewport: { width: 390, height: 900 } });
   const erroresJS = [];
   page.on('pageerror', e => erroresJS.push(e.message));
@@ -2497,6 +2500,229 @@ TARJETA 450,00`)]);
   });
   chk('personal', 'Si cambia de idea (1.000 desde noviembre), sustituye al de 950: quedan 900 hasta octubre y 1.000 desde noviembre',
     JSON.stringify(mil.periodos) === JSON.stringify([['', 900], ['2026-11', 1000]]) && cerca(mil.oct, 900) && cerca(mil.nov, 1000), JSON.stringify(mil));
+
+  // ══════════════ 9q. EL ASESOR (chat con los datos de la app) ══════════════
+  // El asesor es Claude (Anthropic) llamado desde el navegador con la clave del
+  // dueño. Aquí se simula el servicio para comprobar lo que importa: que sin
+  // clave no sale nada, que cada cifra la da la app (no el modelo), que lo que
+  // aprende se guarda, que los fallos se dicen en pantalla y que la clave y la
+  // conversación no van a las copias.
+  console.log('\n═══ 9q. EL ASESOR (chat) ═══');
+  await limpiar();
+  const CLAVE_BUENA = 'sk-ant-prueba-buena';
+  const apiVistas = [];        // lo que la app ha enviado a /v1/messages
+  let colaAPI = [];            // lo que el "Claude simulado" contestará, en orden
+  let llamadasAPI = 0;
+  await page.route('https://api.anthropic.com/**', async (route) => {
+    const req = route.request();
+    const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': '*' };
+    if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
+    llamadasAPI++;
+    const h = req.headers();
+    const json = (status, body) => route.fulfill({ status, headers: { ...cors, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    // El SDK oficial manda la clave en la cabecera Authorization
+    const claveEnviada = (h['authorization'] || '').replace(/^Bearer /, '') || h['x-api-key'];
+    if (claveEnviada !== CLAVE_BUENA) return json(401, { type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key' } });
+    if (req.method() === 'GET' && req.url().includes('/v1/models/')) return json(200, { id: 'claude-opus-5-5', type: 'model', display_name: 'Claude Opus 5.5', created_at: '2026-01-01T00:00:00Z' });
+    if (req.method() === 'POST' && req.url().includes('/v1/messages')) {
+      apiVistas.push({ cuerpo: JSON.parse(req.postData() || '{}'), cabeceras: h });
+      const sig = colaAPI.shift();
+      if (!sig) return json(400, { type: 'error', error: { type: 'invalid_request_error', message: 'la prueba no esperaba esta llamada' } });
+      if (sig.status) return json(sig.status, sig.body);
+      return json(200, { id: 'msg_' + apiVistas.length, type: 'message', role: 'assistant', model: 'claude-opus-5-5', stop_sequence: null, usage: { input_tokens: 1000, output_tokens: 200 }, ...sig });
+    }
+    return json(404, { type: 'error', error: { type: 'not_found_error', message: 'no existe' } });
+  });
+  const usa = (id, name, input) => ({ stop_reason: 'tool_use', content: [{ type: 'tool_use', id, name, input }] });
+  const dice = (texto) => ({ stop_reason: 'end_turn', content: [{ type: 'text', text: texto }] });
+  const preguntarAlAsesor = async (texto) => {
+    await page.fill('#ase-texto', texto);
+    await page.click('#ase-enviar');
+    await page.waitForFunction(() => !document.querySelector('#ase-enviar').disabled, null, { timeout: 20000 });
+    await page.waitForTimeout(150);
+    return (await page.textContent('#ase-mensajes')).replace(/\s+/g, ' ');
+  };
+
+  await page.evaluate(async () => {
+    ['contable-asesor-clave', 'contable-asesor-memoria', 'contable-asesor-chat'].forEach(k => localStorage.removeItem(k));
+    const ahora = new Date().toISOString();
+    await DB.guardar({ tipo: 'cierre', fecha: '2026-10-01', total: 1000, efectivo: 400, tarjeta: 600, proveedor: '', creado: ahora });
+    await DB.guardar({ tipo: 'cierre', fecha: '2026-10-02', total: 2000, proveedor: '', creado: ahora });
+    await DB.guardar({ tipo: 'factura', fecha: '2026-10-01', proveedor: 'Bebidas Pepe', total: 700, categoria: 'Mercancía', baseImponible: 578.51, ivaTipo: 21, ivaCuota: 121.49, creado: ahora });
+    await DB.guardar({ tipo: 'factura', fecha: '2026-10-02', proveedor: 'Alquiler casa', total: 100, categoria: 'Alquiler', personal: true, creado: ahora });
+    await DB.perGuardar({ nombre: 'Ana', sueldoMensual: 900, diasMes: 26, horasJornada: 7.5, tramos: [], dias: ['2026-10-01', '2026-10-02'], tardes: [], faltas: [], descansos: [], notasDias: [], inicio: '2026-10-01', creado: ahora });
+    const ana = (await DB.perTodos()).find(x => x.nombre === 'Ana');
+    await DB.pagoGuardar({ trabajadorSid: ana.sid, fecha: '2026-10-02', importe: 20, notas: 'adelanto', creado: ahora });
+  });
+
+  // --- Sin clave: solo se explica cómo activarlo, y no sale nada ---
+  await page.click('.tab[data-tab="asesor"]');
+  await page.waitForTimeout(300);
+  const sinClave = await page.evaluate(() => ({
+    config: !document.querySelector('#ase-config').classList.contains('hidden'),
+    chat: !document.querySelector('#ase-chat').classList.contains('hidden'),
+    texto: document.querySelector('#ase-config').textContent.replace(/\s+/g, ' ')
+  }));
+  chk('asesor', 'Sin clave, la pestaña solo explica cómo activarlo y no hay chat', sinClave.config && !sinClave.chat, JSON.stringify(sinClave).slice(0, 200));
+  chk('asesor', 'Y dice qué pasa con los datos: solo lo necesario, nunca las fotos, y sin clave no se envía nada',
+    /Nunca las fotos/.test(sinClave.texto) && /Si no pones clave, no se envía nada/.test(sinClave.texto), sinClave.texto.slice(-400));
+  chk('asesor', 'Abrir la pestaña sin clave no hace ninguna llamada a Claude', llamadasAPI === 0, String(llamadasAPI));
+
+  // --- Una clave mala no se guarda, y se dice ---
+  await page.fill('#ase-clave', 'sk-ant-mala');
+  await page.click('#ase-guardar-clave');
+  await page.waitForFunction(() => /No se ha guardado/.test(document.querySelector('#ase-config-msg').textContent), null, { timeout: 20000 });
+  const claveMala = await page.evaluate(() => ({ msg: document.querySelector('#ase-config-msg').textContent, guardada: localStorage.getItem('contable-asesor-clave') }));
+  chk('asesor', 'Una clave que no vale NO se guarda y se dice por qué ("La clave no es válida")',
+    /No se ha guardado/.test(claveMala.msg) && /La clave no es válida/.test(claveMala.msg) && !claveMala.guardada, JSON.stringify(claveMala));
+
+  // --- Con la clave buena se activa el chat ---
+  await page.fill('#ase-clave', CLAVE_BUENA);
+  await page.click('#ase-guardar-clave');
+  await page.waitForFunction(() => !document.querySelector('#ase-chat').classList.contains('hidden'), null, { timeout: 20000 });
+  chk('asesor', 'Con una clave válida se activa el chat, con preguntas de ejemplo para empezar',
+    await page.evaluate(() => document.querySelector('#ase-config').classList.contains('hidden') &&
+      !document.querySelector('#ase-sugerencias').classList.contains('hidden') &&
+      document.querySelectorAll('.ase-sugerencia').length >= 4));
+
+  // --- Una pregunta con datos: la cifra la da la app, no el modelo ---
+  colaAPI = [usa('toolu_1', 'resumen_mes', { mes: '2026-10' }), dice('En octubre llevas **3.000,00 €** de ventas.\n- Gastos: 700,00 €\n- Te quedan 2.241,94 €')];
+  const chat1 = await preguntarAlAsesor('¿Cómo fue octubre?');
+  const envio1 = apiVistas[0] || { cuerpo: {}, cabeceras: {} };
+  chk('asesor', 'La pregunta va al modelo acordado (claude-opus-5-5), con esfuerzo medio y el reintento automático si declina',
+    envio1.cuerpo.model === 'claude-opus-5-5' && envio1.cuerpo.output_config && envio1.cuerpo.output_config.effort === 'medium' &&
+    envio1.cuerpo.fallbacks === 'default' && /server-side-fallback-2026-07-01/.test(envio1.cabeceras['anthropic-beta'] || ''),
+    JSON.stringify({ m: envio1.cuerpo.model, o: envio1.cuerpo.output_config, f: envio1.cuerpo.fallbacks, b: envio1.cabeceras['anthropic-beta'] }));
+  chk('asesor', 'Lleva la clave del dueño y las instrucciones de asesor de bares de copas que no inventa datos',
+    envio1.cabeceras['authorization'] === 'Bearer ' + CLAVE_BUENA && envio1.cabeceras['anthropic-dangerous-direct-browser-access'] === 'true' && /bar de copas/.test(JSON.stringify(envio1.cuerpo.system)) &&
+    /Nunca de memoria ni de una suposición/.test(JSON.stringify(envio1.cuerpo.system)), JSON.stringify(envio1.cuerpo.system).slice(0, 300));
+  const nombresHerr = (envio1.cuerpo.tools || []).map(t => t.name).sort().join(',');
+  chk('asesor', 'Se le dan las 12 herramientas (resumen, evolución, ventas, facturas, proveedores, personal, trabajador, impuestos, avisos, calcular, recordar, olvidar)',
+    nombresHerr === 'avisos,calcular,evolucion,facturas,impuestos_trimestre,olvidar,personal_mes,proveedores,recordar,resumen_mes,trabajador,ventas_por_dia', nombresHerr);
+  const envio2 = apiVistas[1] || { cuerpo: { messages: [] } };
+  const resultado1 = (() => {
+    try {
+      const ultimo = envio2.cuerpo.messages[envio2.cuerpo.messages.length - 1];
+      return JSON.parse(ultimo.content[0].content);
+    } catch (e) { return {}; }
+  })();
+  chk('asesor', 'La consulta la contesta LA APP con sus cuentas: ventas 3.000, gastos 700, personal 58,06, quedan 2.241,94, casa 100 aparte',
+    cerca(resultado1.ventas, 3000) && cerca(resultado1.gastos_del_negocio, 700) && cerca(resultado1.personal_devengado, 58.06) &&
+    cerca(resultado1.lo_que_queda, 2241.94) && cerca(resultado1.gastos_de_casa_aparte, 100) && cerca(resultado1.margen_pct, 74.7, 0.06),
+    JSON.stringify(resultado1).slice(0, 400));
+  chk('asesor', 'Y cómo entró el dinero: efectivo 400, tarjeta 600 y 2.000 sin desglosar',
+    resultado1.como_entro_el_dinero && cerca(resultado1.como_entro_el_dinero.efectivo, 400) && cerca(resultado1.como_entro_el_dinero.tarjeta, 600) &&
+    cerca(resultado1.como_entro_el_dinero.sin_desglosar, 2000), JSON.stringify(resultado1.como_entro_el_dinero));
+  chk('asesor', 'En lo enviado no va ninguna foto',
+    !/"imagen"|"miniatura"|data:image/.test(JSON.stringify(apiVistas.map(v => v.cuerpo))));
+  chk('asesor', 'La respuesta sale en el chat, y debajo qué datos se consultaron y lo que costó',
+    /En octubre llevas 3\.000,00 € de ventas/.test(chat1) && /Datos consultados en tu app: Resumen de octubre de 2026/.test(chat1) && /Coste aprox\.: 0,016 \$/.test(chat1), chat1.slice(0, 500));
+  chk('asesor', 'La negrita y las listas del asesor se pintan como tales',
+    await page.evaluate(() => {
+      const el = [...document.querySelectorAll('#ase-mensajes .ase-el')].pop();
+      return !!el && !!el.querySelector('strong') && el.querySelector('strong').textContent === '3.000,00 €' && el.querySelectorAll('li').length === 2;
+    }));
+
+  // --- Sus herramientas dan los mismos números que la app ---
+  const herr = await page.evaluate(async () => {
+    const per = await ASESOR.ejecutar('personal_mes', { mes: '2026-10' });
+    const ana = await ASESOR.ejecutar('trabajador', { nombre: 'ana' });
+    const nadie = await ASESOR.ejecutar('trabajador', { nombre: 'Zacarías' });
+    const fac = await ASESOR.ejecutar('facturas', { desde: '2026-10-01', hasta: '2026-10-31' });
+    const prov = await ASESOR.ejecutar('proveedores', { desde: '2026-10-01', hasta: '2026-10-31' });
+    const dias = await ASESOR.ejecutar('ventas_por_dia', { desde: '2026-10-01', hasta: '2026-10-31' });
+    const imp = await ASESOR.ejecutar('impuestos_trimestre', { anio: 2026, trimestre: 4 });
+    const evo = await ASESOR.ejecutar('evolucion', { meses: 3 });
+    const avi = await ASESOR.ejecutar('avisos', {});
+    const calc = await ASESOR.ejecutar('calcular', { expresion: '(3000 - 700) / 3000 * 100' });
+    const fallo = async (e) => { try { await ASESOR.ejecutar('calcular', { expresion: e }); return ''; } catch (err) { return err.message; } };
+    const cfg = { ivaVentas: 21, ivaGastos: 21, irpfActivo: true, irpf: 20, ...JSON.parse(localStorage.getItem('contable-config') || '{}') };
+    const oficial = INFORME.prevision(await INFORME.generar(2026, 4), cfg);
+    return { per, ana, nadie, fac, prov, dias, imp, evo, avi, calc, malo: await fallo('alert(1)'), cero: await fallo('5/0'), oficial };
+  });
+  const anaMes = (herr.per.trabajadores || [])[0] || {};
+  chk('asesor', 'Personal del mes: Ana, 2 días, día a 29,03, le corresponden 58,06, entregados 20,00 y se le deben 38,06',
+    anaMes.nombre === 'Ana' && anaMes.dias_trabajados === 2 && cerca(anaMes.precio_del_dia_este_mes, 29.03) && cerca(anaMes.le_corresponde_este_mes, 58.06) &&
+    cerca(anaMes.entregado_este_mes, 20) && cerca(anaMes.pendiente_total_a_dia_de_hoy, 38.06) && cerca(herr.per.debes_al_equipo_en_total, 38.06), JSON.stringify(anaMes).slice(0, 400));
+  chk('asesor', 'La cuenta de una persona se encuentra por parte del nombre, con sus entregas y lo pendiente',
+    herr.ana.encontrado && herr.ana.nombre === 'Ana' && herr.ana.entregas.length === 1 && cerca(herr.ana.entregas[0].importe, 20) && cerca(herr.ana.pendiente_a_dia_de_hoy, 38.06),
+    JSON.stringify(herr.ana).slice(0, 300));
+  chk('asesor', 'Si la persona no existe se dice (no se inventa) y se dan los nombres apuntados',
+    herr.nadie.encontrado === false && herr.nadie.personas_apuntadas.includes('Ana'), JSON.stringify(herr.nadie));
+  chk('asesor', 'Facturas: el gasto de casa va aparte (negocio 700, casa 100) y el IVA detectado es 121,49',
+    herr.fac.encontradas === 2 && cerca(herr.fac.total_negocio, 700) && cerca(herr.fac.total_de_casa_aparte, 100) && cerca(herr.fac.iva_soportado_detectado, 121.49), JSON.stringify(herr.fac).slice(0, 300));
+  chk('asesor', 'Proveedores: solo los del negocio (Bebidas Pepe, 700, el 100 % del gasto)',
+    herr.prov.num_proveedores === 1 && herr.prov.proveedores[0].proveedor === 'Bebidas Pepe' && cerca(herr.prov.total_gastos_negocio, 700) && herr.prov.proveedores[0].pct_del_gasto === 100, JSON.stringify(herr.prov).slice(0, 300));
+  chk('asesor', 'Ventas por día: 2 cierres, 3.000 en total y 1.500 de media',
+    herr.dias.dias_con_cierre === 2 && cerca(herr.dias.total_ventas, 3000) && cerca(herr.dias.media_por_dia_con_cierre, 1500) && herr.dias.dias.length === 2, JSON.stringify(herr.dias).slice(0, 300));
+  chk('asesor', 'Impuestos del trimestre: los mismos números que la previsión interna de la app, marcados como orientativos',
+    cerca(herr.imp.prevision_orientativa.iva_a_pagar_modelo_303, herr.oficial.ivaResultado) && cerca(herr.imp.prevision_orientativa.total_previsto_a_pagar, herr.oficial.totalPrevisto) &&
+    cerca(herr.imp.total_ingresos, 3000) && /ORIENTATIVA/.test(herr.imp.notas.join(' ')), JSON.stringify(herr.imp.prevision_orientativa));
+  chk('asesor', 'Evolución: tantos meses como se piden, acabando en el mes en curso',
+    herr.evo.meses.length === 3 && herr.evo.meses[2].mes === herr.evo.mes_en_curso, JSON.stringify(herr.evo.meses.map(m => m.mes)));
+  chk('asesor', 'Avisos: los mismos textos del Inicio, sin botones ni HTML',
+    Array.isArray(herr.avi.avisos) && herr.avi.avisos.every(a => !/[<>]/.test(a) && !/Ya lo hice/.test(a)), JSON.stringify(herr.avi).slice(0, 300));
+  chk('asesor', 'La calculadora hace la cuenta exacta: (3000 − 700) ÷ 3000 × 100 = 76,67',
+    cerca(herr.calc.resultado, 76.666667, 0.00001) && cerca(herr.calc.redondeado_al_centimo, 76.67), JSON.stringify(herr.calc));
+  chk('asesor', 'Y no ejecuta nada que no sea una operación (ni divide entre cero)',
+    /Solo se admiten números/.test(herr.malo) && /dividir entre cero/.test(herr.cero), JSON.stringify([herr.malo, herr.cero]));
+
+  // --- Va aprendiendo: lo que se le cuenta se guarda y vuelve en la siguiente pregunta ---
+  colaAPI = [usa('toolu_2', 'recordar', { texto: 'Su objetivo de margen es el 25 %' }), dice('Apuntado: tu objetivo de margen es el 25 %.')];
+  const chat2 = await preguntarAlAsesor('Mi objetivo de margen es el 25 %, tenlo en cuenta');
+  const memoria = await page.evaluate(() => ({ notas: ASESOR.memoria(), titulo: document.querySelector('#ase-memoria-titulo').textContent, lista: document.querySelector('#ase-memoria-lista').textContent }));
+  chk('asesor', 'Lo que el dueño le cuenta se guarda en su memoria y se ve en la pantalla',
+    memoria.notas.length === 1 && /objetivo de margen es el 25 %/.test(memoria.notas[0].texto) && /\(1\)/.test(memoria.titulo) && /objetivo de margen/.test(memoria.lista) &&
+    /Ha guardado una nota en su memoria/.test(chat2), JSON.stringify(memoria).slice(0, 300));
+  colaAPI = [dice('Sí: lo habitual en el sector es un margen del 20 al 30 %.')];
+  const chat3 = await preguntarAlAsesor('¿Es razonable ese objetivo?');
+  const envio5 = apiVistas[apiVistas.length - 1].cuerpo;
+  chk('asesor', 'En la siguiente pregunta ya lleva lo aprendido',
+    /Su objetivo de margen es el 25 %/.test(JSON.stringify(envio5.system)), JSON.stringify(envio5.system).slice(-300));
+  chk('asesor', 'Y recuerda la conversación: las preguntas y respuestas anteriores van como texto, sin reenviar datos viejos',
+    envio5.messages.length === 5 && envio5.messages[0].content === '¿Cómo fue octubre?' && /3\.000,00/.test(envio5.messages[1].content) &&
+    envio5.messages[4].content === '¿Es razonable ese objetivo?' && !/tool_result/.test(JSON.stringify(envio5.messages)), JSON.stringify(envio5.messages).slice(0, 400));
+  chk('asesor', 'Una respuesta sin consultar datos lo dice claro: "conocimiento general del asesor"',
+    /Respuesta sin consultar datos de la app \(conocimiento general del asesor\)/.test(chat3), chat3.slice(-300));
+  await page.evaluate(() => { document.querySelectorAll('#ase-chat details').forEach(d => { d.open = true; }); });
+  await page.click('#ase-memoria-lista .ase-olvidar');
+  await page.waitForTimeout(300);
+  chk('asesor', 'El dueño puede borrar lo aprendido desde la pantalla',
+    await page.evaluate(() => ASESOR.memoria().length === 0 && /\(0\)/.test(document.querySelector('#ase-memoria-titulo').textContent)));
+
+  // --- Nada falla en silencio ---
+  colaAPI = [usa('toolu_3', 'borrar_todo', {}), dice('No puedo hacer eso.')];
+  await preguntarAlAsesor('Borra todos los datos');
+  const errHerr = apiVistas[apiVistas.length - 1].cuerpo.messages.slice(-1)[0].content[0];
+  chk('asesor', 'Si pide algo que no existe (no hay herramientas para borrar ni cambiar nada), recibe un error y la app no hace nada',
+    errHerr.is_error === true && /No existe la herramienta/.test(errHerr.content) &&
+    await page.evaluate(async () => (await DB.todos()).length === 4 && (await DB.perTodos()).length === 1), JSON.stringify(errHerr));
+  colaAPI = [dice('Mira: <img src=x onerror="window.__colado=1"> y <b>esto</b>')];
+  await preguntarAlAsesor('Prueba de texto raro');
+  chk('asesor', 'El texto del asesor nunca se ejecuta como código en la pantalla',
+    await page.evaluate(() => !document.querySelector('#ase-mensajes img') && !document.querySelector('#ase-mensajes b') && !window.__colado));
+  colaAPI = [{ status: 401, body: { type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key' } } }];
+  const chatErr = await preguntarAlAsesor('¿Cuánto debo al equipo?');
+  chk('asesor', 'Si la clave deja de valer, se dice en el chat (no se queda callado) y la pregunta se conserva',
+    /La clave no es válida o se ha desactivado/.test(chatErr) && /¿Cuánto debo al equipo\?/.test(chatErr), chatErr.slice(-300));
+  colaAPI = [{ stop_reason: 'refusal', content: [] }];
+  const chatNo = await preguntarAlAsesor('Otra pregunta');
+  chk('asesor', 'Si el modelo declina contestar, también se dice', /no puede contestar a esa pregunta/.test(chatNo), chatNo.slice(-200));
+
+  // --- La clave y la conversación no salen del dispositivo por otro lado ---
+  const copiaAse = await page.evaluate(async () => JSON.stringify(await DB.exportarTodo()));
+  chk('asesor', 'La clave, la conversación y lo aprendido NO van en la copia de seguridad',
+    !copiaAse.includes(CLAVE_BUENA) && !copiaAse.includes('Cómo fue octubre') && !copiaAse.includes('objetivo de margen'));
+  await page.click('#ase-borrar-chat');
+  await page.waitForTimeout(300);
+  chk('asesor', 'Se puede borrar la conversación', await page.evaluate(() => ASESOR.chat().length === 0 && /Pregúntame por tus ventas/.test(document.querySelector('#ase-mensajes').textContent)));
+  await page.click('#ase-quitar-clave');
+  await page.waitForTimeout(300);
+  const llamadasAntes = llamadasAPI;
+  chk('asesor', 'Y quitar la clave: el chat se apaga y vuelve la pantalla de activación',
+    await page.evaluate(() => !localStorage.getItem('contable-asesor-clave') && !document.querySelector('#ase-config').classList.contains('hidden') &&
+      document.querySelector('#ase-chat').classList.contains('hidden')) && llamadasAPI === llamadasAntes);
+  await page.unroute('https://api.anthropic.com/**');
 
   // ══════════════ 10. ERRORES DE JAVASCRIPT ══════════════
   console.log('\n═══ 10. ESTABILIDAD ═══');

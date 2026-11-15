@@ -13,12 +13,14 @@ desde la rama por defecto del repositorio.
 
 | Archivo | Qué hace |
 |---|---|
-| `index.html` | Toda la interfaz, en pestañas (Inicio, Facturas, Facturación, Consultar, Personal, RRPP, Informes, Ajustes) |
+| `index.html` | Toda la interfaz, en pestañas (Inicio, Facturas, Facturación, Consultar, Personal, RRPP, Informes, Asesor, Ajustes) |
 | `js/db.js` | Almacenamiento local (IndexedDB): registros, proveedores, personal, pagos |
 | `js/nube.js` | Sincronización con Firebase (Firestore) del proyecto del propio usuario |
 | `js/ocr.js` | Lectura de fotos con Tesseract y detección de proveedor, fechas, totales, IVA y retenciones |
 | `js/report.js` | Informe trimestral, CSV para la gestoría y previsión interna de impuestos |
 | `js/app.js` | Lógica de la interfaz y todos los cálculos de personal |
+| `js/asesor.js` | El asesor: chat con Claude que contesta con los datos de la app (ver más abajo) |
+| `js/vendor/anthropic-sdk.js` | SDK oficial de Anthropic empaquetado en un archivo (no editar; la cabecera dice cómo rehacerlo) |
 | `js/seguridad.js` | PIN de acceso, huella y cifrado de las copias de seguridad |
 | `sw.js` | Service worker (caché offline) |
 | `pruebas/` | Verificación de la app (ver más abajo) |
@@ -393,6 +395,50 @@ restaurar). `window.APP` expone `inicio`, `recientes` y `miniaturas` para la ver
 - Un RRPP solo se puede **eliminar si no tiene noches ni entregas**; con
   historial, se conserva como prueba.
 
+## El asesor (pestaña Asesor)
+
+Un chat donde el dueño pregunta por su negocio y le contesta "un asesor financiero
+de bares de copas". Lo pidió así: que hable con seguridad, que vaya aprendiendo y
+**que no se invente datos**. Es solo interno: no sale en el CSV ni en la impresión.
+
+- **Es Claude (Anthropic), llamado desde el navegador** con la clave del propio dueño
+  (`contable-asesor-clave` en localStorage). La app no tiene servidor, así que se usa el
+  SDK oficial con `dangerouslyAllowBrowser`, cargado solo al usar la pestaña desde
+  `js/vendor/anthropic-sdk.js` (un archivo propio: el arranque sigue sin depender de nada
+  externo). Modelo `claude-opus-5-5`, esfuerzo `medium`, y `fallbacks: "default"` (beta
+  `server-side-fallback-2026-07-01`) para que una negativa por error se reintente sola.
+  **Sin clave no se envía nada**: la pestaña solo explica cómo activarlo y qué datos salen.
+- **Cada cifra la da la app, no el modelo.** Claude no tiene las cuentas: las pide con
+  herramientas que se ejecutan en el móvil (`APP.asesor` en `js/app.js`: `resumenMes`,
+  `evolucion`, `ventasPorDia`, `facturas`, `proveedores`, `personalMes`, `trabajador`,
+  `impuestosTrimestre`, `avisos`), que reutilizan **las mismas funciones** del Inicio, el
+  cuadro de mando y Personal (`datosMesDe`, `desgloseDeuda`, `INFORME.prevision`…). Si se
+  cambia una cuenta de la app, el asesor la hereda; no hay que duplicar nada. Las
+  herramientas son **solo de lectura** (no hay ninguna que guarde, cambie o borre datos del
+  negocio) y nunca devuelven fotos. Las listas largas se recortan **diciéndolo** y con los
+  totales de todo, nunca en silencio.
+- Las cuentas las hace con la herramienta `calcular` (un lector propio de `+ − × ÷` y
+  paréntesis, sin `eval`), no "de cabeza".
+- **Debajo de cada respuesta se enseña qué datos consultó** ("📊 Datos consultados en tu
+  app: Resumen de octubre de 2026") o, si no consultó nada, "Respuesta sin consultar datos
+  de la app (conocimiento general del asesor)", y lo que costó aprox. en dólares.
+- **Va aprendiendo** con las herramientas `recordar` / `olvidar`: notas cortas en
+  `contable-asesor-memoria` que se le vuelven a dar en cada pregunta y que el dueño ve y
+  puede borrar en "🧠 Lo que el asesor ha aprendido". Lo que guarda a mitad de una
+  respuesta vale desde la siguiente (las instrucciones se fijan al empezar la pregunta).
+- De la conversación (`contable-asesor-chat`) se reenvían las últimas preguntas y
+  respuestas **como texto**; los datos consultados entonces no, para que siempre vuelva a
+  pedir los de ahora. Dentro de una misma pregunta el contenido de Claude se devuelve tal
+  cual llegó (lo exige la API para seguir el hilo).
+- **La clave, la conversación y lo aprendido viven solo en el dispositivo**: no van a la
+  nube de la app ni a las copias de seguridad (hay una comprobación). Pendiente conocido:
+  por eso lo aprendido no pasa de un dispositivo a otro.
+- **Nada falla en silencio**: clave inválida, sin saldo, sin conexión, servicio caído o una
+  negativa del modelo salen como aviso en el chat, y la pregunta se conserva.
+- El texto del asesor se pinta escapado (`aHTML`: solo párrafos, **negrita** y listas).
+- El tono y las reglas están en `INSTRUCCIONES` (`js/asesor.js`). Si se cambia una regla de
+  negocio que el asesor deba conocer (cómo cuenta la app), hay que actualizarla también ahí.
+
 ## Sincronización en la nube
 
 Firebase del propio usuario (proyecto `wandercontable`), con reglas que solo
@@ -418,8 +464,9 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 416 comprobaciones en un navegador real sobre los cálculos de dinero, las
-copias de seguridad, el personal, el OCR, la seguridad y la sincronización.
+Son 452 comprobaciones en un navegador real sobre los cálculos de dinero, las
+copias de seguridad, el personal, el OCR, la seguridad, el asesor (con un Claude
+simulado: no gasta saldo ni necesita clave) y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.
 
 ## Estilo

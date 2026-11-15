@@ -12,7 +12,15 @@ bash pruebas/ejecutar.sh
 
 Al final dice `✅ TODO CORRECTO` o lista los fallos encontrados.
 
-## Qué se comprueba (337 comprobaciones)
+## Qué se comprueba (452 comprobaciones)
+
+**El asesor (chat)** — con un Claude simulado, así que no gasta saldo ni necesita
+clave: que sin clave no sale nada del móvil, que una clave mala no se guarda, que cada
+cifra la contesta la app con sus cuentas (y son las mismas del resto de pantallas), que
+no se envía ninguna foto, que la calculadora no ejecuta nada raro, que lo aprendido se
+guarda y vuelve en la siguiente pregunta, que los fallos se dicen en el chat, que el
+texto del asesor no se ejecuta como código y que la clave y la conversación no van a
+las copias de seguridad. **No comprueba la conexión real con Claude.**
 
 **Informe trimestral** — que los ingresos y gastos del trimestre son los
 correctos, que no se cuelan registros de otros meses, que se agrupan las
