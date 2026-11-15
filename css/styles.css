@@ -959,6 +959,39 @@ select { appearance: none; -webkit-appearance: none; }
   z-index: 80;
 }
 .ase-burbuja:active { transform: scale(.94); }
+/* El número de avisos nuevos, sobre la burbuja */
+.ase-globo {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 11px;
+  background: var(--bad);
+  color: #fff;
+  font-size: .78rem;
+  font-weight: 800;
+  line-height: 22px;
+  text-align: center;
+  box-shadow: 0 2px 6px rgba(0,0,0,.5);
+}
+/* El parte de hoy, bajo la cabecera del chat */
+.ase-parte {
+  padding: 12px 14px;
+  background: #241d08;
+  border-bottom: 1px solid #5a4a12;
+  font-size: .88rem;
+  line-height: 1.45;
+  max-height: 46vh;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+.ase-parte-titulo { font-weight: 800; margin-bottom: 6px; }
+.ase-parte p { margin: 0 0 6px; }
+.ase-parte ul { margin: 6px 0 0 18px; padding: 0; }
+.ase-parte li { margin-bottom: 5px; }
+.ase-parte-botones { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }
 body.ase-abierto { overflow: hidden; }
 .ase-panel {
   position: fixed;

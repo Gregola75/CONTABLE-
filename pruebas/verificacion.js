@@ -2570,9 +2570,43 @@ TARJETA 450,00`)]);
   chk('asesor', 'Y sigue ahí en las demás pantallas',
     await page.evaluate(() => { const r = document.querySelector('#ase-burbuja').getBoundingClientRect(); return r.width > 40 && r.bottom <= innerHeight; }));
 
+  // --- Avisos: un número sobre la burbuja y el parte al abrir (sin clave ni saldo) ---
+  await page.evaluate(() => localStorage.removeItem('contable-asesor-parte-visto'));
+  await page.click('.tab[data-tab="inicio"]');
+  await page.waitForTimeout(900);
+  const globo = await page.evaluate(() => {
+    const g = document.querySelector('#ase-globo');
+    const p = ASESOR.parte();
+    return { hayParte: !!p, avisos: p ? p.avisos : [], visible: !g.classList.contains('hidden'), numero: g.textContent, ventas: p && p.ventas, mes: p && p.mes };
+  });
+  chk('asesor', 'La app publica el parte del mes en curso (cómo va y qué hay pendiente) y, si hay avisos nuevos, pone su número sobre la burbuja',
+    globo.hayParte && globo.mes === new Date().toISOString().slice(0, 7) && globo.visible === (globo.avisos.length > 0) &&
+    (!globo.visible || globo.numero === String(globo.avisos.length)), JSON.stringify(globo).slice(0, 400));
+  const avisosOct = await page.evaluate(() => APP.alertas('2026-10'));
+  chk('asesor', 'Aviso nuevo: un trabajador con días ya pasados sin marcar (Ana, 29 días de octubre) sale avisado, porque no se le pagan',
+    avisosOct.some(a => /Ana tiene 29 días sin marcar \(3, 4, 5, 6, 7, 8, 9, 10…\): no se le pagan hasta que los marques/.test(a)), JSON.stringify(avisosOct).slice(0, 600));
+
   // --- Sin clave: solo se explica cómo activarlo, y no sale nada ---
   await page.click('#ase-burbuja');
   await page.waitForTimeout(300);
+  const parte1 = await page.evaluate(() => ({
+    visible: !document.querySelector('#ase-parte').classList.contains('hidden'),
+    texto: document.querySelector('#ase-parte').textContent.replace(/\s+/g, ' '),
+    globoOculto: document.querySelector('#ase-globo').classList.contains('hidden'),
+    avisos: ASESOR.parte().avisos,
+    sinBotonDeClaude: !document.querySelector('#ase-parte-explicar')
+  }));
+  chk('asesor', 'Al abrir el chat sale el parte de hoy con cómo va el mes y cada aviso, y el número de la burbuja se apaga',
+    parte1.visible && /Parte de hoy/.test(parte1.texto) && parte1.avisos.every(a => parte1.texto.includes(a)) && parte1.globoOculto, parte1.texto.slice(0, 500));
+  chk('asesor', 'El parte no necesita clave ni gasta saldo: lo calcula la app (sin clave no ofrece "Coméntamelo")', parte1.sinBotonDeClaude && llamadasAPI === 0);
+  await page.click('#ase-parte-ok');
+  await page.click('#ase-cerrar');
+  await page.click('#ase-burbuja');
+  await page.waitForTimeout(200);
+  chk('asesor', 'Una vez visto no vuelve a salir solo, pero con el megáfono se puede volver a ver',
+    await page.evaluate(() => document.querySelector('#ase-parte').classList.contains('hidden')) &&
+    await (async () => { await page.click('#ase-ver-parte'); return page.evaluate(() => !document.querySelector('#ase-parte').classList.contains('hidden')); })());
+  await page.click('#ase-parte-ok');
   chk('asesor', 'Al tocarla se abre el chat y saluda por el nombre: "¿Qué tal, Gregory? ¿Qué necesitas?"',
     await page.evaluate(() => !document.querySelector('#ase-panel').classList.contains('hidden') &&
       document.querySelector('#ase-burbuja').classList.contains('hidden') &&
@@ -2616,8 +2650,8 @@ TARJETA 450,00`)]);
     envio1.cabeceras['authorization'] === 'Bearer ' + CLAVE_BUENA && envio1.cabeceras['anthropic-dangerous-direct-browser-access'] === 'true' && /bar de copas/.test(JSON.stringify(envio1.cuerpo.system)) &&
     /Nunca de memoria ni de una suposición/.test(JSON.stringify(envio1.cuerpo.system)), JSON.stringify(envio1.cuerpo.system).slice(0, 300));
   const nombresHerr = (envio1.cuerpo.tools || []).map(t => t.name).sort().join(',');
-  chk('asesor', 'Se le dan las 15 herramientas: 9 para consultar, la calculadora, recordar y olvidar, y las 3 para apuntar (gasto, cierre y entrega)',
-    nombresHerr === 'apuntar_cierre,apuntar_entrega,apuntar_gasto,avisos,calcular,evolucion,facturas,impuestos_trimestre,olvidar,personal_mes,proveedores,recordar,resumen_mes,trabajador,ventas_por_dia', nombresHerr);
+  chk('asesor', 'Se le dan las 16 herramientas: 9 para consultar, la calculadora, recordar y olvidar, y las 4 para apuntar (gasto, cierre, entrega y días)',
+    nombresHerr === 'apuntar_cierre,apuntar_entrega,apuntar_gasto,avisos,calcular,evolucion,facturas,impuestos_trimestre,marcar_dias,olvidar,personal_mes,proveedores,recordar,resumen_mes,trabajador,ventas_por_dia', nombresHerr);
   chk('asesor', 'Ninguna herramienta sirve para cambiar o borrar lo que ya está apuntado',
     !(envio1.cuerpo.tools || []).some(t => /borrar|eliminar|editar|modificar|cambiar/.test(t.name)));
   const envio2 = apiVistas[1] || { cuerpo: { messages: [] } };
@@ -2881,13 +2915,82 @@ TARJETA 450,00`)]);
     entregasNo.viejo.valido === false && /ya está liquidado/.test(entregasNo.viejo.motivo) && entregasNo.sinImporte.valido === false && /Falta el importe/.test(entregasNo.sinImporte.motivo) &&
     entregasNo.nadie.valido === false && entregasNo.nadie.personas_en_activo.includes('Carlos') && !entregasNo.nadie.personas_en_activo.includes('Viejo'), JSON.stringify(entregasNo).slice(0, 500));
 
+  // --- Marcar los días de un trabajador: "Carlos trabajó del 3 al 6" ---
+  const carlos = () => page.evaluate(async () => {
+    const t = (await DB.perTodos()).find(x => x.nombre === 'Carlos');
+    return { dias: t.dias, descansos: t.descansos || [], faltas: t.faltas || [], tardes: t.tardes || [], notas: (t.notasDias || []).filter(n => n.motivoFalta) };
+  });
+  colaAPI = [usa('toolu_d1', 'marcar_dias', { nombre: 'carlos', estado: 'trabajo', desde: '2026-11-03', hasta: '2026-11-06' }), dice('Marcados.')];
+  const tarjetaD1 = await dictar('Carlos trabajó del 3 al 6');
+  chk('asesor', 'Al dictarle días enseña la tarjeta: para quién, qué días, cómo se marcan y cómo cambia lo que le corresponde (150,00 €, ahora 30,00 €)',
+    /Marcar estos días/.test(tarjetaD1) && /Para\s*Carlos/.test(tarjetaD1) && /noviembre 2026: 3, 4, 5, 6/.test(tarjetaD1) && /Se marcan como\s*trabajó/.test(tarjetaD1) &&
+    /Le corresponde en noviembre 2026\s*150,00 € \(ahora 30,00 €\)/.test(tarjetaD1), tarjetaD1);
+  chk('asesor', 'Antes de pulsar Guardar, el calendario no ha cambiado', (await carlos()).dias.length === 1);
+  await page.click('#ase-mensajes .ase-tarjeta .ase-confirmar');
+  const chatD1 = await acabar();
+  chk('asesor', 'Al pulsar Guardar quedan marcados los 4 días (del 3 al 6), y en el chat queda escrito',
+    JSON.stringify((await carlos()).dias) === JSON.stringify(['2026-11-02', '2026-11-03', '2026-11-04', '2026-11-05', '2026-11-06']) &&
+    ultimoResultado().guardado === true && /Apuntado en la app: Carlos · 4 días como «trabajó»/.test(chatD1), JSON.stringify(await carlos()) + chatD1.slice(-200));
+  // Un descanso suelto: con el sueldo por mes también se paga
+  colaAPI = [usa('toolu_d2', 'marcar_dias', { nombre: 'carlos', estado: 'descanso', fechas: ['2026-11-07'] }), dice('Hecho.')];
+  const tarjetaD2 = await dictar('Carlos libró el 7');
+  await page.click('#ase-mensajes .ase-tarjeta .ase-confirmar');
+  await acabar();
+  chk('asesor', 'Un descanso dictado se marca como descanso y cuenta como día pagado (180,00 €, ahora 150,00 €)',
+    (await carlos()).descansos.includes('2026-11-07') && /Se marcan como\s*descansó/.test(tarjetaD2) && /180,00 € \(ahora 150,00 €\)/.test(tarjetaD2), tarjetaD2);
+  // Cambiar un día ya marcado: avisa de lo que había
+  colaAPI = [usa('toolu_d3', 'marcar_dias', { nombre: 'carlos', estado: 'falta', fechas: ['2026-11-06'], motivo: 'médico' }), dice('Hecho.')];
+  const tarjetaD3 = await dictar('El 6 Carlos faltó, fue al médico');
+  chk('asesor', 'Si el día ya tenía otra marca, la tarjeta avisa de lo que había ("el 06/11/2026 estaba como «trabajó»") y del motivo',
+    /Se cambia lo que había: el 06\/11\/2026 estaba como «trabajó»/.test(tarjetaD3) && /Motivo\s*médico/.test(tarjetaD3) && /150,00 € \(ahora 180,00 €\)/.test(tarjetaD3), tarjetaD3);
+  await page.click('#ase-mensajes .ase-tarjeta .ase-confirmar');
+  await acabar();
+  const carlosF = await carlos();
+  chk('asesor', 'La falta queda con su motivo, y el día deja de contar como trabajado (un día solo tiene un estado)',
+    carlosF.faltas.includes('2026-11-06') && !carlosF.dias.includes('2026-11-06') && carlosF.notas.some(n => n.fecha === '2026-11-06' && n.texto === 'médico'), JSON.stringify(carlosF));
+  // Lo que no se puede marcar se dice, sin tarjeta y sin tocar nada
+  const diasNo = await page.evaluate(async () => {
+    await DB.perGuardar({ esRRPP: true, nombre: 'Promo', inicio: '2026-11-01', noches: [], creado: new Date().toISOString() });
+    const p = (i) => APP.asesor.prepararDias(i);
+    const tarde = await p({ nombre: 'Carlos', estado: 'tarde', fechas: ['2026-11-05'], horas_tarde: 2 });
+    return {
+      sinHoras: await p({ nombre: 'Carlos', estado: 'tarde', fechas: ['2026-11-05'] }),
+      tarde: { valido: tarde.valido, cambios: tarde.registro && tarde.registro.cambios, lineas: JSON.stringify(tarde.lineas) },
+      antes: await p({ nombre: 'Carlos', estado: 'trabajo', fechas: ['2026-11-01'] }),
+      yaAsi: await p({ nombre: 'Carlos', estado: 'trabajo', fechas: ['2026-11-03'] }),
+      rrpp: await p({ nombre: 'Promo', estado: 'trabajo', fechas: ['2026-11-03'] }),
+      viejo: await p({ nombre: 'Viejo', estado: 'trabajo', fechas: ['2026-09-01'] }),
+      dos: await p({ nombre: 'Jeferson', estado: 'trabajo', fechas: ['2026-11-06'] }),
+      sinEstado: await p({ nombre: 'Carlos', fechas: ['2026-11-08'] }),
+      fechaMala: await p({ nombre: 'Carlos', estado: 'trabajo', fechas: ['2026-11-31'] })
+    };
+  });
+  chk('asesor', 'Un retraso necesita las horas; con 2 h, la tarjeta ya descuenta la parte del día (2 ÷ 7,5 × 30 = 8,00 → 142,00 €)',
+    diasNo.sinHoras.valido === false && /cuántas horas llegó tarde/.test(diasNo.sinHoras.motivo) && diasNo.tarde.valido === true &&
+    diasNo.tarde.cambios[0].estado === 'tarde' && diasNo.tarde.cambios[0].horas === 2 && /142,00 € \(ahora 150,00 €\)/.test(diasNo.tarde.lineas), JSON.stringify(diasNo.tarde));
+  chk('asesor', 'No marca días de antes de que empezara, ni lo que ya estaba así, ni a un RRPP, ni a un liquidado, ni sin saber qué pasó, ni una fecha que no existe',
+    diasNo.antes.valido === false && /fuera del tiempo que ha trabajado/.test(diasNo.antes.motivo) && diasNo.yaAsi.valido === false && /ya estaban marcados así/.test(diasNo.yaAsi.motivo) &&
+    diasNo.rrpp.valido === false && /es RRPP/.test(diasNo.rrpp.motivo) && diasNo.viejo.valido === false && /liquidado/.test(diasNo.viejo.motivo) &&
+    diasNo.sinEstado.valido === false && diasNo.fechaMala.valido === false, JSON.stringify(diasNo).slice(0, 700));
+  chk('asesor', 'Y con dos personas del mismo nombre tampoco elige: devuelve las dos para preguntar a cuál',
+    diasNo.dos.valido === false && (diasNo.dos.coinciden || []).length === 2, JSON.stringify(diasNo.dos).slice(0, 300));
+
+  // --- Con clave, el parte ofrece "Coméntamelo": se lo pide al asesor ---
+  await page.click('#ase-ver-parte');
+  colaAPI = [dice('Vas bien, pero te faltan cierres por apuntar.')];
+  await page.click('#ase-parte-explicar');
+  const chatParte = await acabar();
+  chk('asesor', '"Coméntamelo" le pide al asesor el parte de hoy, y su respuesta sale en el chat',
+    /Dame el parte de hoy/.test(apiVistas[apiVistas.length - 1].cuerpo.messages.slice(-1)[0].content) && /te faltan cierres por apuntar/.test(chatParte) &&
+    await page.evaluate(() => document.querySelector('#ase-parte').classList.contains('hidden')), chatParte.slice(-300));
+
   // --- Nada falla en silencio ---
   colaAPI = [usa('toolu_3', 'borrar_todo', {}), dice('No puedo hacer eso.')];
   await preguntarAlAsesor('Borra todos los datos');
   const errHerr = apiVistas[apiVistas.length - 1].cuerpo.messages.slice(-1)[0].content[0];
   chk('asesor', 'Si pide algo que no existe (no hay herramienta para borrar), recibe un error y la app no borra nada',
     errHerr.is_error === true && /No existe la herramienta/.test(errHerr.content) &&
-    await page.evaluate(async () => (await DB.todos()).length === 7 && (await DB.perTodos()).length === 5 && (await DB.pagoTodos()).length === 2), JSON.stringify(errHerr));
+    await page.evaluate(async () => (await DB.todos()).length === 7 && (await DB.perTodos()).length === 6 && (await DB.pagoTodos()).length === 2), JSON.stringify(errHerr));
   colaAPI = [dice('Mira: <img src=x onerror="window.__colado=1"> y <b>esto</b>')];
   await preguntarAlAsesor('Prueba de texto raro');
   chk('asesor', 'El texto del asesor nunca se ejecuta como código en la pantalla',

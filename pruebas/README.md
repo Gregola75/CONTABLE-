@@ -12,7 +12,7 @@ bash pruebas/ejecutar.sh
 
 Al final dice `✅ TODO CORRECTO` o lista los fallos encontrados.
 
-## Qué se comprueba (483 comprobaciones)
+## Qué se comprueba (498 comprobaciones)
 
 **El asesor (chat)** — con un Claude simulado, así que no gasta saldo ni necesita
 clave: que sin clave no sale nada del móvil, que una clave mala no se guarda, que cada
@@ -26,7 +26,11 @@ con Cancelar), que salen los avisos de siempre (duplicado, cierre ya apuntado), 
 reconoce al proveedor dado de alta y que no existe herramienta para cambiar o borrar. Y
 las entregas al equipo: que con dos personas del mismo nombre no elige él sino que devuelve
 las dos para preguntar a cuál, que la tarjeta dice lo que se le debe y cómo quedará, que se
-apunta a la persona elegida y no a la otra, y que a un liquidado no se le apunta nada.
+apunta a la persona elegida y no a la otra, y que a un liquidado no se le apunta nada. Los
+días del calendario dictados (trabajó, descansó, faltó, llegó tarde): que la tarjeta dice
+cómo cambia lo que le corresponde, que avisa si pisa una marca anterior y que no marca
+fuera de su etapa. Y los avisos: el número sobre la burbuja, el parte al abrir (sin clave
+ni saldo) y el aviso de días pasados sin marcar.
 **No comprueba la conexión real con Claude.**
 
 **Informe trimestral** — que los ingresos y gastos del trimestre son los

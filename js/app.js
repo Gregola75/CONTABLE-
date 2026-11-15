@@ -1464,6 +1464,25 @@
     return r2(total);
   }
 
+  /* El parte del día: cómo va el mes y qué hay pendiente, con las mismas cifras y
+     avisos del Inicio. Lo recoge la burbuja del asesor para avisar (un número
+     sobre la burbuja) y enseñarlo al abrir el chat. No lee nada más de la base
+     de datos ni llama a ningún servicio. */
+  function publicarParte(d, ant, equipo, alertas) {
+    const media = (x) => x.cierres ? r2(Object.values(x.porDia).reduce((s, v) => s + v, 0) / x.cierres) : null;
+    window.APP_PARTE = {
+      fecha: hoyISO(),
+      mes: d.mes,
+      ventas: d.ingresos, dias_con_cierre: d.cierres, media_por_dia: media(d),
+      mes_anterior: ant ? ant.mes : null, media_por_dia_mes_anterior: ant ? media(ant) : null,
+      gastos: d.gastos, personal: d.personal, lo_que_queda: d.beneficio,
+      margen_pct: d.ingresos > 0 ? Math.round(d.beneficio / d.ingresos * 100) : null,
+      debes_al_equipo: equipo.total,
+      avisos: alertas.map(textoPlano)
+    };
+    document.dispatchEvent(new CustomEvent('contable-parte'));
+  }
+
   /* Los números de un mes a partir de los registros ya cargados. */
   function datosMesDe(regs, trabajadores, mes) {
     const delMes = regs.filter(r => (r.fecha || '').startsWith(mes));
@@ -1552,6 +1571,15 @@
     }
     if (d.sinIVA) alertas.push(`<div class="alerta"><span>🧾 <strong>${d.sinIVA} factura${d.sinIVA === 1 ? '' : 's'} sin desglose de IVA</strong> este mes: la previsión de impuestos lo estima. Ábrelas y pon el IVA para afinar.</span></div>`);
     if (equipo.total > 0) alertas.push(`<div class="alerta"><span>👥 Debes <strong>${INFORME.eur(equipo.total)}</strong> al equipo en total (ver pestaña Personal).</span></div>`);
+    // Días ya pasados sin marcar: con el sueldo por mes no se pagan. Se deja un
+    // día de margen (el de ayer puede estar aún por apuntar) para no dar la lata.
+    if (mes >= MES_SUELDO_POR_MES) {
+      const ayer = sumarDiasISO(hoy, -1);
+      for (const { t } of equipo.filas) {
+        const sin = calcularMes(t, 0, [], mes).sinMarcar.filter(f => f < ayer);
+        if (sin.length) alertas.push(`<div class="alerta"><span>📅 <strong>${escapar(t.nombre)}</strong> tiene <strong>${sin.length} día${sin.length === 1 ? '' : 's'} sin marcar</strong> (${sin.slice(0, 8).map(f => +f.slice(8)).join(', ')}${sin.length > 8 ? '…' : ''}): no se le paga${sin.length === 1 ? '' : 'n'} hasta que lo${sin.length === 1 ? '' : 's'} marques como trabajado o descanso.</span></div>`);
+      }
+    }
     // Descanso semanal: si alguien trabajó los 7 días de una semana, avisar (solo al dueño)
     for (const { t } of equipo.filas) {
       const semanas = semanasSinDescanso(t, mes);
@@ -1773,6 +1801,7 @@
     const ant = datos[datos.length - 2];
     const equipo = await deudaConElEquipo(cierresDesde(regs));
     const alertas = await alertasDelMes(mes, d, regs, equipo);
+    if (esMesActual) publicarParte(d, ant, equipo, alertas);
 
     const pct = (parte) => d.ingresos > 0 ? `${Math.round(parte / d.ingresos * 100)} % de las ventas` : '';
     const variacion = (ahora, antes) => {
@@ -2281,6 +2310,32 @@
     await DB.perGuardar(t);
     cerrarModal();
     pintarPersonal();
+  }
+
+  /* Lo mismo que hace el menú del calendario, pero sin preguntar nada: deja el
+     día f de t en ese estado ('trabajo', 'descanso', 'tarde', 'falta' o 'nada')
+     y devuelve t. Lo usa el asesor al marcar los días que le dictan; las horas
+     del retraso y el motivo de la falta ya vienen dados. */
+  function ponerEstadoDia(t, f, estado, horas = 0, motivo = '') {
+    const dias = new Set(t.dias || []);
+    const tardes = tardesDe(t).filter(x => x.fecha !== f);
+    const faltas = new Set(t.faltas || []);
+    const descansos = new Set(t.descansos || []);
+    let notas = (t.notasDias || []).filter(n => !(n.fecha === f && n.motivoFalta));
+    dias.delete(f); descansos.delete(f); faltas.delete(f);
+    if (estado === 'trabajo') dias.add(f);
+    if (estado === 'descanso') descansos.add(f);
+    if (estado === 'tarde') tardes.push({ fecha: f, horas: Math.max(0, +horas || 0) });
+    if (estado === 'falta') {
+      faltas.add(f);
+      if (String(motivo || '').trim()) notas = [...notas, { fecha: f, texto: String(motivo).trim(), motivoFalta: true }];
+    }
+    t.dias = [...dias].sort();
+    t.tardes = tardes.sort((a, b) => a.fecha.localeCompare(b.fecha));
+    t.faltas = [...faltas].sort();
+    t.descansos = [...descansos].sort();
+    t.notasDias = notas;
+    return t;
   }
 
   /* Colores de los trabajadores (paleta validada para el tema oscuro).
@@ -4874,7 +4929,7 @@
      sueltos (sin HTML ni fotos). El asesor no calcula el negocio por su cuenta:
      pregunta aquí y repite lo que le devuelven. Las consultas son de solo
      lectura; lo único que puede escribir es un gasto, un cierre o una entrega
-     al personal nuevos, y solo
+     al personal nuevos, y los días del calendario de un trabajador, y solo
      después de que el dueño lo confirme en pantalla (ver "Apuntar" más abajo).
      No puede cambiar ni borrar nada. Los importes van redondeados al céntimo. */
   const esMes = (m) => typeof m === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(m);
@@ -5407,8 +5462,97 @@
       };
     },
 
+    /* Marcar días en el calendario de un trabajador: trabajó, descansó, faltó,
+       llegó tarde o sin marcar. Uno o varios días, o un tramo seguido. */
+    async prepararDias({ nombre, persona_id, fechas, desde, hasta, estado, horas_tarde, motivo } = {}) {
+      const [regs, todos] = await Promise.all([DB.todos(), DB.perTodos()]);
+      const hallado = buscarPersona(todos, { nombre, persona_id });
+      if (!hallado.persona) return { valido: false, ...hallado };
+      const t = hallado.persona;
+      if (t.esRRPP) return { valido: false, motivo: `${t.nombre} es RRPP: no tiene días de trabajo, sino lo que factura cada noche. Eso se apunta en la pestaña RRPP.` };
+      if (t.liquidado) return { valido: false, motivo: `${t.nombre} ya está liquidado y su cuenta está cerrada: no se le pueden marcar días. Para corregir algo hay que reabrir antes su ficha en Personal.` };
+
+      const ESTADOS = { trabajo: 'trabajó', descanso: 'descansó', falta: 'faltó (no vino)', tarde: 'llegó tarde', sin_marcar: 'sin marcar (se quita la marca)' };
+      if (!ESTADOS[estado]) return { valido: false, motivo: 'Falta qué pasó esos días: trabajo, descanso, falta, tarde o sin_marcar. Pregúntaselo al dueño.' };
+      const interno = estado === 'sin_marcar' ? 'nada' : estado;
+      let horas = 0;
+      if (estado === 'tarde') {
+        horas = Math.round(Number(horas_tarde) * 100) / 100;
+        if (!(horas > 0) || horas > 24) return { valido: false, motivo: 'Para marcar un retraso hace falta saber cuántas horas llegó tarde. Pregúntaselo al dueño.' };
+      }
+
+      // Los días: una lista, un tramo seguido, o las dos cosas
+      const lista = new Set((Array.isArray(fechas) ? fechas : (fechas ? [fechas] : [])).map(String));
+      if (desde || hasta) {
+        if (!esFechaReal(desde) || !esFechaReal(hasta) || hasta < desde) return { valido: false, motivo: 'El tramo de días no está bien: hacen falta el primer y el último día (AAAA-MM-DD), en orden.' };
+        for (let f = desde, n = 0; f <= hasta && n < 70; f = sumarDiasISO(f, 1), n++) lista.add(f);
+      }
+      const pedidas = [...lista].sort();
+      if (!pedidas.length) return { valido: false, motivo: 'Falta qué días hay que marcar. Pregúntaselo al dueño.' };
+      if (pedidas.some(f => !esFechaReal(f))) return { valido: false, motivo: 'Alguna fecha no es una fecha de verdad (formato AAAA-MM-DD). Revísalas con el dueño.' };
+      if (pedidas.length > 62) return { valido: false, motivo: 'Son demasiados días de una vez (más de dos meses). Hazlo por meses.' };
+
+      const avisos = [];
+      const fuera = pedidas.filter(f => (t.inicio && f < t.inicio) || (t.fin && f > t.fin));
+      const dentro = pedidas.filter(f => !fuera.includes(f));
+      if (!dentro.length) return { valido: false, motivo: `Esos días quedan fuera del tiempo que ha trabajado ${t.nombre}${t.inicio ? ` (empezó el ${fmtFecha(t.inicio)}` + (t.fin ? ` y dejó de trabajar el ${fmtFecha(t.fin)})` : ')') : ''}: no se marca nada.` };
+      if (fuera.length) avisos.push(`No se marcan ${fuera.length === 1 ? 'el' : 'los días'} ${fuera.map(fmtFecha).join(', ')}: ${fuera.length === 1 ? 'queda' : 'quedan'} fuera del tiempo que ha trabajado.`);
+
+      const NOMBRE_DE = { trabajo: 'trabajó', descanso: 'descanso', tarde: 'llegó tarde', falta: 'faltó' };
+      const yaAsi = dentro.filter(f => estadoDelDia(t, f) === interno &&
+        (interno !== 'tarde' || ((tardesDe(t).find(x => x.fecha === f) || {}).horas === horas)));
+      const aCambiar = dentro.filter(f => !yaAsi.includes(f));
+      if (!aCambiar.length) return { valido: false, motivo: `Esos días ya estaban marcados así para ${t.nombre}: no hay nada que cambiar.` };
+      const pisados = aCambiar.filter(f => estadoDelDia(t, f) !== 'nada');
+      if (pisados.length) avisos.push(`Se cambia lo que había: ${pisados.map(f => `el ${fmtFecha(f)} estaba como «${NOMBRE_DE[estadoDelDia(t, f)]}»`).join('; ')}.`);
+      const hoy = hoyISO();
+      const futuros = aCambiar.filter(f => f > hoy);
+      if (futuros.length) avisos.push(`${futuros.length === 1 ? 'Hay 1 día que todavía no ha llegado' : `Hay ${futuros.length} días que todavía no han llegado`} (${futuros.map(fmtFecha).join(', ')}). Comprueba que es lo que quieres.`);
+      if (estado === 'tarde' && horas > (trabajadorEn(t, aCambiar[0].slice(0, 7)).horasJornada || 7.5)) avisos.push(`${numH(horas)} h de retraso es más que su jornada: ese día no cobraría nada.`);
+
+      // Cómo cambia lo que le corresponde, mes a mes (la misma cuenta de Personal)
+      const cambios = aCambiar.map(f => ({ fecha: f, estado: interno, horas, motivo: estado === 'falta' ? String(motivo || '').replace(/\s+/g, ' ').trim().slice(0, 120) : '' }));
+      const copia = JSON.parse(JSON.stringify({ ...t, imagen: undefined }));
+      cambios.forEach(c => ponerEstadoDia(copia, c.fecha, c.estado, c.horas, c.motivo));
+      const rrpps = todos.filter(x => x.esRRPP);
+      const meses = [...new Set(aCambiar.map(f => f.slice(0, 7)))];
+      const leCorresponde = (quien, mes) => {
+        const cierresMes = regs.filter(r => r.tipo === 'cierre' && (r.fecha || '').startsWith(mes));
+        return calcularMes(quien, ventasParaTrabajador(quien, cierresMes, mes, false, rrpps), [], mes).devengado;
+      };
+      const porMes = (lista2) => meses.map(m => `${mesEnLetras(m + '-01').toLowerCase()}: ${lista2.filter(f => f.startsWith(m)).map(f => +f.slice(8)).join(', ')}`).join(' · ');
+      const lineas = [
+        ['Para', t.nombre],
+        ['Días', porMes(aCambiar)],
+        ['Se marcan como', ESTADOS[estado] + (estado === 'tarde' ? ` ${numH(horas)} h` : '')]
+      ];
+      if (estado === 'falta' && cambios[0].motivo) lineas.push(['Motivo', cambios[0].motivo]);
+      meses.forEach(m => {
+        const antes = leCorresponde(t, m), despues = leCorresponde(copia, m);
+        lineas.push([`Le corresponde en ${mesEnLetras(m + '-01').toLowerCase()}`, Math.abs(antes - despues) < 0.005 ? `${INFORME.eur(despues)} (no cambia)` : `${INFORME.eur(despues)} (ahora ${INFORME.eur(antes)})`]);
+      });
+      if (yaAsi.length) avisos.push(`${yaAsi.length === 1 ? 'El ' + fmtFecha(yaAsi[0]) + ' ya estaba' : yaAsi.length + ' de esos días ya estaban'} así: no se toca${yaAsi.length === 1 ? '' : 'n'}.`);
+      return {
+        valido: true, titulo: 'Marcar estos días', almacen: 'dias', lineas, avisos,
+        registro: { sid: t.sid, cambios },
+        resumen: `${t.nombre} · ${aCambiar.length} día${aCambiar.length === 1 ? '' : 's'} como «${ESTADOS[estado].replace(/ \(.*$/, '')}» (${porMes(aCambiar)})`
+      };
+    },
+
     /* Guarda lo que "preparar" devolvió y el dueño ha confirmado en la tarjeta */
     async guardarApunte(registro, almacen = 'registro') {
+      if (almacen === 'dias') {
+        // Se relee al trabajador AHORA: mientras la tarjeta estaba en pantalla
+        // pudo cambiar algo, y los días se aplican sobre lo que hay de verdad.
+        const t = registro && (await DB.perTodos()).find(x => x.sid === registro.sid);
+        if (!t || t.liquidado || t.esRRPP || !Array.isArray(registro.cambios) || !registro.cambios.length) {
+          throw new Error('No se han podido marcar los días: no se ha guardado nada.');
+        }
+        registro.cambios.forEach(c => ponerEstadoDia(t, c.fecha, c.estado, c.horas, c.motivo));
+        const id = await DB.perGuardar(t);
+        refrescarPantalla();
+        return id;
+      }
       if (almacen === 'pago') {
         if (!registro || !registro.trabajadorSid || !esFechaReal(registro.fecha) || !(registro.importe > 0)) {
           throw new Error('La entrega no está completa: no se ha guardado nada.');
@@ -5437,7 +5581,14 @@
     }
   };
 
-  window.APP = { asesor: DATOS_ASESOR, inicio: pintarInicio, recientes: pintarRecientes, miniaturas: crearMiniaturasQueFaltan, semanas: semanasSinDescanso,
+  window.APP = { asesor: DATOS_ASESOR,
+    // Los avisos de un mes, en texto (para la verificación)
+    alertas: async (mes) => {
+      const [regs, trabajadores] = await Promise.all([DB.todos(), DB.perTodos()]);
+      const equipo = await deudaConElEquipo(cierresDesde(regs));
+      return (await alertasDelMes(mes, datosMesDe(regs, trabajadores, mes), regs, equipo)).map(textoPlano);
+    },
+    inicio: pintarInicio, recientes: pintarRecientes, miniaturas: crearMiniaturasQueFaltan, semanas: semanasSinDescanso,
     rrppSemana: calcularSemanaRRPP, rrppNoche: guardarNocheRRPP, datosMes,
     rrppCuenta: async (nombre) => {
       const r = (await DB.perTodos()).find(x => x.nombre === nombre);

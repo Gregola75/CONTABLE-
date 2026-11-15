@@ -9,12 +9,15 @@
      y debajo de cada respuesta se enseña qué datos consultó.
    - Va aprendiendo: lo que el dueño le cuenta y merece recordarse lo guarda con
      la herramienta "recordar", y se le vuelve a dar en cada conversación.
-   - Puede APUNTAR un gasto, un cierre de caja o una entrega al personal que el
-     dueño le dicte ("Movistar, 45 €, ayer"; "100 a Jeferson hoy"), pero nunca por
-     su cuenta: la app enseña una tarjeta con lo que
+   - Puede APUNTAR un gasto, un cierre de caja, una entrega al personal o los días
+     de un trabajador que el dueño le dicte ("Movistar, 45 €, ayer"; "100 a Jeferson
+     hoy"; "Carlos trabajó del 10 al 14"), pero nunca por su cuenta: la app enseña una tarjeta con lo que
      se va a guardar y solo se guarda si el dueño pulsa Guardar. No puede cambiar
      ni borrar nada.
-   - Vive en una burbuja flotante, a mano desde cualquier pantalla.
+   - Vive en una burbuja flotante, a mano desde cualquier pantalla. Sobre la
+     burbuja sale un número cuando hay avisos nuevos, y al abrirla enseña el
+     "parte": cómo va el mes y qué hay pendiente. El parte lo calcula la app
+     (APP_PARTE, las mismas cifras del Inicio): no gasta saldo ni necesita clave.
 
    Qué sale del móvil: la pregunta, la conversación reciente, lo aprendido y los
    datos que haga falta consultar para responder. Nunca las fotos. La clave, la
@@ -40,6 +43,7 @@
   const CLAVE_MEMORIA = 'contable-asesor-memoria';
   const CLAVE_CHAT = 'contable-asesor-chat';
   const CLAVE_NOMBRE = 'contable-asesor-nombre';
+  const CLAVE_PARTE_VISTO = 'contable-asesor-parte-visto';
   const NOMBRE_POR_DEFECTO = 'Gregory';   // el dueño; lo puede cambiar en los ajustes del asesor
 
   /* ---------- Lo que se guarda en el dispositivo ---------- */
@@ -272,6 +276,24 @@
       }
     },
     {
+      name: 'marcar_dias',
+      description: 'Marca en el calendario de un trabajador qué pasó uno o varios días que el dueño te dicta: trabajó, descansó, faltó, llegó tarde, o quitar la marca. Por ejemplo "Jeferson trabajó del 10 al 14 y libró el 15". Un solo estado por llamada: si hay días con estados distintos, llama una vez por cada estado. Si varias personas coinciden con el nombre, te devuelve la lista para que preguntes cuál. La app le enseña al dueño una tarjeta con los días y cómo cambia lo que le corresponde ese mes, y solo se guarda si pulsa Guardar.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          nombre: { type: 'string', description: 'Nombre o parte del nombre del trabajador.' },
+          persona_id: { type: 'string', description: 'El identificador de la persona, si ya lo tienes de una respuesta anterior.' },
+          estado: { type: 'string', enum: ['trabajo', 'descanso', 'falta', 'tarde', 'sin_marcar'], description: 'Qué pasó esos días: trabajo (vino), descanso (su día libre), falta (no vino), tarde (vino pero llegó tarde) o sin_marcar (quitar lo que hubiera).' },
+          fechas: { type: 'array', items: { type: 'string' }, description: 'Los días sueltos, cada uno en formato AAAA-MM-DD.' },
+          desde: FECHA('Primer día de un tramo seguido'),
+          hasta: FECHA('Último día de ese tramo'),
+          horas_tarde: { type: 'number', description: 'Solo con estado tarde: cuántas horas llegó tarde (1.5 es hora y media).' },
+          motivo: { type: 'string', description: 'Solo con estado falta: el motivo, si el dueño lo dice.' }
+        },
+        required: ['estado']
+      }
+    },
+    {
       name: 'calcular',
       description: 'Calculadora exacta. Úsala para cualquier suma, resta, porcentaje, media o proyección en vez de hacer la cuenta de cabeza. Escribe la operación con números (punto decimal), + - * / y paréntesis.',
       input_schema: { type: 'object', properties: { expresion: { type: 'string', description: 'Por ejemplo: (18250.40-5300)/18250.40*100' } }, required: ['expresion'] }
@@ -326,6 +348,7 @@
     if (nombre === 'apuntar_gasto') return apuntar((x) => datos().prepararGasto(x), i, confirmar);
     if (nombre === 'apuntar_cierre') return apuntar((x) => datos().prepararCierre(x), i, confirmar);
     if (nombre === 'apuntar_entrega') return apuntar((x) => datos().prepararEntrega(x), i, confirmar);
+    if (nombre === 'marcar_dias') return apuntar((x) => datos().prepararDias(x), i, confirmar);
     const fn = EJECUTAR[nombre];
     if (!fn) throw new Error(`No existe la herramienta "${nombre}".`);
     return fn(i);
@@ -376,15 +399,16 @@ CÓMO CUENTA LA APP
 - La previsión de impuestos es interna y orientativa, y no incluye el coste de personal. La cifra oficial la calcula su gestoría: dilo una vez cuando hables de impuestos, sin sermones.
 - El mes en curso está sin terminar: compáralo con otros por media diaria, no por total.
 
-APUNTAR GASTOS, CIERRES Y ENTREGAS AL EQUIPO
-Puedes apuntar en la app un gasto (o factura), un cierre de caja y una entrega de dinero a alguien del equipo (adelanto, paga, pago a un RRPP) cuando el dueño te lo dicta, con apuntar_gasto, apuntar_cierre y apuntar_entrega.
+APUNTAR GASTOS, CIERRES, ENTREGAS Y DÍAS DEL EQUIPO
+Puedes apuntar en la app un gasto (o factura), un cierre de caja, una entrega de dinero a alguien del equipo (adelanto, paga, pago a un RRPP) y los días de un trabajador (trabajó, descansó, faltó, llegó tarde) cuando el dueño te lo dicta, con apuntar_gasto, apuntar_cierre, apuntar_entrega y marcar_dias.
 - Un gasto necesita tres cosas: a quién se paga, el importe total y la fecha. Un cierre, la fecha y las ventas. Una entrega, a quién, cuánto y qué día. Si te falta alguna, pregúntala en una línea; no la supongas. "Hoy", "ayer", "el viernes" o "el 12" los conviertes tú a fecha con el día de hoy.
-- En una entrega, si la herramienta te dice que varias personas coinciden con el nombre, no elijas tú: pregúntale a cuál, enseñándole las opciones numeradas con lo que las distingue ("1. Jeferson, trabajador, empezó el…; 2. Jeferson, RRPP"), y cuando conteste vuelve a llamar con el persona_id de esa. Cómo se pagó ("en efectivo") o por qué ("adelanto") va en la nota.
+- Al marcar días, un tramo ("del 10 al 14") va con desde y hasta, y los días sueltos en fechas. Cada llamada lleva un solo estado: "trabajó del 10 al 14 y libró el 15" son dos llamadas. Si dice que llegó tarde y no dice cuánto, pregúntalo. Si no dice de qué mes habla, es el mes en curso.
+- En una entrega o al marcar días, si la herramienta te dice que varias personas coinciden con el nombre, no elijas tú: pregúntale a cuál, enseñándole las opciones numeradas con lo que las distingue ("1. Jeferson, trabajador, empezó el…; 2. Jeferson, RRPP"), y cuando conteste vuelve a llamar con el persona_id de esa. Cómo se pagó ("en efectivo") o por qué ("adelanto") va en la nota.
 - Después de apuntar una entrega, dile lo que le queda pendiente con esa persona (te lo devuelve la herramienta).
 - En cuanto tengas lo necesario, llama a la herramienta directamente: la app le enseña al dueño una tarjeta con todo lo que se va a guardar y él pulsa Guardar o Cancelar. No le pidas tú otra confirmación antes.
 - El IVA ponlo solo si te lo dice o si no hay duda (teléfono, luz, agua y suministros parecidos van al 21 %). En mercancía no lo supongas: las bebidas mezclan tipos.
 - Después dile en una línea lo que ha quedado apuntado, o que no se ha guardado si lo canceló o falló. Nunca digas que algo está apuntado si la herramienta no te ha confirmado que se guardó.
-- No puedes cambiar ni borrar lo que ya está apuntado, ni marcar días, sueldos o bonos: si te lo pide, dile en qué pestaña se hace (Consultar para corregir o borrar una factura o un cierre; Personal para borrar una entrega, marcar días o cambiar el sueldo).
+- No puedes cambiar ni borrar facturas, cierres o entregas ya apuntados, ni tocar sueldos o bonos, ni apuntar lo que factura un RRPP: si te lo pide, dile en qué pestaña se hace (Consultar para corregir o borrar una factura o un cierre; Personal para borrar una entrega, cambiar el sueldo o poner un bono; RRPP para sus noches).
 - Si te pregunta qué le debe a alguien o cuánto vale su día de trabajo, consúltalo con la herramienta trabajador: te da lo pendiente a día de hoy y lo que vale cada día este mes (sueldo ÷ días del mes).
 
 TU MEMORIA
@@ -519,7 +543,7 @@ ${notas.length ? notas.map(n => `- [${n.id}] ${n.texto} (apuntado el ${fechaCort
           const etiqueta = etiquetaDe(p.name, p.input || {});
           if (etiqueta) { consultados.push(etiqueta); alAvanzar(`Consultando: ${etiqueta.toLowerCase()}…`); }
           try {
-            const esApunte = p.name === 'apuntar_gasto' || p.name === 'apuntar_cierre' || p.name === 'apuntar_entrega';
+            const esApunte = ['apuntar_gasto', 'apuntar_cierre', 'apuntar_entrega', 'marcar_dias'].includes(p.name);
             if (esApunte) alAvanzar('Esperando a que confirmes en la tarjeta…');
             const dato = await ejecutar(p.name, p.input, confirmar);
             if (p.name === 'recordar' && dato && dato.guardado) aprendido++;
@@ -591,7 +615,7 @@ ${notas.length ? notas.map(n => `- [${n.id}] ${n.texto} (apuntado el ${fechaCort
     const caja = $('#ase-mensajes');
     caja.innerHTML = chat.length
       ? chat.map(burbujaHTML).join('')
-      : '<div class="ase-msg ase-el"><p>Pregúntame cómo va el mes, qué debes al equipo o cuánto te tocará de impuestos.</p><p>Y si me dictas un gasto, un cierre o una entrega a un trabajador, te lo apunto: por ejemplo, «Movistar, 45 €, ayer» o «100 en efectivo a Jeferson hoy».</p></div>';
+      : '<div class="ase-msg ase-el"><p>Pregúntame cómo va el mes, qué debes al equipo o cuánto te tocará de impuestos.</p><p>Y si me dictas un gasto, un cierre, una entrega a un trabajador o los días que ha venido, te lo apunto: por ejemplo, «Movistar, 45 €, ayer», «100 en efectivo a Jeferson hoy» o «Carlos trabajó del 10 al 14».</p></div>';
     caja.scrollTop = caja.scrollHeight;
     $('#ase-sugerencias').classList.toggle('hidden', chat.length > 0);
   }
@@ -631,11 +655,78 @@ ${notas.length ? notas.map(n => `- [${n.id}] ${n.texto} (apuntado el ${fechaCort
 
   const panelAbierto = () => !$('#ase-panel').classList.contains('hidden');
 
+  /* ---------- El parte: cómo va todo y qué hay pendiente ----------
+     La app no tiene servidor, así que no puede avisar con el móvil cerrado. Lo
+     que sí hace: cada vez que se abre (o cambia algo), si hay avisos nuevos
+     pone su número sobre la burbuja, y al abrir el chat enseña el parte. */
+  const euros = (n) => Number(n || 0).toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
+  const parteDeHoy = () => window.APP_PARTE || null;
+  // Lo ya visto: el día y los avisos de entonces. Si cambia cualquiera, es nuevo.
+  const firmaDe = (p) => p ? `${p.fecha}|${p.avisos.join('|')}` : '';
+  const parteVisto = () => { try { return localStorage.getItem(CLAVE_PARTE_VISTO) === firmaDe(parteDeHoy()); } catch (e) { return true; } };
+
+  function parteHTML(p) {
+    const lineas = [];
+    const mesTxt = mesEnLetras(p.mes).replace(/^./, (c) => c.toUpperCase());
+    if (p.dias_con_cierre) {
+      let l = `<strong>${escapar(mesTxt)}</strong>: llevas <strong>${euros(p.ventas)}</strong> en ${p.dias_con_cierre} ${p.dias_con_cierre === 1 ? 'noche' : 'noches'} (${euros(p.media_por_dia)} de media`;
+      if (p.media_por_dia_mes_anterior) {
+        const dif = Math.round((p.media_por_dia - p.media_por_dia_mes_anterior) / p.media_por_dia_mes_anterior * 100);
+        l += `; en ${escapar(MESES[+p.mes_anterior.slice(5) - 1])} fueron ${euros(p.media_por_dia_mes_anterior)}, ${dif >= 0 ? '▲' : '▼'} ${Math.abs(dif)} %`;
+      }
+      lineas.push(l + ').');
+      lineas.push(`Gastos ${euros(p.gastos)} · personal ${euros(p.personal)} · te quedan <strong>${euros(p.lo_que_queda)}</strong>${p.margen_pct === null ? '' : ` (${p.margen_pct} %)`}.`);
+    } else {
+      lineas.push(`<strong>${escapar(mesTxt)}</strong>: todavía no hay ningún cierre de caja apuntado este mes.`);
+    }
+    const avisos = p.avisos.length
+      ? `<ul>${p.avisos.map(a => `<li>${escapar(a)}</li>`).join('')}</ul>`
+      : '<p class="txt-ok" style="margin:6px 0 0">✓ No tienes ningún aviso pendiente.</p>';
+    return `
+      <div class="ase-parte-titulo">📣 Parte de hoy${p.avisos.length ? ` · ${p.avisos.length} aviso${p.avisos.length === 1 ? '' : 's'}` : ''}</div>
+      ${lineas.map(l => `<p>${l}</p>`).join('')}
+      ${avisos}
+      <div class="ase-parte-botones">
+        ${leerClave() ? '<button class="btn btn-small" id="ase-parte-explicar">Coméntamelo</button>' : ''}
+        <button class="btn btn-small" id="ase-parte-ok">Entendido</button>
+      </div>`;
+  }
+
+  function pintarGlobo() {
+    const p = parteDeHoy();
+    const globo = $('#ase-globo');
+    const hayNuevos = !!p && p.avisos.length > 0 && !parteVisto();
+    globo.textContent = hayNuevos ? String(p.avisos.length) : '';
+    globo.classList.toggle('hidden', !hayNuevos);
+    $('#ase-ver-parte').classList.toggle('hidden', !p);
+  }
+
+  function mostrarParte(mostrar) {
+    const p = parteDeHoy();
+    const caja = $('#ase-parte');
+    if (!mostrar || !p) { caja.classList.add('hidden'); caja.innerHTML = ''; return; }
+    caja.innerHTML = parteHTML(p);
+    caja.classList.remove('hidden');
+    try { localStorage.setItem(CLAVE_PARTE_VISTO, firmaDe(p)); } catch (e) { /* sin almacenamiento: se volverá a enseñar */ }
+    pintarGlobo();
+    $('#ase-parte-ok').addEventListener('click', () => mostrarParte(false));
+    const explicar = $('#ase-parte-explicar');
+    if (explicar) explicar.addEventListener('click', () => {
+      mostrarParte(false);
+      pintar(false);
+      enviar('Dame el parte de hoy: cómo va el mes, qué tengo pendiente y qué harías tú primero.');
+    });
+  }
+
   function abrir() {
+    // El parte se enseña solo si es nuevo (otro día u otros avisos); con el
+    // megáfono de la cabecera se puede volver a ver cuando se quiera.
+    const nuevo = !!parteDeHoy() && !parteVisto();
     $('#ase-panel').classList.remove('hidden');
     $('#ase-burbuja').classList.add('hidden');
     document.body.classList.add('ase-abierto');
     pintar(false);
+    mostrarParte(nuevo);
   }
 
   function cerrar() {
@@ -739,6 +830,10 @@ ${notas.length ? notas.map(n => `- [${n.id}] ${n.texto} (apuntado el ${fechaCort
     if (!$('#ase-panel')) return;
     $('#ase-burbuja').addEventListener('click', abrir);
     $('#ase-cerrar').addEventListener('click', cerrar);
+    $('#ase-ver-parte').addEventListener('click', () => mostrarParte($('#ase-parte').classList.contains('hidden')));
+    // La app publica el parte cada vez que pinta el Inicio del mes en curso
+    document.addEventListener('contable-parte', pintarGlobo);
+    pintarGlobo();
     $('#ase-ver-ajustes').addEventListener('click', () => pintar($('#ase-vista-ajustes').classList.contains('hidden')));
     $('#ase-guardar-clave').addEventListener('click', guardarClave);
     $('#ase-enviar').addEventListener('click', () => enviar($('#ase-texto').value));
@@ -766,5 +861,5 @@ ${notas.length ? notas.map(n => `- [${n.id}] ${n.texto} (apuntado el ${fechaCort
 
   conectar();
 
-  window.ASESOR = { abrir, cerrar, enviar, preguntar, ejecutar, calcular, HERRAMIENTAS, MODELO, memoria: leerMemoria, chat: leerChat, aHTML };
+  window.ASESOR = { abrir, cerrar, parte: parteDeHoy, enviar, preguntar, ejecutar, calcular, HERRAMIENTAS, MODELO, memoria: leerMemoria, chat: leerChat, aHTML };
 })();

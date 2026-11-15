@@ -139,7 +139,9 @@ restaurar). `window.APP` expone `inicio`, `recientes` y `miniaturas` para la ver
   factura se va en cada cosa. Los gastos de casa no entran.
 - Alertas: trimestre cerrado pendiente de guardar (botón "Ya lo hice", clave
   `contable-trimestre-guardado` en localStorage), días sin cierre, facturas
-  sin desglose de IVA y deuda total con el equipo.
+  sin desglose de IVA, deuda total con el equipo y **trabajadores con días ya pasados sin
+  marcar** (con el sueldo por mes no se pagan; se deja un día de margen: el de ayer aún no
+  avisa). `APP.alertas(mes)` las da en texto para la verificación.
 
 **Personal** (pestaña privada, tampoco sale en el informe de la gestoría)
 - **El sueldo es POR MES** (acordado con el dueño, desde octubre de 2026,
@@ -410,8 +412,8 @@ impresión.
   bloqueo, y no se imprime. La rueda ⚙️ enseña lo aprendido, el nombre, la clave y la
   privacidad.
 - **Apuntar es lo único que puede escribir, y nunca solo** (`apuntar_gasto`,
-  `apuntar_cierre`, `apuntar_entrega`): `APP.asesor.prepararGasto` / `prepararCierre` /
-  `prepararEntrega` comprueban lo dictado y
+  `apuntar_cierre`, `apuntar_entrega`, `marcar_dias`): `APP.asesor.prepararGasto` /
+  `prepararCierre` / `prepararEntrega` / `prepararDias` comprueban lo dictado y
   devuelven el registro, las líneas de una **tarjeta de confirmación** y **los mismos
   avisos que el formulario** (factura duplicada, total de trimestre ya guardado, cierre
   ya apuntado ese día, total del mes ya guardado, desglose que suma más que el total,
@@ -421,9 +423,29 @@ impresión.
   pregunte. El registro queda igual que uno del formulario (con `origen: 'asesor'`), el
   proveedor se escribe como ya está en la app (el dado de alta o el de sus facturas
   anteriores, porque el informe agrupa por nombre exacto) y el IVA solo se desglosa si se
-  dice; con retención, `total = base + IVA − retención`. **No puede cambiar ni borrar nada
-  ya apuntado, ni marcar días, sueldos o bonos**: no hay herramienta para eso. Tras guardar
-  se repinta la pantalla que se esté viendo (`refrescarPantalla`).
+  dice; con retención, `total = base + IVA − retención`. **No puede cambiar ni borrar
+  facturas, cierres o entregas ya apuntados, ni tocar sueldos o bonos, ni las noches de un
+  RRPP**: no hay herramienta para eso. Tras guardar se repinta la pantalla que se esté
+  viendo (`refrescarPantalla`).
+- **Días del calendario** (`prepararDias`, lo pidió el dueño: "debería apuntar los días de
+  los trabajadores si se lo pido"): trabajó, descansó, faltó (con motivo), llegó tarde (con
+  horas) o sin marcar, para días sueltos o un tramo, un estado por llamada. Usa
+  `ponerEstadoDia`, **la misma lógica del menú del calendario** (un día, un estado), sin sus
+  preguntas. La tarjeta dice para quién, qué días, cómo se marcan y **cómo cambia lo que le
+  corresponde ese mes** ("150,00 € (ahora 30,00 €)", con la cuenta de Personal), y avisa si
+  se cambia una marca que ya había, si hay días futuros o si alguno queda fuera de su etapa
+  (esos no se marcan). No marca a un RRPP ni a un liquidado, ni un retraso sin horas, y si
+  todo estaba ya así dice que no hay nada que cambiar. Al guardar se relee al trabajador.
+- **Avisos y parte del día** (lo pidió así: "enviarme notificaciones de cómo va todo o
+  alguna alerta"). La app no tiene servidor, así que **no puede avisar con el móvil
+  cerrado**; lo que hace: cada vez que pinta el Inicio del mes en curso publica el parte
+  (`publicarParte` → `window.APP_PARTE` + evento `contable-parte`: ventas, noches, media y
+  la del mes anterior, gastos, personal, lo que queda y los avisos de `alertasDelMes` en
+  texto). Si hay avisos **nuevos** (otro día u otros avisos que los ya vistos,
+  `contable-asesor-parte-visto`) sale su número sobre la burbuja (`#ase-globo`), y al abrir
+  el chat se enseña el parte (`#ase-parte`); el megáfono 📣 lo vuelve a enseñar. Lo calcula
+  la app: **ni clave ni saldo**. Con clave ofrece "Coméntamelo", que le pide el parte al
+  asesor.
 - **Entregas al equipo** (`prepararEntrega`, lo pidió el dueño: "100 efectivo a Jeferson
   hoy"): adelantos, pagas y pagos a RRPP, al almacén de pagos de siempre (a un RRPP, con la
   nota `RRPP`). **Si varias personas coinciden con el nombre no elige** (`buscarPersona`):
@@ -501,7 +523,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 483 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 498 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad, el asesor (con un Claude
 simulado: no gasta saldo ni necesita clave) y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.
