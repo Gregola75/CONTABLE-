@@ -149,8 +149,8 @@ restaurar). `window.APP` expone `inicio`, `recientes` y `miniaturas` para la ver
 - **El sueldo es POR MES** (acordado con el dueño, desde octubre de 2026,
   `MES_SUELDO_POR_MES`): **precio del día = sueldo ÷ los días que tiene ese mes
   natural** (31 → el día vale menos, 30 → más, febrero → más todavía) y se pagan
-  los días **trabajados + los de descanso** (`c.diasPagados`), así el mes completo
-  es el sueldo justo. Una falta o un día sin marcar no se paga. `calcularMes`
+  los días **trabajados + los de descanso (uno por semana desde noviembre de 2026) +
+  los de local cerrado** (`c.diasPagados`), así el mes completo es el sueldo justo. Una falta o un día sin marcar no se paga. `calcularMes`
   devuelve `porMes`, `divisor`, `diasPagados`, `precioDia` y `sinMarcar` (días ya
   pasados sin marcar: la ficha los avisa con su fecha para que no se queden sin
   pagar por un olvido). Todo lo que escribe el fijo usa `fijoCuenta(c)`
@@ -161,8 +161,8 @@ restaurar). `window.APP` expone `inicio`, `recientes` y `miniaturas` para la ver
   cuenta antigua, **sueldo ÷ días de trabajo pactados** (`diasMes`, 26 por defecto)
   **× días trabajados**, y siguen así (igual que la comisión por tramos). El campo
   "Días que trabaja al mes" del formulario solo cuenta para esos meses.
-- Estados de cada día en el calendario: trabajó · 🛌 descansó · ⏰ llegó tarde (pregunta
-  cuántas horas) · 🚫 faltó (pregunta el motivo) · sin marcar. **Un toque abre un menú**
+- Estados de cada día en el calendario: trabajó · 🛌 descansó · 🔒 local cerrado · ⏰ llegó
+  tarde (pregunta cuántas horas) · 🚫 faltó (pregunta el motivo) · sin marcar. **Un toque abre un menú**
   (`abrirMenuDia`, en el modal de la app) y se elige el estado directamente: nada de dar
   vueltas por los demás ni pasar por preguntas que no tocan. Si el día ya es un retraso, el
   menú ofrece cambiar las horas; si ya es una falta, cambiar el motivo. **Cancelar una
@@ -185,26 +185,36 @@ restaurar). `window.APP` expone `inicio`, `recientes` y `miniaturas` para la ver
   (venir tarde es venir), sale un aviso en el Inicio y en el cuadro de mando con el
   nombre y las fechas. Solo con los 7 marcados: un día sin marcar no lo dispara.
   **Es solo para el dueño**: no va en los mensajes que se le envían al trabajador.
-- **Más de un día libre en la misma semana** (`semanasConDescansoDeMas`, expuesta como
-  `APP.semanasDeMas`): los libres son **semanales, no mensuales** (lo recalcó el dueño:
-  "1 vez a la semana descansan; hay meses que descansan 5 y otros 4"). Con el sueldo por
-  mes se pagan TODOS los descansos marcados, así que un segundo libre en la misma semana
-  (lunes a domingo) se paga de más. **No se cambia la cuenta**: se avisa en la ficha
-  (`descansoDeMasHTML`) y en el Inicio y el cuadro de mando, y el dueño decide si el otro
-  día era una falta (lo marca «faltó» y deja de pagarse). Solo para el dueño: no va en los
-  mensajes. Cuatro cosas que salieron en la revisión y hay que respetar:
-  - **Solo cuentan los descansos que se pagan**: los de octubre de 2026 en adelante. En la
-    semana del 28 de septiembre al 4 de octubre, un libre de septiembre no se pagó y no
-    puede contar como "de más".
-  - **Sin sueldo fijo ese mes no se avisa** (un descanso de más no cuesta nada).
-  - **Cada día de más se valora una vez, en el mes en que cae.** El primer libre de la
-    semana es el suyo; `s.deMas` son los siguientes. Una semana a caballo de dos meses
-    sale en las dos fichas, pero cada una pone importe solo a sus días, a su precio del
-    día ("El día de más cae en noviembre: su importe sale en la ficha de ese mes").
-  - **Un libre cambiado de semana no es un día de más**: si la semana de antes o la de
-    después la trabajó entera (`s.compensan`), el segundo libre la compensa; la ficha lo
-    dice ("puede ser el libre que no cogió entonces") y no pone importe ni manda marcar
-    una falta.
+- **Se paga UN solo día libre por semana** (decidido por el dueño; desde noviembre de
+  2026, `MES_UN_LIBRE_POR_SEMANA`): los libres son **semanales, no mensuales** ("1 vez a
+  la semana descansan; hay meses que descansan 5 y otros 4"). El primer descanso marcado
+  de cada semana (lunes a domingo) se paga; un segundo libre en la misma semana **no se
+  paga** (`c.libresNoPagados`; `c.descansosPagados` son los que cuentan y `diasPagados =
+  trabajados + descansos pagados + días de local cerrado`). Octubre de 2026 se pagó con
+  todos los descansos y no se reescribe: allí solo se avisa. Las semanas las da
+  `semanasConDescansoDeMas` (expuesta como `APP.semanasDeMas`), con `s.deMas` (los que no
+  se pagan) y `s.compensan`. Reglas que hay que respetar:
+  - **Solo cuentan los descansos de octubre de 2026 en adelante** (antes no se pagaban).
+  - **Sin sueldo fijo ese mes no hay nada que avisar ni que descontar.**
+  - **Cada libre de más se trata una vez, en el mes en que cae**, al precio del día de ese
+    mes. Una semana a caballo de dos meses sale en las dos fichas; la que no tiene el día
+    dice en qué mes está.
+  - **Un libre cambiado de semana SÍ se paga**: si la semana de antes o la de después la
+    trabajó entera (los 7 días), el segundo libre compensa el que no cogió (`s.compensan`).
+    Lo pone la ficha ("ese libre compensa el que no cogió entonces y se le paga").
+  La ficha (`descansoDeMasHTML`) dice la semana, los días, cuál no se paga y cuánto es
+  ("El día 13 no se le paga: 30,00 € menos") y cómo corregirlo; el calendario lo pinta
+  **tachado** (`.dia.descanso.sin-paga`); el Inicio y el cuadro de mando lo avisan. En el
+  mensaje al trabajador solo cambia el recuento, para que cuadre con la cuenta: **"Días de
+  descanso: 3 (cuentan 2: uno por semana)"**, sin la frase de que algo no se paga.
+- **«🔒 Local cerrado»** (`t.cerrados`, estado `cerrado`): los días que el local no abre
+  (el dueño puso el ejemplo: 24 y 25 de diciembre) **se pagan y no cuentan como el libre
+  de la semana**. Es un estado más del menú del día; al marcarlo se ofrece ponerlo de una
+  vez al resto del equipo (solo a quien tenga ese día sin marcar o como descanso). No es
+  día trabajado (no entra en su base de ventas) ni día sin marcar. Sale en la ficha
+  ("+ 2 con el local cerrado"), en los mensajes ("Días con el local cerrado: 2") y lo puede
+  marcar el asesor (`marcar_dias` con `cerrado`). `#per-guardar` lo conserva
+  (`cerrados: actual.cerrados`) y `js/avisos-parte.js` lo cuenta como día marcado.
 - **Lo que pasó de su sueldo con la cuenta antigua** (`pagadoDeMasAntesHTML`): la ficha
   del activo enseña, plegado, los meses de antes de octubre en los que el fijo **ya
   descontados los retrasos** pasó del sueldo (27 días × 900 ÷ 26 = 934,62 → +34,62) y el
@@ -592,7 +602,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 539 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 551 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad, el asesor (con un Claude
 simulado: no gasta saldo ni necesita clave), los avisos del móvil y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.

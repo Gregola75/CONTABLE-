@@ -12,7 +12,7 @@ bash pruebas/ejecutar.sh
 
 Al final dice `✅ TODO CORRECTO` o lista los fallos encontrados.
 
-## Qué se comprueba (539 comprobaciones)
+## Qué se comprueba (551 comprobaciones)
 
 **Avisos en el móvil** — qué dice la notificación diaria (falta el cierre de ayer, días sin
 marcar), que no reclama el cierre de un día en que el local no abre, que por defecto no
@@ -152,6 +152,14 @@ También los casos que salieron en la revisión: los libres de septiembre no cue
 semana del cambio de cuenta, sin sueldo fijo no se avisa, una semana a caballo de dos meses
 pone el importe una sola vez y en su mes, y un libre cambiado de semana (la de al lado la
 trabajó entera) no es un día de más.
+
+**Un libre pagado por semana y «local cerrado»** — que desde noviembre de 2026 un segundo
+libre en la misma semana no se paga (10 trabajados + 2 de 3 descansos = 12 días, 360,00), que
+la ficha dice cuál y cuánto y el calendario lo tacha, que el mensaje al trabajador cuadra
+("Días de descanso: 3 (cuentan 2: uno por semana)") sin decir que algo no se paga, que un
+libre que compensa una semana trabajada entera sí se paga, que octubre no se reescribe, y
+que Nochebuena y Navidad marcadas como «local cerrado» se pagan, no cuentan como libre, se
+marcan de una vez para todo el equipo y se conservan al guardar la ficha.
 
 **Seguridad** — que el PIN no se guarda en claro, que uno incorrecto no abre la
 app, y que las copias cifradas no se pueden leer sin su contraseña.

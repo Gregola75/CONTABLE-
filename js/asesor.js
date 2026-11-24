@@ -283,7 +283,7 @@
         properties: {
           nombre: { type: 'string', description: 'Nombre o parte del nombre del trabajador.' },
           persona_id: { type: 'string', description: 'El identificador de la persona, si ya lo tienes de una respuesta anterior.' },
-          estado: { type: 'string', enum: ['trabajo', 'descanso', 'falta', 'tarde', 'sin_marcar'], description: 'Qué pasó esos días: trabajo (vino), descanso (su día libre), falta (no vino), tarde (vino pero llegó tarde) o sin_marcar (quitar lo que hubiera).' },
+          estado: { type: 'string', enum: ['trabajo', 'descanso', 'cerrado', 'falta', 'tarde', 'sin_marcar'], description: 'Qué pasó esos días: trabajo (vino), descanso (su día libre de la semana), cerrado (el local no abrió ese día, por ejemplo Nochebuena o Navidad: se le paga y no cuenta como su libre), falta (no vino), tarde (vino pero llegó tarde) o sin_marcar (quitar lo que hubiera).' },
           fechas: { type: 'array', items: { type: 'string' }, description: 'Los días sueltos, cada uno en formato AAAA-MM-DD.' },
           desde: FECHA('Primer día de un tramo seguido'),
           hasta: FECHA('Último día de ese tramo'),
@@ -395,7 +395,7 @@ El dueño decide cosas de dinero con lo que le dices: una cifra inventada le pue
 CÓMO CUENTA LA APP
 - Las ventas son los cierres de caja apuntados y los gastos, las facturas cargadas. Lo que no está apuntado no existe para la app: si faltan cierres o facturas y eso cambia la conclusión, avísalo.
 - Los gastos de casa van aparte y no restan del negocio.
-- "Personal devengado" es lo que le corresponde al equipo ese mes, esté pagado o no. Desde octubre de 2026 el sueldo es por mes (el día vale sueldo ÷ días del mes y se pagan los días trabajados y los descansos marcados). Los RRPP cobran por semana.
+- "Personal devengado" es lo que le corresponde al equipo ese mes, esté pagado o no. Desde octubre de 2026 el sueldo es por mes (el día vale sueldo ÷ días del mes y se pagan los días trabajados, los descansos y los días que el local está cerrado). Desde noviembre de 2026 se paga UN solo día libre por semana (de lunes a domingo): un segundo libre en la misma semana no se paga, salvo que compense una semana de al lado que trabajó entera. Los días que el local no abre (Nochebuena, Navidad…) se marcan como «local cerrado», se pagan y no cuentan como su libre. Los RRPP cobran por semana.
 - La previsión de impuestos es interna y orientativa, y no incluye el coste de personal. La cifra oficial la calcula su gestoría: dilo una vez cuando hables de impuestos, sin sermones.
 - El mes en curso está sin terminar: compáralo con otros por media diaria, no por total.
 

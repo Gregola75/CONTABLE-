@@ -750,6 +750,20 @@ select { appearance: none; -webkit-appearance: none; }
   border-color: #1d4757;
   font-weight: 700;
 }
+/* Un libre que no se paga (el segundo de la misma semana): tachado */
+.cal .dia.descanso.sin-paga {
+  text-decoration: line-through;
+  border-style: dashed;
+  border-color: var(--bad);
+  color: #7f8c93;
+}
+/* El local no abrió ese día (festivo): se paga y no es su libre */
+.cal .dia.cerrado {
+  background: #1b1a24;
+  color: #b9a7e6;
+  border-color: #3a3357;
+  font-weight: 700;
+}
 .cal .dia.tarde {
   background: #241d08;
   color: var(--oro);

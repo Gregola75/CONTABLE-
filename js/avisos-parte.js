@@ -42,7 +42,7 @@
     if (mes < MES_SUELDO_POR_MES) return [];
     const ayer = sumar(fechaHoy, -1);
     const fechasDe = (l) => (l || []).map(x => (typeof x === 'string' ? x : (x && x.fecha))).filter(Boolean);
-    const marcados = new Set([...fechasDe(t.dias), ...fechasDe(t.descansos), ...fechasDe(t.faltas), ...fechasDe(t.tardes)]);
+    const marcados = new Set([...fechasDe(t.dias), ...fechasDe(t.descansos), ...fechasDe(t.faltas), ...fechasDe(t.tardes), ...fechasDe(t.cerrados)]);
     const sin = [];
     for (let f = mes + '-01'; f < ayer; f = sumar(f, 1)) {
       if (t.inicio && f < t.inicio) continue;
