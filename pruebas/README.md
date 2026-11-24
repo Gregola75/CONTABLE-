@@ -12,7 +12,7 @@ bash pruebas/ejecutar.sh
 
 Al final dice `✅ TODO CORRECTO` o lista los fallos encontrados.
 
-## Qué se comprueba (513 comprobaciones)
+## Qué se comprueba (528 comprobaciones)
 
 **Avisos en el móvil** — qué dice la notificación diaria (falta el cierre de ayer, días sin
 marcar), que no reclama el cierre de un día en que el local no abre, que por defecto no
@@ -140,6 +140,13 @@ seguridad lleva las fotos pero no las miniaturas.
 
 **Arranque bloqueado** — que la fuente de Google no bloquea la primera pintada, que con PIN la
 app arranca sin pintar el inicio ni las listas con fotos, y que al entrar se pinta todo.
+
+**Día libre semanal** — que un libre por semana no avisa, que dos en la misma semana se
+detectan con su semana y sus días (también a caballo entre dos meses), que el aviso sale en
+la ficha (con lo que son esos días de más), en el inicio y en el cuadro de mando, que NO
+cambia la cuenta ni va en el mensaje al trabajador, que al pasar el segundo a «faltó» deja de
+pagarse, que la ficha enseña lo cobrado por encima del sueldo antes de octubre (+34,62 en
+septiembre), y que el formulario ya no pide los días que trabaja al mes.
 
 **Seguridad** — que el PIN no se guarda en claro, que uno incorrecto no abre la
 app, y que las copias cifradas no se pueden leer sin su contraseña.

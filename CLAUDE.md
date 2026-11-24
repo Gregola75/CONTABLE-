@@ -185,6 +185,25 @@ restaurar). `window.APP` expone `inicio`, `recientes` y `miniaturas` para la ver
   (venir tarde es venir), sale un aviso en el Inicio y en el cuadro de mando con el
   nombre y las fechas. Solo con los 7 marcados: un día sin marcar no lo dispara.
   **Es solo para el dueño**: no va en los mensajes que se le envían al trabajador.
+- **Más de un día libre en la misma semana** (`semanasConDescansoDeMas`, expuesta como
+  `APP.semanasDeMas`): los libres son **semanales, no mensuales** (lo recalcó el dueño:
+  "1 vez a la semana descansan; hay meses que descansan 5 y otros 4"). Con el sueldo por
+  mes se pagan TODOS los descansos marcados, así que un segundo libre en la misma semana
+  (lunes a domingo) se paga de más. **No se cambia la cuenta**: se avisa en la ficha
+  (`descansoDeMasHTML`, con la semana, los días y cuánto son esos días de más) y en el
+  Inicio y el cuadro de mando, y el dueño decide si el otro día era una falta (lo marca
+  «faltó» y deja de pagarse). Entran las semanas que tocan el mes, también la que empieza
+  a finales del anterior, si alguno de sus libres cae en el mes. Solo desde octubre de
+  2026 (antes los descansos no se pagaban). Solo para el dueño: no va en los mensajes.
+- **Lo cobrado de más con la cuenta antigua** (`pagadoDeMasAntesHTML`): la ficha del
+  activo enseña, plegado, los meses de antes de octubre en los que el fijo pasó del
+  sueldo (27 días × 900 ÷ 26 = 934,62 → +34,62) y el total. Solo informa ("creo que he
+  estado pagando de más"): esos meses están pagados y no se reescriben.
+- El formulario ya **no pide "días que trabaja al mes"**: el campo `#pe-diasmes` sigue
+  existiendo (cuenta para los meses de antes de octubre) pero va dentro de un plegado
+  "Solo para los meses de antes de octubre de 2026". A la vista se explica la regla: mes
+  natural, 1 libre a la semana dentro del sueldo, y si empieza el 10 cobra del 10 a fin
+  de mes. Tenerlo a la vista hacía pensar que el sueldo seguía contándose por 26 días.
 - **Retrasos**: descuentan del fijo la parte proporcional
   (`horas de retraso ÷ horas de jornada × precio del día`). Jornada por
   defecto 7,5 h (el local abre de 20:00 a 3:30). El descuento se calcula con el
@@ -561,7 +580,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 513 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 528 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad, el asesor (con un Claude
 simulado: no gasta saldo ni necesita clave), los avisos del móvil y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.

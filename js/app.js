@@ -1591,6 +1591,15 @@
         alertas.push(`<div class="alerta"><span>🛌 <strong>${escapar(t.nombre)}</strong> trabajó los 7 días ${semanas.length === 1 ? 'la semana' : 'las semanas'} ${rangos}: no libró su día de descanso.</span></div>`);
       }
     }
+    // Y al revés: una semana con más de un día de descanso. Le toca uno a la
+    // semana y con el sueldo por mes se pagan todos los que se marquen.
+    for (const { t } of equipo.filas) {
+      const deMas = semanasConDescansoDeMas(t, mes);
+      if (deMas.length) {
+        const rangos = deMas.map(s => `${rangoSemanaTexto(s)} (${s.libres.length} libres: días ${s.libres.map(f => +f.slice(8)).join(' y ')})`).join('; ');
+        alertas.push(`<div class="alerta"><span>🛌 <strong>${escapar(t.nombre)}</strong> tiene <strong>más de un día libre</strong> ${deMas.length === 1 ? 'la semana' : 'las semanas'} ${rangos}. Le toca 1 a la semana y se le pagan todos: si alguno no era su libre, márcalo como «faltó».</span></div>`);
+      }
+    }
     return alertas;
   }
 
@@ -2369,6 +2378,72 @@
       if (siete.every(f => trabajados.has(f))) semanas.push({ desde: siete[0], hasta: siete[6] });
     }
     return semanas;
+  }
+
+  /* Semanas (de lunes a domingo) con MÁS de un día de descanso marcado. A cada
+     trabajador le toca 1 día libre a la semana, no un número fijo al mes (hay
+     meses con 5 semanas y meses con 4). Con el sueldo por mes se pagan todos los
+     descansos marcados, así que un segundo descanso en la misma semana se está
+     pagando de más. No cambia la cuenta: es un aviso solo para el dueño, que
+     decide si el otro día era en realidad una falta. Entran las semanas que
+     tocan el mes (también la que empieza a finales del mes anterior), siempre
+     que al menos uno de sus descansos caiga en ese mes. */
+  function semanasConDescansoDeMas(t, mes) {
+    if (mes < MES_SUELDO_POR_MES) return [];   // antes los descansos no se pagaban
+    const enPeriodo = (d) => (!t.inicio || d >= t.inicio) && (!t.fin || d <= t.fin);
+    const descansos = new Set((t.descansos || []).filter(enPeriodo));
+    if (descansos.size < 2) return [];
+    const [a, m] = mes.split('-').map(Number);
+    const nDias = new Date(a, m, 0).getDate();
+    const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const semanas = [];
+    // El lunes de la semana en la que cae el día 1 (puede ser del mes anterior)
+    const lunes = new Date(a, m - 1, 1);
+    lunes.setDate(lunes.getDate() - ((lunes.getDay() + 6) % 7));
+    for (; lunes <= new Date(a, m - 1, nDias); lunes.setDate(lunes.getDate() + 7)) {
+      const siete = [];
+      for (let i = 0; i < 7; i++) siete.push(iso(new Date(lunes.getFullYear(), lunes.getMonth(), lunes.getDate() + i)));
+      const libres = siete.filter(f => descansos.has(f));
+      if (libres.length > 1 && libres.some(f => f.startsWith(mes))) semanas.push({ desde: siete[0], hasta: siete[6], libres });
+    }
+    return semanas;
+  }
+
+  /* "del 9 al 15" · "del 30 de noviembre al 6 de diciembre" */
+  function rangoSemanaTexto(s) {
+    const cruzaMes = s.desde.slice(5, 7) !== s.hasta.slice(5, 7);
+    return cruzaMes
+      ? `del ${+s.desde.slice(8)} de ${nombreMes(s.desde)} al ${+s.hasta.slice(8)} de ${nombreMes(s.hasta)}`
+      : `del ${+s.desde.slice(8)} al ${+s.hasta.slice(8)}`;
+  }
+
+  /* El aviso de la ficha: qué semanas tienen más de un libre, con sus días. */
+  function descansoDeMasHTML(t, c) {
+    const semanas = semanasConDescansoDeMas(t, c.mes);
+    if (!semanas.length) return '';
+    const deMas = semanas.reduce((n, s) => n + s.libres.length - 1, 0);
+    const filas = semanas.map(s => `la semana ${rangoSemanaTexto(s)} tiene ${s.libres.length} (días ${s.libres.map(f => +f.slice(8)).join(' y ')})`).join('; ');
+    return `
+            <p class="hint txt-bad" style="margin:6px 0 0">🛌 Le toca <strong>1 día libre a la semana</strong> y ${filas}. Con el sueldo por mes se le pagan todos los descansos marcados${c.precioDia > 0 ? `: ${deMas === 1 ? 'ese día de más son' : `esos ${deMas} días de más son`} ${INFORME.eur(Math.round(c.precioDia * deMas * 100) / 100)}` : ''}. Si el otro día no era su libre, márcalo como «🚫 faltó» y no se le paga.</p>`;
+  }
+
+  /* Antes de pasar al sueldo por mes se pagaba "sueldo ÷ días pactados × días
+     trabajados": en un mes de 31 días con 4 libres son 27 días y cobraba MÁS que
+     el sueldo (27 × 34,62 = 934,62 por 900). Aquí se enseña, mes a mes, cuánto
+     fue eso. Solo informa: esos meses ya se pagaron y no se cambian. */
+  function pagadoDeMasAntesHTML(deuda) {
+    const filas = (deuda.meses || [])
+      .filter(m => m.calc && !m.calc.porMes && m.calc.cond.sueldoMensual > 0 && m.calc.fijoBruto > m.calc.cond.sueldoMensual + 0.005)
+      .map(m => ({ mes: m.mes, dias: m.calc.dias.length, cuenta: fijoCuenta(m.calc), fijo: m.calc.fijoBruto, sueldo: m.calc.cond.sueldoMensual, mas: r2(m.calc.fijoBruto - m.calc.cond.sueldoMensual) }));
+    if (!filas.length) return '';
+    const total = r2(filas.reduce((s, f) => s + f.mas, 0));
+    return `
+            <details class="ocr-details pagado-de-mas" style="margin:8px 0 0">
+              <summary>📐 Antes de octubre cobró ${INFORME.eur(total)} más que su sueldo (${filas.length} mes${filas.length === 1 ? '' : 'es'})</summary>
+              <p class="hint" style="margin:0 0 6px">Entonces se pagaba por día trabajado (sueldo ÷ días pactados × días que vino): un mes con más días trabajados que los pactados salía por encima del sueldo. Desde octubre de 2026 el sueldo es por mes y el mes completo es el sueldo justo. Estos meses ya están pagados y no se cambian.</p>
+              ${filas.map(f => `<div class="stat-linea"><span>${mesEnLetras(f.mes + '-01')}: ${f.dias} días trabajados <small class="txt-sec">(${f.cuenta} = ${INFORME.eur(f.fijo)}; su sueldo, ${INFORME.eur(f.sueldo)})</small></span><strong class="txt-bad">+${INFORME.eur(f.mas)}</strong></div>`).join('')}
+              <div class="stat-linea"><span><strong>En total, por encima de su sueldo</strong></span><strong class="txt-bad">${INFORME.eur(total)}</strong></div>
+            </details>`;
   }
 
 
@@ -3628,6 +3703,7 @@
             ${c.fueraDePeriodo ? `<p class="hint txt-bad" style="margin:6px 0 0">⚠️ Hay ${c.fueraDePeriodo} día(s) marcados fuera del periodo que trabajó (antes de empezar o después de la baja). No se le pagan. Revísalos en el calendario.</p>` : ''}
             <div class="stat-linea"><span>Asistencia del mes</span><span>${c.dias.length} trabajado${c.dias.length === 1 ? '' : 's'}${c.tardes.length ? ` · <strong class="txt-oro">⏰ ${c.tardes.length} tarde${c.tardes.length === 1 ? '' : 's'}${c.horasTarde ? ` (${numH(c.horasTarde)} h)` : ''}</strong>` : ''}${c.faltas.length ? ` · <strong class="txt-bad">${c.faltas.length} falta${c.faltas.length === 1 ? '' : 's'}</strong>` : ''}${c.descanso ? ` · <span class="txt-sec">${c.descanso} de descanso</span>` : ''}</span></div>
             ${fijoLineasHTML(t, c)}
+            ${descansoDeMasHTML(t, c)}
             ${retrasosHTML(t, c, ventasDet, true)}
             ${faltasHTML(t, c)}
             ${objetivoHTML(t, c, ventasT)}
@@ -3644,6 +3720,7 @@
               ${filasMeses}
             </details>
             ${explicaHTML}
+            ${pagadoDeMasAntesHTML(deuda)}
 
             <p class="per-seccion">💶 Adelantos y pagos que le haces</p>
             <div class="form-row">
@@ -5189,7 +5266,8 @@
           le_corresponde_este_mes: c.devengado,
           entregado_este_mes: c.entregado,
           pendiente_total_a_dia_de_hoy: deuda.total,
-          semanas_sin_dia_libre: semanasSinDescanso(t, mes).map(s => `${s.desde} a ${s.hasta}`)
+          semanas_sin_dia_libre: semanasSinDescanso(t, mes).map(s => `${s.desde} a ${s.hasta}`),
+          semanas_con_mas_de_un_dia_libre: semanasConDescansoDeMas(t, mes).map(s => `${s.desde} a ${s.hasta}: libres ${s.libres.join(', ')}`)
         });
       }
       const promotores = rrpps.map(r => {
@@ -5588,7 +5666,7 @@
       const equipo = await deudaConElEquipo(cierresDesde(regs));
       return (await alertasDelMes(mes, datosMesDe(regs, trabajadores, mes), regs, equipo)).map(textoPlano);
     },
-    inicio: pintarInicio, recientes: pintarRecientes, miniaturas: crearMiniaturasQueFaltan, semanas: semanasSinDescanso,
+    inicio: pintarInicio, recientes: pintarRecientes, miniaturas: crearMiniaturasQueFaltan, semanas: semanasSinDescanso, semanasDeMas: semanasConDescansoDeMas,
     rrppSemana: calcularSemanaRRPP, rrppNoche: guardarNocheRRPP, datosMes,
     rrppCuenta: async (nombre) => {
       const r = (await DB.perTodos()).find(x => x.nombre === nombre);
