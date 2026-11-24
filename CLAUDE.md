@@ -190,15 +190,27 @@ restaurar). `window.APP` expone `inicio`, `recientes` y `miniaturas` para la ver
   "1 vez a la semana descansan; hay meses que descansan 5 y otros 4"). Con el sueldo por
   mes se pagan TODOS los descansos marcados, así que un segundo libre en la misma semana
   (lunes a domingo) se paga de más. **No se cambia la cuenta**: se avisa en la ficha
-  (`descansoDeMasHTML`, con la semana, los días y cuánto son esos días de más) y en el
-  Inicio y el cuadro de mando, y el dueño decide si el otro día era una falta (lo marca
-  «faltó» y deja de pagarse). Entran las semanas que tocan el mes, también la que empieza
-  a finales del anterior, si alguno de sus libres cae en el mes. Solo desde octubre de
-  2026 (antes los descansos no se pagaban). Solo para el dueño: no va en los mensajes.
-- **Lo cobrado de más con la cuenta antigua** (`pagadoDeMasAntesHTML`): la ficha del
-  activo enseña, plegado, los meses de antes de octubre en los que el fijo pasó del
-  sueldo (27 días × 900 ÷ 26 = 934,62 → +34,62) y el total. Solo informa ("creo que he
-  estado pagando de más"): esos meses están pagados y no se reescriben.
+  (`descansoDeMasHTML`) y en el Inicio y el cuadro de mando, y el dueño decide si el otro
+  día era una falta (lo marca «faltó» y deja de pagarse). Solo para el dueño: no va en los
+  mensajes. Cuatro cosas que salieron en la revisión y hay que respetar:
+  - **Solo cuentan los descansos que se pagan**: los de octubre de 2026 en adelante. En la
+    semana del 28 de septiembre al 4 de octubre, un libre de septiembre no se pagó y no
+    puede contar como "de más".
+  - **Sin sueldo fijo ese mes no se avisa** (un descanso de más no cuesta nada).
+  - **Cada día de más se valora una vez, en el mes en que cae.** El primer libre de la
+    semana es el suyo; `s.deMas` son los siguientes. Una semana a caballo de dos meses
+    sale en las dos fichas, pero cada una pone importe solo a sus días, a su precio del
+    día ("El día de más cae en noviembre: su importe sale en la ficha de ese mes").
+  - **Un libre cambiado de semana no es un día de más**: si la semana de antes o la de
+    después la trabajó entera (`s.compensan`), el segundo libre la compensa; la ficha lo
+    dice ("puede ser el libre que no cogió entonces") y no pone importe ni manda marcar
+    una falta.
+- **Lo que pasó de su sueldo con la cuenta antigua** (`pagadoDeMasAntesHTML`): la ficha
+  del activo enseña, plegado, los meses de antes de octubre en los que el fijo **ya
+  descontados los retrasos** pasó del sueldo (27 días × 900 ÷ 26 = 934,62 → +34,62) y el
+  total. Solo informa ("creo que he estado pagando de más"): esos meses no se reescriben.
+  Dice **"le correspondió"**, nunca "cobró" ni "ya están pagados", porque el mes puede
+  seguir pendiente (y entonces lo dice: "aún sin cubrir: X €").
 - El formulario ya **no pide "días que trabaja al mes"**: el campo `#pe-diasmes` sigue
   existiendo (cuenta para los meses de antes de octubre) pero va dentro de un plegado
   "Solo para los meses de antes de octubre de 2026". A la vista se explica la regla: mes
@@ -580,7 +592,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 528 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 539 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad, el asesor (con un Claude
 simulado: no gasta saldo ni necesita clave), los avisos del móvil y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.

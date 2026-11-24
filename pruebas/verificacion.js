@@ -2505,30 +2505,45 @@ TARJETA 450,00`)]);
   // Lo pidió el dueño: los días libres son 1 a la semana, no un número fijo al mes
   // (hay meses con 5 y con 4). Con el sueldo por mes se pagan todos los descansos
   // marcados, así que un segundo libre en la misma semana se paga de más: se avisa.
-  // Y se enseña cuánto cobró por encima de su sueldo con la cuenta de antes de octubre.
+  // Y se enseña cuánto le correspondió por encima de su sueldo con la cuenta de antes
+  // de octubre.
   console.log('\n═══ 9p2. DÍA LIBRE SEMANAL (más de uno en la misma semana) ═══');
   await limpiar();
   const libresSem = await page.evaluate(() => {
     const f = (d) => `2026-11-${String(d).padStart(2, '0')}`;
+    const con = (x) => Object.assign({ sueldoMensual: 900 }, x);
     // Noviembre de 2026: los lunes son 2, 9, 16, 23 y 30
     return {
-      uno: APP.semanasDeMas({ descansos: [f(2), f(9), f(16), f(23), f(30)] }, '2026-11').length,
-      dos: APP.semanasDeMas({ descansos: [f(10), f(13), f(18)] }, '2026-11'),
-      cruza: APP.semanasDeMas({ descansos: ['2026-10-28', '2026-11-01'] }, '2026-11'),
-      cruzaOct: APP.semanasDeMas({ descansos: ['2026-10-28', '2026-11-01'] }, '2026-10').length,
-      soloOtroMes: APP.semanasDeMas({ descansos: ['2026-10-27', '2026-10-28'] }, '2026-11').length,
-      antes: APP.semanasDeMas({ descansos: ['2026-09-08', '2026-09-10'] }, '2026-09').length,
-      fuera: APP.semanasDeMas({ inicio: '2026-11-12', descansos: [f(10), f(13)] }, '2026-11').length
+      uno: APP.semanasDeMas(con({ descansos: [f(2), f(9), f(16), f(23), f(30)] }), '2026-11').length,
+      dos: APP.semanasDeMas(con({ descansos: [f(10), f(13), f(18)] }), '2026-11'),
+      cruza: APP.semanasDeMas(con({ descansos: ['2026-10-28', '2026-11-01'] }), '2026-11'),
+      cruzaOct: APP.semanasDeMas(con({ descansos: ['2026-10-28', '2026-11-01'] }), '2026-10').length,
+      soloOtroMes: APP.semanasDeMas(con({ descansos: ['2026-10-27', '2026-10-28'] }), '2026-11').length,
+      antes: APP.semanasDeMas(con({ descansos: ['2026-09-08', '2026-09-10'] }), '2026-09').length,
+      fuera: APP.semanasDeMas(con({ inicio: '2026-11-12', descansos: [f(10), f(13)] }), '2026-11').length,
+      // La semana del cambio de cuenta (28 sep – 4 oct): los libres de septiembre no se pagaron
+      cambioSep: APP.semanasDeMas(con({ descansos: ['2026-09-29', '2026-09-30', '2026-10-03'] }), '2026-10').length,
+      cambioOct: APP.semanasDeMas(con({ descansos: ['2026-09-29', '2026-10-01', '2026-10-03'] }), '2026-10'),
+      sinSueldo: APP.semanasDeMas({ sueldoMensual: 0, descansos: [f(10), f(13)] }, '2026-11').length,
+      // Libre cambiado de semana: trabajó entera la del 2 al 8 y libró dos días la del 9 al 15
+      compensa: APP.semanasDeMas(con({ dias: [2, 3, 4, 5, 6, 7, 8].map(f), descansos: [f(1), f(9), f(15)] }), '2026-11')
     };
   });
   chk('personal', 'Un día libre cada semana (5 lunes en noviembre): ningún aviso', libresSem.uno === 0, JSON.stringify(libresSem.uno));
-  chk('personal', 'Dos libres en la misma semana (10 y 13 de noviembre) se detectan, con la semana del 9 al 15',
-    libresSem.dos.length === 1 && libresSem.dos[0].desde === '2026-11-09' && libresSem.dos[0].hasta === '2026-11-15' && libresSem.dos[0].libres.join() === '2026-11-10,2026-11-13', JSON.stringify(libresSem.dos));
+  chk('personal', 'Dos libres en la misma semana (10 y 13 de noviembre) se detectan, con la semana del 9 al 15 y el 13 como día de más',
+    libresSem.dos.length === 1 && libresSem.dos[0].desde === '2026-11-09' && libresSem.dos[0].hasta === '2026-11-15' && libresSem.dos[0].libres.join() === '2026-11-10,2026-11-13' && libresSem.dos[0].deMas.join() === '2026-11-13', JSON.stringify(libresSem.dos));
   chk('personal', 'Una semana a caballo entre dos meses (28 de octubre y 1 de noviembre) sale en los dos meses',
     libresSem.cruza.length === 1 && libresSem.cruza[0].desde === '2026-10-26' && libresSem.cruzaOct === 1, JSON.stringify(libresSem.cruza));
   chk('personal', 'Pero si los dos libres son del mes anterior, en este mes no se repite', libresSem.soloOtroMes === 0);
   chk('personal', 'Antes de octubre los descansos no se pagaban: no hay nada que avisar', libresSem.antes === 0);
   chk('personal', 'Un descanso marcado antes de su alta no cuenta', libresSem.fuera === 0);
+  chk('personal', 'Semana del 28 de septiembre al 4 de octubre: los libres de septiembre no se pagaron, así que con uno solo en octubre no hay aviso',
+    libresSem.cambioSep === 0, JSON.stringify(libresSem.cambioSep));
+  chk('personal', 'Pero dos libres ya dentro de octubre en esa semana (1 y 3) sí avisan, y solo cuentan esos dos',
+    libresSem.cambioOct.length === 1 && libresSem.cambioOct[0].libres.join() === '2026-10-01,2026-10-03', JSON.stringify(libresSem.cambioOct));
+  chk('personal', 'Sin sueldo fijo un descanso de más no cuesta nada: no se avisa', libresSem.sinSueldo === 0);
+  chk('personal', 'Si la semana de antes la trabajó entera, el segundo libre la compensa: no hay día de más',
+    libresSem.compensa.length === 1 && libresSem.compensa[0].deMas.length === 0 && libresSem.compensa[0].compensan.length === 1 && libresSem.compensa[0].compensan[0].desde === '2026-11-02', JSON.stringify(libresSem.compensa));
 
   await page.evaluate(async () => {
     const f = (mes, d) => `${mes}-${String(d).padStart(2, '0')}`;
@@ -2548,11 +2563,13 @@ TARJETA 450,00`)]);
     pagLib.pagados === 13 && cerca(pagLib.fijo, 390), JSON.stringify(pagLib));
   const avisosLib = (await page.evaluate(() => APP.alertas('2026-11'))).join(' | ');
   chk('personal', 'El aviso sale también en el inicio y el cuadro de mando, con nombre, semana y días',
-    /Dos Libres tiene más de un día libre la semana del 9 al 15 \(2 libres: días 10 y 13\)/.test(avisosLib), avisosLib.slice(0, 600));
-  chk('personal', 'Antes de octubre: cobró 34,62 € más que su sueldo en septiembre (27 días × 900 ÷ 26 = 934,62)',
-    /Antes de octubre cobró 34,62 € más que su sueldo \(1 mes\)/.test(txtLib) && /Septiembre 2026: 27 días trabajados \(900,00 € ÷ 26 × 27 = 934,62 €; su sueldo, 900,00 €\)\s*\+34,62 €/.test(txtLib), txtLib.slice(-1500));
+    /Dos Libres tiene más de un día libre la semana del 9 al 15 \(2 libres: días 10 y 13\)/.test(avisosLib) && /márcalo como «faltó»/.test(avisosLib), avisosLib.slice(0, 600));
+  chk('personal', 'Antes de octubre: le correspondió 34,62 € más que su sueldo en septiembre (27 días × 900 ÷ 26 = 934,62)',
+    /Antes de octubre le correspondió 34,62 € más que su sueldo \(1 mes\)/.test(txtLib) && /Septiembre 2026: 27 días trabajados \(900,00 € ÷ 26 × 27 = 934,62 €; su sueldo, 900,00 €; aún sin cubrir: 934,62 €\)\s*\+34,62 €/.test(txtLib), txtLib.slice(-1500));
+  chk('personal', 'Y no afirma que cobró ni que está pagado: a este trabajador aún no se le ha dado nada',
+    !/cobró 34,62|ya están pagados/.test(txtLib) && /Le debes/.test(txtLib));
   const envLib = await leerEnvio();
-  chk('personal', 'Nada de esto va en el mensaje al trabajador (ni el aviso del libre de más ni lo cobrado de más)',
+  chk('personal', 'Nada de esto va en el mensaje al trabajador (ni el aviso del libre de más ni lo que pasó de su sueldo)',
     !/día libre a la semana|más que su sueldo|de más son/.test(envLib), envLib.slice(0, 600));
   // El dueño decide que el día 13 no era su libre: lo pasa a falta
   await page.evaluate(async () => {
@@ -2565,19 +2582,63 @@ TARJETA 450,00`)]);
   const pagLib2 = await page.evaluate(async () => { const d = await APP.deudaDe('Dos Libres', true); const m = d.meses.find(x => x.mes === '2026-11'); return { pagados: m.calc.diasPagados, fijo: m.calc.fijo }; });
   chk('personal', 'Al marcar el segundo como «faltó» el aviso desaparece y ese día deja de pagarse (12 días = 360,00)',
     !/Le toca 1 día libre a la semana/.test(txtLib) && pagLib2.pagados === 12 && cerca(pagLib2.fijo, 360), JSON.stringify(pagLib2));
-  // La ficha ya no pide "días que trabaja al mes": va plegado, solo para los meses viejos
+  // La ficha ya no pide "días que trabaja al mes": va plegado, solo para los meses viejos.
+  // Se pone un valor distinto del 26 por defecto para probar que el campo oculto se lee y se conserva.
+  await page.evaluate(async () => {
+    const t = (await DB.perTodos()).find(x => x.nombre === 'Dos Libres');
+    t.diasMes = 24;
+    await DB.perGuardar(t);
+  });
+  await verMes('2026-11');
   await page.click('#per-lista .per-editar');
   await page.waitForTimeout(500);
   const formLib = await page.evaluate(() => {
     const campo = document.querySelector('#pe-diasmes');
-    return { plegado: !campo.closest('details').open, visible: campo.checkVisibility ? campo.checkVisibility() : false, texto: document.querySelector('#per-form').textContent.replace(/\s+/g, ' ') };
+    return { plegado: !campo.closest('details').open, visible: campo.checkVisibility ? campo.checkVisibility() : false, valor: campo.value, texto: document.querySelector('#per-form').textContent.replace(/\s+/g, ' ') };
   });
   chk('personal', 'El formulario ya no pide los días que trabaja al mes: el campo va plegado, solo para antes de octubre',
     formLib.plegado && !formLib.visible && /No hay que poner cuántos días trabaja al mes/.test(formLib.texto) && /1 día libre a la semana/.test(formLib.texto), formLib.texto.slice(0, 500));
+  await page.fill('#pe-notas', 'guardado de prueba');
   await page.click('#per-guardar');
   await page.waitForTimeout(900);
-  chk('personal', 'Y guardar la ficha sin tocarlo conserva los días pactados de los meses viejos (26)',
-    await page.evaluate(async () => (await DB.perTodos()).find(x => x.nombre === 'Dos Libres').diasMes === 26));
+  const trasLib = await page.evaluate(async () => { const t = (await DB.perTodos()).find(x => x.nombre === 'Dos Libres'); return { diasMes: t.diasMes, notas: t.notas }; });
+  chk('personal', 'Y guardar la ficha sin tocarlo conserva los días pactados que tenía (24, no el 26 por defecto), y el guardado se hizo',
+    formLib.valor === '24' && trasLib.diasMes === 24 && trasLib.notas === 'guardado de prueba', JSON.stringify({ campo: formLib.valor, ...trasLib }));
+
+  // Un retraso deja el fijo por debajo del sueldo: ese mes NO pasó del sueldo, aunque el bruto sí
+  const unoSoloLib = async (ficha) => page.evaluate(async (ficha) => {
+    for (const t of await DB.perTodos()) await DB.perBorrar(t.id);
+    for (const g of await DB.pagoTodos()) await DB.pagoBorrar(g.id);
+    await DB.perGuardar(Object.assign({ sueldoMensual: 900, diasMes: 26, horasJornada: 7.5, tramos: [], dias: [], tardes: [], faltas: [], descansos: [], notasDias: [], creado: new Date().toISOString() }, ficha));
+  }, ficha);
+  const fLib = (mes, d) => `${mes}-${String(d).padStart(2, '0')}`;
+  await unoSoloLib({ nombre: 'Con Retrasos', inicio: '2026-09-01',
+    dias: Array.from({ length: 25 }, (_, i) => fLib('2026-09', i + 1)),
+    tardes: [{ fecha: fLib('2026-09', 26), horas: 7.5 }, { fecha: fLib('2026-09', 27), horas: 7.5 }] });
+  txtLib = await verMes('2026-11');
+  chk('personal', 'Con 27 días pero dos de ellos perdidos por retraso (865,38 de fijo) no se dice que pasó de su sueldo',
+    !/más que su sueldo/.test(txtLib), txtLib.slice(-800));
+  await unoSoloLib({ nombre: 'Un Retraso', inicio: '2026-09-01',
+    dias: Array.from({ length: 26 }, (_, i) => fLib('2026-09', i + 1)),
+    tardes: [{ fecha: fLib('2026-09', 27), horas: 2 }] });
+  txtLib = await verMes('2026-11');
+  chk('personal', 'Con un retraso pequeño se resta antes de comparar: 934,62 − 9,23 = 925,39 → +25,39 sobre su sueldo',
+    /le correspondió 25,39 € más que su sueldo/.test(txtLib) && /900,00 € ÷ 26 × 27 = 934,62 € − 9,23 € de retrasos = 925,39 €/.test(txtLib), txtLib.slice(-900));
+  // Semana a caballo de dos meses: cada día de más se valora una vez, en su mes
+  await unoSoloLib({ nombre: 'Cruza Mes', inicio: '2026-10-01', dias: [fLib('2026-10', 27), fLib('2026-10', 29)], descansos: [fLib('2026-10', 28), fLib('2026-11', 1)] });
+  const txtOctLib = await verMes('2026-10');
+  const txtNovLib = await verMes('2026-11');
+  chk('personal', 'Libres el 28 de octubre y el 1 de noviembre: octubre avisa de la semana pero sin importe (el día de más cae en noviembre)',
+    /la semana del 26 de octubre al 1 de noviembre tiene 2 \(días 28 y 1\)/.test(txtOctLib) && !/de más son/.test(txtOctLib) && /El día de más cae en noviembre/.test(txtOctLib), txtOctLib.slice(0, 1200));
+  chk('personal', 'Y noviembre lo valora una sola vez, a su precio: 30,00 €', /ese día de más son 30,00 €/.test(txtNovLib) && !/cae en octubre/.test(txtNovLib), txtNovLib.slice(0, 1200));
+  // Libre cambiado de semana: no hay día de más ni se manda marcar una falta
+  await unoSoloLib({ nombre: 'Compensa', inicio: '2026-11-01', dias: [2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14].map(d => fLib('2026-11', d)), descansos: [1, 9, 15].map(d => fLib('2026-11', d)) });
+  txtLib = await verMes('2026-11');
+  chk('personal', 'Trabajó entera la semana del 2 al 8 y libró dos días la del 9 al 15: la ficha lo explica y no habla de día de más ni de marcar falta',
+    /la semana del 9 al 15 tiene 2 \(días 9 y 15\), aunque la semana del 2 al 8 la trabajó entera: puede ser el libre que no cogió entonces/.test(txtLib) && !/de más son|márcalo como/.test(txtLib) && /no hace falta cambiar nada/.test(txtLib), txtLib.slice(0, 1200));
+  const avisosComp = (await page.evaluate(() => APP.alertas('2026-11'))).join(' | ');
+  chk('personal', 'Y el aviso del inicio tampoco manda marcar «faltó»: dice que puede ser el libre que no cogió',
+    /Compensa tiene más de un día libre la semana del 9 al 15/.test(avisosComp) && /Puede ser el libre que no cogió la semana que trabajó entera/.test(avisosComp) && !/Compensa tiene más de un día libre[^|]*márcalo como «faltó»/.test(avisosComp), avisosComp.slice(0, 700));
 
   // ══════════════ 9q. EL ASESOR (chat con los datos de la app) ══════════════
   // El asesor es Claude (Anthropic) llamado desde el navegador con la clave del

@@ -12,7 +12,7 @@ bash pruebas/ejecutar.sh
 
 Al final dice `✅ TODO CORRECTO` o lista los fallos encontrados.
 
-## Qué se comprueba (528 comprobaciones)
+## Qué se comprueba (539 comprobaciones)
 
 **Avisos en el móvil** — qué dice la notificación diaria (falta el cierre de ayer, días sin
 marcar), que no reclama el cierre de un día en que el local no abre, que por defecto no
@@ -146,7 +146,12 @@ detectan con su semana y sus días (también a caballo entre dos meses), que el 
 la ficha (con lo que son esos días de más), en el inicio y en el cuadro de mando, que NO
 cambia la cuenta ni va en el mensaje al trabajador, que al pasar el segundo a «faltó» deja de
 pagarse, que la ficha enseña lo cobrado por encima del sueldo antes de octubre (+34,62 en
-septiembre), y que el formulario ya no pide los días que trabaja al mes.
+septiembre, con los retrasos ya restados y sin decir "cobró" si aún se le debe), y que el
+formulario ya no pide los días que trabaja al mes y conserva el valor antiguo al guardar.
+También los casos que salieron en la revisión: los libres de septiembre no cuentan en la
+semana del cambio de cuenta, sin sueldo fijo no se avisa, una semana a caballo de dos meses
+pone el importe una sola vez y en su mes, y un libre cambiado de semana (la de al lado la
+trabajó entera) no es un día de más.
 
 **Seguridad** — que el PIN no se guarda en claro, que uno incorrecto no abre la
 app, y que las copias cifradas no se pueden leer sin su contraseña.
