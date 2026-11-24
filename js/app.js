@@ -1767,8 +1767,31 @@
       .sort((a, b) => a.objetivo - b.objetivo);
   }
 
-  /* Cálculo del mes de un trabajador: fijo por días + comisión por tramo */
-  function calcularMes(t, ventas, pagosMes, mes) {
+  /* ---------- Cómo se calcula el sueldo de un mes ----------
+     'mes'  = el sueldo pactado es por el MES ENTERO (del 1 al último día), con su día
+              libre semanal pagado. Mes completo → sueldo completo, tenga 28, 30 o 31
+              días y caigan 4 o 5 libres. Si entra o se va a mitad de mes, la parte
+              proporcional por días naturales (sueldo ÷ días del mes × días que estuvo,
+              contando sus libres). Un día que no viene y un retraso descuentan sobre
+              sueldo ÷ días del mes. Es lo que el dueño pacta de verdad.
+     'dias' = la regla antigua: sueldo ÷ días pactados (26) × días trabajados. Pagaba de
+              más en un mes de 31 días con 4 libres (27 × 34,62 = 934,62 por un sueldo
+              de 900) y de menos en febrero o con 5 libres. Se conserva para los meses
+              ya pagados con ella y para quien cobre de verdad por día (un refuerzo).
+     Sin campo `modelo`, la regla nueva vale desde MES_SUELDO_POR_MES (cuando se cambió)
+     y los meses anteriores siguen con la antigua, para no reabrir lo ya pagado. */
+  const MES_SUELDO_POR_MES = '2026-11';
+
+  function modeloDe(t, mes) {
+    if (t.modelo === 'dias') return 'dias';
+    const desde = t.modelo === 'mes' ? (t.modeloDesde || '') : MES_SUELDO_POR_MES;
+    return mes >= desde ? 'mes' : 'dias';
+  }
+
+  /* Cálculo del mes de un trabajador: fijo (por mes entero o por días) + comisión por
+     tramo + bonos. `forzar.modelo` sirve para comparar las dos reglas sobre un mismo mes. */
+  function calcularMes(t, ventas, pagosMes, mes, forzar = {}) {
+    const modelo = forzar.modelo || modeloDe(t, mes);
     t = trabajadorEn(t, mes);   // con el sueldo y los objetivos que tenía ESE mes
     // Trabajó = días normales + días que llegó tarde (vino igualmente)
     // Las cuentas llegan hasta el día que trabajó: nada anterior a su alta ni
@@ -1785,19 +1808,48 @@
     const descanso = descansos.length;
     const fueraDePeriodo = [...new Set([...(t.dias || []), ...fechasTardes(t), ...(t.faltas || []), ...(t.descansos || [])])]
       .filter(d => delMes(d) && !dentroDelPeriodo(d)).length;
-    const fijoDia = (t.sueldoMensual || 0) / (t.diasMes || 26);
+    const sueldo = t.sueldoMensual || 0;
     const jornada = t.horasJornada || 7.5;
     const horasTarde = Math.round(tardes.reduce((s, x) => s + (x.horas || 0), 0) * 10) / 10;
-    const precioDia = Math.round(fijoDia * 100) / 100;
-    const fijoBruto = Math.round(fijoDia * dias.length * 100) / 100;
+
+    // El periodo del mes que se paga: de su alta a su baja y, en el mes en curso,
+    // hasta hoy. Son días naturales (sus libres incluidos).
+    const [a, m] = mes.split('-').map(Number);
+    const diasDelMes = new Date(a, m, 0).getDate();
+    const hoy = hoyISO();
+    const primero = `${mes}-01`;
+    const ultimo = `${mes}-${String(diasDelMes).padStart(2, '0')}`;
+    const desde = t.inicio && t.inicio > primero ? t.inicio : primero;
+    let hasta = ultimo;
+    if (t.fin && t.fin < hasta) hasta = t.fin;
+    if (hoy < hasta) hasta = hoy;
+    const enElMes = desde <= hasta && desde.startsWith(mes) && hasta.startsWith(mes);
+    const diasNaturales = enElMes ? (+hasta.slice(8) - +desde.slice(8) + 1) : 0;
+    const enCurso = enElMes && hasta === hoy && hoy < ultimo && !(t.fin && t.fin <= hoy);
+
+    let precioDia, fijoBruto, descuentoFaltas, faltasDescontadas;
+    if (modelo === 'mes') {
+      precioDia = Math.round(sueldo / diasDelMes * 100) / 100;
+      fijoBruto = Math.round(sueldo * diasNaturales / diasDelMes * 100) / 100;
+      // Una falta descuenta un día (sueldo ÷ días del mes). Solo las de días ya
+      // pasados del periodo que se está pagando.
+      faltasDescontadas = enElMes ? faltas.filter(f => f >= desde && f <= hasta).length : 0;
+      descuentoFaltas = Math.min(Math.round(precioDia * faltasDescontadas * 100) / 100, fijoBruto);
+    } else {
+      const fijoDia = sueldo / (t.diasMes || 26);
+      precioDia = Math.round(fijoDia * 100) / 100;
+      fijoBruto = Math.round(fijoDia * dias.length * 100) / 100;
+      faltasDescontadas = 0;
+      descuentoFaltas = 0;   // por día trabajado, el día que no viene simplemente no se cuenta
+    }
     // Al redondear día a día, si TODOS los días llevaran un retraso de la jornada
     // entera la suma podría pasarse unos céntimos del bruto y dejar el fijo en
     // negativo. Se topa: por llegar tarde como mucho se pierde el fijo, nunca más.
     const descuentoSuma = Math.round(tardes.reduce(
       (s, x) => s + descuentoDeUnDia(precioDia, jornada, x.horas || 0), 0) * 100) / 100;
-    const descuentoTardes = Math.min(descuentoSuma, fijoBruto);
-    const descuentoTopado = descuentoSuma > fijoBruto;
-    const fijo = Math.round((fijoBruto - descuentoTardes) * 100) / 100;
+    const descuentoTardes = Math.max(0, Math.min(descuentoSuma, Math.round((fijoBruto - descuentoFaltas) * 100) / 100));
+    const descuentoTopado = descuentoSuma + descuentoFaltas > fijoBruto + 0.001;
+    const fijo = Math.round((fijoBruto - descuentoFaltas - descuentoTardes) * 100) / 100;
 
     const tramos = tramosDe(t);
     let tramoActual = null;
@@ -1816,8 +1868,11 @@
     const entregado = Math.round(pagosMes.reduce((s, p) => s + (p.importe || 0), 0) * 100) / 100;
     const devengado = Math.round((fijo + comision + bono) * 100) / 100;
     return {
-      cond: { sueldoMensual: t.sueldoMensual || 0, diasMes: t.diasMes || 26, horasJornada: t.horasJornada || 7.5, tramos: t.tramos || [] },
-      dias, tardes, faltas, descansos, descanso, fueraDePeriodo, horasTarde, descuentoTardes, descuentoTopado, fijoBruto,
+      cond: { sueldoMensual: sueldo, diasMes: t.diasMes || 26, horasJornada: jornada, tramos: t.tramos || [] },
+      modelo, mes, diasDelMes, diasNaturales, enCurso, precioDia,
+      periodo: enElMes ? { desde, hasta } : null,
+      dias, tardes, faltas, descansos, descanso, fueraDePeriodo, horasTarde,
+      descuentoFaltas, faltasDescontadas, descuentoTardes, descuentoTopado, fijoBruto,
       fijo, comision, tramoActual, siguiente, bonos, bono,
       devengado, entregado,
       pendiente: Math.round((devengado - entregado) * 100) / 100
@@ -2382,6 +2437,7 @@
     lineas.push(`Días trabajados: ${c.dias.length}` +
       (c.tardes.length ? ` (⏰ ${c.tardes.length} con retraso${c.horasTarde ? `, ${numH(c.horasTarde)} h` : ''})` : ''));
     if (c.descanso) lineas.push(`Días de descanso: ${c.descanso}`);
+    const faltasQueDescuentan = c.modelo === 'mes' && c.periodo ? c.faltas.filter(f => f >= c.periodo.desde && f <= c.periodo.hasta) : [];
     if (c.faltas.length) {
       lineas.push(`Días que no vino: ${c.faltas.length} (${c.faltas.map(fmtFecha).join(' · ')})`);
     }
@@ -2389,7 +2445,7 @@
     if (retrasos.length) {
       lineas.push('');
       lineas.push('POR QUÉ SE LE DESCONTÓ DINERO ALGUNOS DÍAS');
-      reglaRetrasoLineas(t, false).forEach(l => lineas.push(l));
+      reglaRetrasoLineas(t, false, c).forEach(l => lineas.push(l));
       retrasos.forEach(r => {
         lineas.push('');
         lineas.push(`${fmtFecha(r.fecha)} — llegó ${numH(r.horas)} h tarde`);
@@ -2401,9 +2457,19 @@
       lineas.push(`Total descontado por llegar tarde: −${INFORME.eur(c.descuentoTardes)}`);
     }
     lineas.push('');
-    lineas.push(c.descuentoTardes > 0
-      ? `Fijo: ${INFORME.eur(t.sueldoMensual || 0)} ÷ ${t.diasMes || 26} × ${c.dias.length} días = ${INFORME.eur(c.fijoBruto)} − ${INFORME.eur(c.descuentoTardes)} = ${INFORME.eur(c.fijo)}`
-      : `Fijo: ${INFORME.eur(t.sueldoMensual || 0)} ÷ ${t.diasMes || 26} × ${c.dias.length} días = ${INFORME.eur(c.fijo)}`);
+    if (c.modelo === 'mes') {
+      lineas.push(`Sueldo: ${INFORME.eur(t.sueldoMensual || 0)} por el mes entero`);
+      lineas.push(`${mesEnLetras(mes + '-01')}, ${periodoTexto(c)}: ${cuentaFijoMes(c)} = ${INFORME.eur(c.fijoBruto)}`);
+      if (c.descuentoFaltas > 0) {
+        lineas.push(`Descontado por los días que no vino (${faltasQueDescuentan.map(fmtFecha).join(' · ')}): ${c.faltasDescontadas} × ${INFORME.eur(c.precioDia)} = −${INFORME.eur(c.descuentoFaltas)}`);
+      }
+      if (c.descuentoFaltas > 0 || c.descuentoTardes > 0) lineas.push(`Fijo: ${restaDelFijo(c)}`);
+      else lineas.push(`Fijo: ${INFORME.eur(c.fijo)}`);
+    } else {
+      lineas.push(c.descuentoTardes > 0
+        ? `Fijo: ${INFORME.eur(t.sueldoMensual || 0)} ÷ ${t.diasMes || 26} × ${c.dias.length} días = ${INFORME.eur(c.fijoBruto)} − ${INFORME.eur(c.descuentoTardes)} = ${INFORME.eur(c.fijo)}`
+        : `Fijo: ${INFORME.eur(t.sueldoMensual || 0)} ÷ ${t.diasMes || 26} × ${c.dias.length} días = ${INFORME.eur(c.fijo)}`);
+    }
     const objetivo = objetivoLineas(t, c, (ventasDet && ventasDet.total) || 0);
     if (objetivo.length) {
       lineas.push('');
@@ -2469,12 +2535,52 @@
   /* La regla del retraso explicada con palabras, para que la entienda el propio
      trabajador. Hasta ahora solo estaba escrita en el formulario donde se le da de
      alta, o sea donde él no la ve nunca. */
-  function reglaRetrasoLineas(t, conJornada = true) {
-    const precio = `Se cobra por día trabajado${conJornada ? `. La jornada es de ${numH(t.horasJornada || 7.5)} h y` : ' y'} el día sale a ${INFORME.eur(precioDeUnDia(t))} (${INFORME.eur(t.sueldoMensual || 0)} ÷ ${t.diasMes || 26} días).`;
+  function reglaRetrasoLineas(t, conJornada = true, c = null) {
+    t = condDe(t, c);
+    const porMes = c && c.modelo === 'mes';
+    const precio = porMes
+      ? `El sueldo es por el mes entero y el día sale a ${INFORME.eur(c.precioDia)} (${INFORME.eur(t.sueldoMensual || 0)} ÷ ${c.diasDelMes} días de ${nombreMes(c.mes)})${conJornada ? `. La jornada es de ${numH(t.horasJornada || 7.5)} h` : ''}.`
+      : `Se cobra por día trabajado${conJornada ? `. La jornada es de ${numH(t.horasJornada || 7.5)} h y` : ' y'} el día sale a ${INFORME.eur(c ? c.precioDia : precioDeUnDia(t))} (${INFORME.eur(t.sueldoMensual || 0)} ÷ ${t.diasMes || 26} días).`;
     return [
       precio,
       'El día que se llega tarde se paga solo la parte del día que se estuvo, no el día entero.'
     ];
+  }
+
+  /* El nombre del mes en minúscula: "noviembre" */
+  const nombreMes = (mes) => INFORME.MESES[+mes.slice(5, 7) - 1].toLowerCase();
+
+  /* Con el sueldo por mes entero: qué parte del mes se está pagando, con palabras.
+     "el mes completo (30 días)" · "del 10 al 30: 21 días naturales de 30" ·
+     "hasta hoy, día 24 de 30". Los días naturales incluyen sus días libres. */
+  function periodoTexto(c) {
+    if (!c.periodo || !c.diasNaturales) return 'ningún día de este mes';
+    const d1 = +c.periodo.desde.slice(8);
+    const d2 = +c.periodo.hasta.slice(8);
+    const n = c.diasNaturales;
+    if (n === c.diasDelMes) return `el mes completo (${n} días)`;
+    if (d1 === 1 && c.enCurso) return `hasta hoy, día ${d2} de ${c.diasDelMes}`;
+    const tramo = d1 === 1 ? `hasta el día ${d2}` : `del ${d1} al ${d2}${c.enCurso ? ' (hoy)' : ''}`;
+    return `${tramo}: ${n} día${n === 1 ? '' : 's'} natural${n === 1 ? '' : 'es'} de ${c.diasDelMes}`;
+  }
+
+  /* "1200,00 € ÷ 30 × 21": la cuenta del fijo por mes entero, que cuadra a mano. */
+  const cuentaFijoMes = (c) => `${INFORME.eur(c.cond.sueldoMensual)} ÷ ${c.diasDelMes} × ${c.diasNaturales}`;
+
+  /* Los descuentos del fijo escritos como una resta, solo los que hubo:
+     "840,00 € − 40,00 € de faltas − 10,32 € de retrasos = 789,68 €" */
+  function restaDelFijo(c, conPalabras = true) {
+    const partes = [INFORME.eur(c.fijoBruto)];
+    if (c.descuentoFaltas > 0) partes.push(`− ${INFORME.eur(c.descuentoFaltas)}${conPalabras ? ' por no venir' : ''}`);
+    if (c.descuentoTardes > 0) partes.push(`− ${INFORME.eur(c.descuentoTardes)}${conPalabras ? ' por llegar tarde' : ''}`);
+    return partes.length > 1 ? `${partes.join(' ')} = ${INFORME.eur(c.fijo)}` : INFORME.eur(c.fijo);
+  }
+
+  /* El cálculo del último mes con datos de su etapa (para explicar la regla
+     vigente con los números de ese mes). */
+  function ultimoCalcDe(deuda) {
+    for (let i = deuda.meses.length - 1; i >= 0; i--) if (deuda.meses[i].calc) return deuda.meses[i].calc;
+    return null;
   }
 
   /* Los retrasos de TODA su etapa: cuántos días y cuánto se le descontó en total.
@@ -2503,7 +2609,7 @@
      objetivo (viene de ventasParaTrabajador). */
   function detalleRetrasos(t, c, ventasDet) {
     t = condDe(t, c);
-    const precioDia = precioDeUnDia(t);
+    const precioDia = c.precioDia != null ? c.precioDia : precioDeUnDia(t);
     const jornada = t.horasJornada || 7.5;
     const porFecha = new Map(((ventasDet && ventasDet.detalleTardes) || []).map(l => [l.fecha, l]));
     return c.tardes.slice().sort((a, b) => (a.fecha || '').localeCompare(b.fecha || '')).map(x => {
@@ -2581,7 +2687,7 @@
       ? `
             <div class="stat-linea"><span><strong>TOTAL DESCONTADO POR LLEGAR TARDE</strong></span><strong class="txt-bad">−${INFORME.eur(c.descuentoTardes)}</strong></div>
             ${avisoSinHoras}${avisoTope}
-            <p class="hint" style="margin:6px 0 0">Estas líneas suman exactamente lo que se le quitó del fijo: ${INFORME.eur(c.fijoBruto)} − ${INFORME.eur(c.descuentoTardes)} = ${INFORME.eur(c.fijo)}.</p>`
+            <p class="hint" style="margin:6px 0 0">Estas líneas suman exactamente lo que se le quitó del fijo por llegar tarde: ${restaDelFijo(c)}.</p>`
       : `
             <p class="hint" style="margin:6px 0 0">No se le quitó nada del fijo por estos días.</p>
             ${avisoSinHoras}`;
@@ -2590,7 +2696,7 @@
       : `Días que llegó tarde`;
 
     const regla = huboDescuento
-      ? `<p class="hint" style="margin:0 0 8px">${reglaRetrasoLineas(t).join(' ')}</p>`
+      ? `<p class="hint" style="margin:0 0 8px">${reglaRetrasoLineas(t, true, c).join(' ')}</p>`
       : '';
 
     if (plegado) {
@@ -2615,12 +2721,15 @@
 
   function faltasHTML(t, c) {
     if (!c.faltas.length) return '';
+    const porMes = c.modelo === 'mes' && c.precioDia > 0;
+    const descuenta = (f) => porMes && c.periodo && f >= c.periodo.desde && f <= c.periodo.hasta;
     return `
             <p class="per-seccion">🚫 Días que no vino (${c.faltas.length})</p>
             ${c.faltas.map(f => {
               const motivo = motivoDeFalta(t, f);
-              return `<div class="per-pago"><span>${fmtFecha(f)}</span><span class="${motivo ? '' : 'txt-sec'}" style="text-align:right">${motivo ? escapar(motivo) : 'sin motivo apuntado'}</span></div>`;
-            }).join('')}`;
+              return `<div class="per-pago"><span>${fmtFecha(f)}${motivo ? ` · ${escapar(motivo)}` : ' · <span class="txt-sec">sin motivo apuntado</span>'}</span>${porMes ? `<strong class="${descuenta(f) ? 'txt-bad' : 'txt-sec'}" style="white-space:nowrap">${descuenta(f) ? '−' + INFORME.eur(c.precioDia) : 'aún no'}</strong>` : ''}</div>`;
+            }).join('')}
+            ${porMes && c.descuentoFaltas > 0 ? `<div class="stat-linea"><span><strong>DESCONTADO POR NO VENIR</strong> <small class="txt-sec">(${c.faltasDescontadas} día${c.faltasDescontadas === 1 ? '' : 's'} × ${INFORME.eur(c.precioDia)}, que es ${INFORME.eur(c.cond.sueldoMensual)} ÷ ${c.diasDelMes})</small></span><strong class="txt-bad">−${INFORME.eur(c.descuentoFaltas)}</strong></div>` : ''}`;
   }
 
   /* Los días que no vino en TODA su etapa, para el resumen del liquidado. */
@@ -2637,12 +2746,30 @@
   function fijoLineasHTML(t, c) {
     t = condDe(t, c);
     const sueldo = t.sueldoMensual || 0;
+    if (c.modelo === 'mes') {
+      // Sueldo por el mes entero: se paga el periodo (días naturales, con sus libres)
+      // y se descuentan solo las faltas y los retrasos.
+      const sinMarcar = c.diasNaturales > 0 && !c.dias.length && !c.faltas.length && !c.descansos.length;
+      const aviso = sinMarcar
+        ? `<p class="hint txt-bad" style="margin:4px 0 0">⚠️ Este mes no tiene ningún día marcado y se le cuenta entero. Si ya no trabaja, ponle la fecha de baja en su ficha.</p>`
+        : '';
+      const cabecera = `
+            <div class="stat-linea"><span>Sueldo por el mes entero: ${periodoTexto(c)} <small class="txt-sec">(${cuentaFijoMes(c)})</small><br><small class="txt-sec">${sueldo > 0 ? `El día sale a ${INFORME.eur(c.precioDia)} (${INFORME.eur(sueldo)} ÷ ${c.diasDelMes} días de ${nombreMes(c.mes)}). ` : ''}Los días libres van dentro del sueldo; solo descuentan las faltas y los retrasos.</small></span><strong>${INFORME.eur(c.fijoBruto)}</strong></div>${aviso}`;
+      if (!(c.descuentoFaltas > 0) && !(c.descuentoTardes > 0)) {
+        return cabecera.replace(`<strong>${INFORME.eur(c.fijoBruto)}</strong>`, `<strong>${INFORME.eur(c.fijo)}</strong>`);
+      }
+      const nT = c.tardes.length;
+      return `${cabecera}
+            ${c.descuentoFaltas > 0 ? `<div class="stat-linea"><span>Descontado por no venir <small class="txt-sec">(${c.faltasDescontadas} día${c.faltasDescontadas === 1 ? '' : 's'} × ${INFORME.eur(c.precioDia)})</small></span><strong class="txt-bad">−${INFORME.eur(c.descuentoFaltas)}</strong></div>` : ''}
+            ${c.descuentoTardes > 0 ? `<div class="stat-linea"><span>Descontado por llegar tarde <small class="txt-sec">(${nT} día${nT === 1 ? '' : 's'}, ${numH(c.horasTarde)} h)</small></span><strong class="txt-bad">−${INFORME.eur(c.descuentoTardes)}</strong></div>` : ''}
+            <div class="stat-linea"><span><strong>FIJO DEL MES</strong> <small class="txt-sec">(${restaDelFijo(c, false)})</small></span><strong>${INFORME.eur(c.fijo)}</strong></div>`;
+    }
     const diasMes = t.diasMes || 26;
     const n = c.dias.length;
     const cuenta = `<small class="txt-sec">(${INFORME.eur(sueldo)} ÷ ${diasMes} × ${n})</small>`;
     // Los dos números pueden coincidir (26 días pactados y 26 que vino) y entonces
     // "÷ 26 × 26" no se entiende: se dice qué es cada uno.
-    const queEs = `<br><small class="txt-sec">Sueldo ÷ los ${diasMes} días de trabajo pactados al mes × los ${n} día${n === 1 ? '' : 's'} que vino${n === diasMes ? ' (este mes vino todos los pactados: cobra el sueldo entero)' : ''}.</small>`;
+    const queEs = `<br><small class="txt-sec">Por día trabajado: sueldo ÷ los ${diasMes} días de trabajo pactados al mes × los ${n} día${n === 1 ? '' : 's'} que vino${n === diasMes ? ' (este mes vino todos los pactados: cobra el sueldo entero)' : ''}.</small>`;
     if (!(c.descuentoTardes > 0)) {
       return `
             <div class="stat-linea"><span>Fijo: ${n} día${n === 1 ? '' : 's'} trabajado${n === 1 ? '' : 's'} ${cuenta}${queEs}</span><strong>${INFORME.eur(c.fijo)}</strong></div>`;
@@ -2651,7 +2778,7 @@
     return `
             <div class="stat-linea"><span>Fijo por los ${n} días que trabajó ${cuenta}<br><small class="txt-sec">${nT === 1 ? 'El día que llegó tarde también cuenta' : 'Los días que llegó tarde también cuentan'} como día trabajado; las horas que faltó se le quitan en la línea de abajo.</small></span><strong>${INFORME.eur(c.fijoBruto)}</strong></div>
             <div class="stat-linea"><span>Descontado por llegar tarde <small class="txt-sec">(${nT} día${nT === 1 ? '' : 's'}, ${numH(c.horasTarde)} h)</small></span><strong class="txt-bad">−${INFORME.eur(c.descuentoTardes)}</strong></div>
-            <div class="stat-linea"><span><strong>FIJO DEL MES</strong> <small class="txt-sec">(sale a ${INFORME.eur(precioDeUnDia(t))} el día)</small></span><strong>${INFORME.eur(c.fijo)}</strong></div>`;
+            <div class="stat-linea"><span><strong>FIJO DEL MES</strong> <small class="txt-sec">(sale a ${INFORME.eur(c.precioDia)} el día)</small></span><strong>${INFORME.eur(c.fijo)}</strong></div>`;
   }
 
   /* El objetivo pactado, lo que se facturó en SUS días y lo que faltó para llegar.
@@ -2712,13 +2839,22 @@
      y en la de uno ya liquidado, para que digan exactamente lo mismo. */
   function explicacionLineas(t, c, ventasDet, pasado = false) {
     t = condDe(t, c);
-    const fijoDia = (t.sueldoMensual || 0) / (t.diasMes || 26);
     const jornada = t.horasJornada || 7.5;
     const ventasT = ventasDet.total;
     const ex = [];
-    ex.push(`Precio del día: ${INFORME.eur(t.sueldoMensual || 0)} ÷ ${t.diasMes || 26} días = <strong>${INFORME.eur(fijoDia)}</strong>`);
-    ex.push(`La cuenta del mes se hace con la cifra exacta: ${INFORME.eur(t.sueldoMensual || 0)} ÷ ${t.diasMes || 26} × ${c.dias.length} día${c.dias.length === 1 ? '' : 's'} = <strong>${INFORME.eur(c.fijoBruto)}</strong>`);
-    ex.push(`<small>Si multiplicas ${INFORME.eur(precioDeUnDia(t))} × ${c.dias.length} te pueden salir unos céntimos de diferencia, porque ${INFORME.eur(precioDeUnDia(t))} es el precio del día ya redondeado.</small>`);
+    if (c.modelo === 'mes') {
+      ex.push(`El sueldo es por el mes entero: ${INFORME.eur(t.sueldoMensual || 0)} por ${nombreMes(c.mes)}, con sus días libres dentro.`);
+      ex.push(`Precio de un día: ${INFORME.eur(t.sueldoMensual || 0)} ÷ ${c.diasDelMes} días de ${nombreMes(c.mes)} = <strong>${INFORME.eur(c.precioDia)}</strong>`);
+      ex.push(`${pasado ? 'Se le pagó' : 'Se le paga'} ${periodoTexto(c)}: ${cuentaFijoMes(c)} = <strong>${INFORME.eur(c.fijoBruto)}</strong>`);
+      c.faltas.filter(f => c.periodo && f >= c.periodo.desde && f <= c.periodo.hasta).forEach(f => {
+        ex.push(`🚫 ${fmtFecha(f)}: no vino → se le descuenta ese día, <strong>${INFORME.eur(c.precioDia)}</strong>`);
+      });
+    } else {
+      const fijoDia = (t.sueldoMensual || 0) / (t.diasMes || 26);
+      ex.push(`Precio del día: ${INFORME.eur(t.sueldoMensual || 0)} ÷ ${t.diasMes || 26} días = <strong>${INFORME.eur(fijoDia)}</strong>`);
+      ex.push(`La cuenta del mes se hace con la cifra exacta: ${INFORME.eur(t.sueldoMensual || 0)} ÷ ${t.diasMes || 26} × ${c.dias.length} día${c.dias.length === 1 ? '' : 's'} = <strong>${INFORME.eur(c.fijoBruto)}</strong>`);
+      ex.push(`<small>Si multiplicas ${INFORME.eur(c.precioDia)} × ${c.dias.length} te pueden salir unos céntimos de diferencia, porque ${INFORME.eur(c.precioDia)} es el precio del día ya redondeado.</small>`);
+    }
     detalleRetrasos(t, c, ventasDet).filter(r => r.horas > 0).forEach(r => {
       ex.push(`⏰ ${fmtFecha(r.fecha)}: llegó ${numH(r.horas)} h tarde → ese día cobró ${INFORME.eur(r.cobra)} en vez de ${INFORME.eur(r.precioDia)}, se le descuentan <strong>${INFORME.eur(r.descuento)}</strong> del fijo`);
     });
@@ -2731,14 +2867,36 @@
         ? `Objetivo de ${INFORME.eur(c.tramoActual.objetivo)} alcanzado → ${c.tramoActual.porcentaje} % de ${INFORME.eur(ventasT)} = <strong>${INFORME.eur(c.comision)}</strong>`
         : `No llegó al objetivo${c.siguiente ? ` de ${INFORME.eur(c.siguiente.objetivo)}` : ''} → sin comisión: cobra solo el fijo pactado`);
     }
-    if (c.descuentoTardes > 0) {
-      ex.push(`Fijo del mes: ${INFORME.eur(c.fijoBruto)} − ${INFORME.eur(c.descuentoTardes)} de retrasos = <strong>${INFORME.eur(c.fijo)}</strong>`);
+    if (c.descuentoTardes > 0 || c.descuentoFaltas > 0) {
+      ex.push(`Fijo del mes: ${restaDelFijo(c).replace(/= ([^=]*)$/, '= <strong>$1</strong>')}`);
     }
     if (c.bono > 0) {
       c.bonos.forEach(b => ex.push(`🎁 Bono del ${fmtFecha(b.fecha)}${b.motivo ? ` (${escapar(b.motivo)})` : ''}: <strong>${INFORME.eur(b.importe)}</strong>`));
     }
     ex.push(`${pasado ? 'Le correspondió ese mes' : 'Le corresponde el mes'}: fijo ${INFORME.eur(c.fijo)} + comisión ${INFORME.eur(c.comision)}${c.bono > 0 ? ` + bono ${INFORME.eur(c.bono)}` : ''} = <strong>${INFORME.eur(c.devengado)}</strong>`);
     return ex;
+  }
+
+  /* Los meses que se pagaron con la regla antigua (por día trabajado), comparados
+     con lo que habrían sido por mes entero. Responde a "creo que he estado pagando
+     de más" sin tocar nada: la cuenta de esos meses no cambia salvo que el dueño
+     ponga en blanco el "por mes entero desde" de la ficha. */
+  function comparativaReglaAntiguaHTML(t, deuda) {
+    const antiguos = deuda.meses.filter(m => m.calc && m.calc.modelo === 'dias' && m.calc.cond.sueldoMensual > 0);
+    if (!antiguos.length || t.modelo === 'dias') return '';
+    const filas = antiguos.map(m => {
+      const nuevo = calcularMes(t, m.ventasDet.total, m.pagos, m.mes, { modelo: 'mes' });
+      return { mes: m.mes, antiguo: m.calc.fijo, nuevo: nuevo.fijo, dif: r2(m.calc.fijo - nuevo.fijo), dias: m.calc.dias.length, naturales: nuevo.diasNaturales };
+    });
+    const total = r2(filas.reduce((s, f) => s + f.dif, 0));
+    const desde = t.modelo === 'mes' ? (t.modeloDesde || '') : MES_SUELDO_POR_MES;
+    return `
+        <details class="ocr-details" style="margin:8px 0 0">
+          <summary>📐 Lo pagado con la regla antigua (por día) frente al mes entero: ${total > 0 ? `${INFORME.eur(total)} de más` : (total < 0 ? `${INFORME.eur(-total)} de menos` : 'igual')}</summary>
+          <p class="hint" style="margin:0 0 6px">Hasta ${desde ? mesEnLetras(desde + '-01') : 'ahora'} el fijo se calculó por día trabajado (sueldo ÷ ${t.diasMes || 26} × días). Así habría sido por mes entero. Estos meses NO cambian: si quieres que la app los recalcule y lo descuente, deja en blanco «Por mes entero desde» en su ficha.</p>
+          ${filas.map(f => `<div class="stat-linea"><span>${mesEnLetras(f.mes + '-01')} <small class="txt-sec">(${f.dias} día${f.dias === 1 ? '' : 's'} trabajado${f.dias === 1 ? '' : 's'}; por mes entero: ${f.naturales} naturales)</small></span><span>${INFORME.eur(f.antiguo)} → ${INFORME.eur(f.nuevo)} <strong class="${f.dif > 0 ? 'txt-bad' : (f.dif < 0 ? 'txt-ok' : 'txt-sec')}">${f.dif > 0 ? '+' : ''}${INFORME.eur(f.dif)}</strong></span></div>`).join('')}
+          <div class="stat-linea"><span><strong>En total</strong></span><strong class="${total > 0 ? 'txt-bad' : 'txt-ok'}">${total > 0 ? `${INFORME.eur(total)} de más` : (total < 0 ? `${INFORME.eur(-total)} de menos` : 'igual')}</strong></div>
+        </details>`;
   }
 
   /* Las mismas líneas, plegadas, tal como salen en la ficha de un activo. */
@@ -2771,7 +2929,9 @@
       const dias = c ? `${c.dias.length} día${c.dias.length === 1 ? '' : 's'} · ` : '';
       const detalle = c ? `${sumaDelMes(c).replace(/ = [^=]*$/, '')} = ` : '';
       lineas.push(`${mesEnLetras(m.mes + '-01')}: ${dias}${detalle}${INFORME.eur(m.devengado)}`);
-      if (c && c.descuentoTardes > 0) {
+      if (c && c.modelo === 'mes') {
+        lineas.push(`   (sueldo ${INFORME.eur(c.cond.sueldoMensual)} por el mes entero, ${periodoTexto(c)}: ${cuentaFijoMes(c)} = ${INFORME.eur(c.fijoBruto)}${c.descuentoFaltas > 0 || c.descuentoTardes > 0 ? `; fijo: ${restaDelFijo(c)}` : ''})`);
+      } else if (c && c.descuentoTardes > 0) {
         lineas.push(`   (fijo: ${INFORME.eur(c.cond.sueldoMensual)} ÷ ${c.cond.diasMes} × ${c.dias.length} = ${INFORME.eur(c.fijoBruto)} − ${INFORME.eur(c.descuentoTardes)} = ${INFORME.eur(c.fijo)}, por los retrasos de abajo)`);
       }
       if (c) bonoLineas(c).forEach(l => lineas.push(`   ${l}`));
@@ -2798,7 +2958,7 @@
     if (tarde.dias) {
       lineas.push('');
       lineas.push('POR QUÉ SE LE DESCONTÓ DINERO ALGUNOS DÍAS');
-      reglaRetrasoLineas(t, false).forEach(l => lineas.push(l));
+      reglaRetrasoLineas(t, false, ultimoCalcDe(deuda)).forEach(l => lineas.push(l));
       tarde.filas.forEach(r => {
         lineas.push('');
         lineas.push(`${fmtFecha(r.fecha)} — llegó ${numH(r.horas)} h tarde`);
@@ -2952,7 +3112,7 @@
             <div class="stat-linea"><span>⏰ Llegó tarde ${tarde.dias} día${tarde.dias === 1 ? '' : 's'} en toda su etapa <small class="txt-sec">(${numH(tarde.horas)} h)</small></span><strong class="txt-bad">se le descontaron ${INFORME.eur(tarde.descuento)}</strong></div>
             <details class="ocr-details" style="margin:6px 0 0">
               <summary>⏰ Por qué se le descontó dinero algunos días</summary>
-              <p class="hint" style="margin:0 0 8px">${reglaRetrasoLineas(t).join(' ')}</p>
+              <p class="hint" style="margin:0 0 8px">${reglaRetrasoLineas(t, true, ultimoCalcDe(deuda)).join(' ')}</p>
               ${tarde.filas.map(r => `
               <div class="per-pago">
                 <span style="min-width:0">⏰ ${fmtFecha(r.fecha)} — llegó ${numH(r.horas)} h tarde<br>
@@ -3031,9 +3191,11 @@
       // 📖 La cuenta bien explicada, paso a paso (para enseñársela al empleado)
       const explicaHTML = explicacionPlegada(t, c, ventasDet);
 
-      // Deuda TOTAL con él (este mes + lo arrastrado de meses anteriores)
-      const deuda = await desgloseDeuda(t, pagosT, cierresDeMes);
+      // Deuda TOTAL con él (este mes + lo arrastrado de meses anteriores). Con
+      // detalle, para poder comparar los meses pagados con la regla antigua.
+      const deuda = await desgloseDeuda(t, pagosT, cierresDeMes, true);
       const arrastre = Math.round((deuda.total - c.pendiente) * 100) / 100;
+      const comparativaHTML = comparativaReglaAntiguaHTML(t, deuda);
 
       // Dado de baja pero aún sin abonar: finiquito total pendiente
       let bajaHTML = '';
@@ -3124,6 +3286,7 @@
               ${filasMeses}
             </details>
             ${explicaHTML}
+            ${comparativaHTML}
 
             <p class="per-seccion">💶 Adelantos y pagos que le haces</p>
             <div class="form-row">
@@ -3422,6 +3585,10 @@
     $('#pe-nombre').value = t ? t.nombre : '';
     $('#pe-sueldo').value = t && t.sueldoMensual != null ? t.sueldoMensual : '';
     $('#pe-diasmes').value = t && t.diasMes ? t.diasMes : 26;
+    // Sin campo guardado: la regla por mes entero desde el mes en que se cambió
+    $('#pe-modelo').value = t && t.modelo === 'dias' ? 'dias' : 'mes';
+    $('#pe-modelo-desde').value = t ? (t.modelo ? (t.modeloDesde || '') : MES_SUELDO_POR_MES) : '';
+    mostrarCamposModelo();
     $('#pe-jornada').value = t && t.horasJornada ? t.horasJornada : 7.5;
     $('#pe-inicio').value = t ? (t.inicio || '') : '';
     $('#pe-fin').value = t ? (t.fin || '') : '';
@@ -3438,6 +3605,13 @@
     $('#pe-nombre').focus();
   }
 
+  function mostrarCamposModelo() {
+    const porMes = $('#pe-modelo').value !== 'dias';
+    $('#pe-modelo-mes-wrap').classList.toggle('hidden', !porMes);
+    $('#pe-modelo-dias-wrap').classList.toggle('hidden', porMes);
+  }
+  $('#pe-modelo').addEventListener('change', mostrarCamposModelo);
+
   $('#per-nuevo').addEventListener('click', () => abrirFormPersonal());
   $('#per-cancelar').addEventListener('click', () => {
     perEditando = null;
@@ -3447,7 +3621,9 @@
   $('#per-guardar').addEventListener('click', guardarConAviso(async () => {
     const nombre = $('#pe-nombre').value.trim();
     const sueldo = parseFloat($('#pe-sueldo').value);
-    const diasMes = Math.round(parseFloat($('#pe-diasmes').value));
+    const modelo = $('#pe-modelo').value === 'dias' ? 'dias' : 'mes';
+    const modeloDesde = modelo === 'mes' ? ($('#pe-modelo-desde').value || '') : '';
+    const diasMes = modelo === 'dias' ? Math.round(parseFloat($('#pe-diasmes').value)) : (perEditando && perEditando.diasMes) || 26;
     if (!nombre) { toast('⚠️ El nombre es obligatorio.'); return; }
     if (isNaN(sueldo) || sueldo < 0) { toast('⚠️ Pon el sueldo mensual pactado.'); return; }
     if (isNaN(diasMes) || diasMes < 1 || diasMes > 31) { toast('⚠️ Pon los días que trabaja al mes (ej.: 26).'); return; }
@@ -3502,6 +3678,7 @@
         : { dias: [], tardes: [], faltas: [], descansos: [], notasDias: [], bonos: [], liquidado: '', creado: new Date().toISOString() }),
       nombre,
       ...nuevas,
+      modelo, modeloDesde,
       inicio: $('#pe-inicio').value || '',
       fin: $('#pe-fin').value || '',
       notas: $('#pe-notas').value.trim()

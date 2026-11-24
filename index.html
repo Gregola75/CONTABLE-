@@ -431,14 +431,31 @@
       <div class="form-row">
         <div class="form-group">
           <label for="pe-sueldo">Sueldo por mes completo (€) *</label>
-          <input type="number" id="pe-sueldo" step="1" min="0" placeholder="900">
+          <input type="number" id="pe-sueldo" step="1" min="0" placeholder="1200">
         </div>
+        <div class="form-group">
+          <label for="pe-modelo">Cómo se calcula</label>
+          <select id="pe-modelo">
+            <option value="mes">Por mes entero</option>
+            <option value="dias">Por día trabajado</option>
+          </select>
+        </div>
+      </div>
+      <div id="pe-modelo-mes-wrap">
+        <p class="hint" style="margin:0 0 10px">El sueldo es por el mes entero (del 1 al último día) con su día libre a la semana. Mes completo → sueldo completo, tenga 28, 30 o 31 días y caigan 4 o 5 libres. Si entra o se va a mitad de mes, cobra la parte proporcional (sueldo ÷ días del mes × días que estuvo). Solo descuentan las faltas y los retrasos: un día que no viene se descuenta a sueldo ÷ días del mes.</p>
+        <div class="form-group">
+          <label for="pe-modelo-desde">Por mes entero desde <small>los meses anteriores siguen por día trabajado, como antes</small></label>
+          <input type="month" id="pe-modelo-desde">
+          <p class="hint" style="margin:6px 0 0">Déjalo en blanco para aplicarlo a todo su historial (los meses ya pagados pueden cambiar).</p>
+        </div>
+      </div>
+      <div id="pe-modelo-dias-wrap" class="hidden">
         <div class="form-group">
           <label for="pe-diasmes">Días que trabaja al mes *</label>
           <input type="number" id="pe-diasmes" step="1" min="1" max="31" value="26">
         </div>
+        <p class="hint" style="margin:0 0 10px">Por día trabajado: el precio del día = sueldo ÷ esos días (ej.: 900 ÷ 26 = 34,62 €) y cobra solo los días que viene. Ojo: en un mes de 31 días con 4 libres son 27 días y cobra más que el sueldo; con 5 libres, menos. Es la regla antigua; sirve para quien cobra de verdad por día.</p>
       </div>
-      <p class="hint" style="margin:0 0 10px">El precio del día = sueldo ÷ esos días. Con 1 día libre a la semana son ~26 días (ej.: 900 ÷ 26 = 34,62 € el día). Se paga por día trabajado.</p>
       <div class="form-group">
         <label for="pe-jornada">Horas de una jornada <small>para descontar retrasos</small></label>
         <input type="number" id="pe-jornada" step="0.5" min="1" max="16" value="7.5">

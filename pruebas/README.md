@@ -12,7 +12,7 @@ bash pruebas/ejecutar.sh
 
 Al final dice `✅ TODO CORRECTO` o lista los fallos encontrados.
 
-## Qué se comprueba (337 comprobaciones)
+## Qué se comprueba (355 comprobaciones)
 
 **Informe trimestral** — que los ingresos y gastos del trimestre son los
 correctos, que no se cuelan registros de otros meses, que se agrupan las
@@ -50,13 +50,21 @@ es cada número, que el mensaje reparte igual el pendiente, y que al corregir la
 alta al 1 de septiembre el 31 de agosto deja de pagarse (884,00) y agosto avisa del día
 fuera del periodo.
 
+**Sueldo por mes entero** — que un mes de 31 días con 4 libres (27 trabajados) paga el sueldo
+justo (1200, no 1246,15) y uno de 30 con 5 libres también (no 1153,85); que empezar el 10
+paga 22 días naturales de 31 (851,61); que una falta descuenta 38,71 (1200 ÷ 31) y un retraso
+de 2 h 10,32; que el mensaje lo explica con la cuenta que cuadra a mano y sin la jornada; que
+el mes en curso se cuenta hasta hoy y avisa si no hay nada marcado; que un trabajador de antes
+sigue por día en los meses ya pagados, ve cuánto fue de más (+46,15 en octubre) y pasa a mes
+entero desde noviembre; y que la ficha permite elegir la regla y desde cuándo.
+
 **Bonos** — que un bono de 50 € con motivo se suma a lo que le corresponde (692,31 → 742,31),
 sale en la ficha y en el mensaje con su motivo y la suma (`fijo + comisión + bono`), que sin
 importe o con fecha fuera de su etapa no se guarda, que guardar la ficha no lo pierde, que se
 puede quitar, y que en la ficha de un liquidado queda en su mes y en el texto de toda su etapa.
 
 **Días que no vino y cierre en la baja** — que las faltas se ven con su fecha y con su
-motivo (solo en la ficha, nunca en el mensaje), y que no descuentan dinero; que un día marcado antes del alta
+motivo (solo en la ficha, nunca en el mensaje), y que por día trabajado no descuentan dinero; que un día marcado antes del alta
 o después de la baja **no se paga** y la ficha avisa; que el mes en que se cobró el
 finiquito **ya no aparece** como un mes más del desglose, pero el pago sigue contando y
 el cuadre sigue dando cero; y que a un liquidado no se le puede borrar sin reabrirlo.

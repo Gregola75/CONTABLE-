@@ -11,7 +11,7 @@ function chk(area, nombre, condicion, detalle = '') {
 const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < tol;
 
 (async () => {
-  const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' });
+  const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || '/opt/pw-browsers/chromium' });
   const page = await browser.newPage({ viewport: { width: 390, height: 900 } });
   const erroresJS = [];
   page.on('pageerror', e => erroresJS.push(e.message));
@@ -341,7 +341,7 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
     const dias = [];
     for (let d = 1; d <= 10; d++) dias.push(`2026-08-${String(d).padStart(2, '0')}`);
     dias.push('2026-09-01', '2026-09-02');
-    await DB.perGuardar({ nombre: 'Deudor', sueldoMensual: 715, diasMes: 26, horasJornada: 7.5, tramos: [], dias, tardes: [], faltas: [], notasDias: [], creado: new Date().toISOString() });
+    await DB.perGuardar({ nombre: 'Deudor', sueldoMensual: 715, diasMes: 26, modelo: 'dias', horasJornada: 7.5, tramos: [], dias, tardes: [], faltas: [], notasDias: [], creado: new Date().toISOString() });
     const t = (await DB.perTodos())[0];
     // Le da 200 en septiembre para saldar lo viejo
     await DB.pagoGuardar({ trabajadorSid: t.sid, fecha: '2026-09-01', importe: 200, notas: 'a cuenta', creado: new Date().toISOString() });
@@ -549,7 +549,7 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
         await DB.guardar({ tipo: 'cierre', fecha: c.fecha, total: c.total, proveedor: '', creado: new Date().toISOString() });
       }
       await DB.perGuardar(Object.assign({
-        sueldoMensual: 900, diasMes: 26, horasJornada: 7.5, tramos: [],
+        sueldoMensual: 900, diasMes: 26, modelo: 'dias', horasJornada: 7.5, tramos: [],
         dias: [], tardes: [], faltas: [], notasDias: [], creado: new Date().toISOString()
       }, ficha));
     }, { ficha, cierres });
@@ -590,7 +590,7 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
   chk('retrasos', 'Lleva el total descontado por llegar tarde',
     /TOTAL DESCONTADO POR LLEGAR TARDE/i.test(txtR) && txtR.includes('18,46'));
   chk('retrasos', 'Invita a comprobar la resta (726,92 − 18,46 = 708,46)',
-    /726,92 € − 18,46 € = 708,46 €/.test(txtR), txtR.slice(-400));
+    /726,92 € − 18,46 € por llegar tarde = 708,46 €/.test(txtR), txtR.slice(-400));
   chk('retrasos', 'Las horas se escriben con coma, no con punto', !/\d\.\d+ h/.test(txtR));
 
   // --- Caso 2: VARIOS retrasos el mismo mes (prueba de que suma exacto) ---
@@ -1136,7 +1136,7 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
   chk('faltas', 'Al marcar una ausencia se guarda el motivo que escribes',
     conMotivo.falta && conMotivo.motivos.join() === 'médico', JSON.stringify(conMotivo.motivos));
   chk('faltas', 'Y la ficha enseña el motivo junto a la fecha',
-    /10\/09\/2026\s*médico/.test(conMotivo.texto), conMotivo.texto.slice(0, 500));
+    /10\/09\/2026 · médico/.test(conMotivo.texto), conMotivo.texto.slice(0, 500));
 
   const envMotivo = await leerEnvio();
   chk('faltas', 'El motivo es para ti: NO sale en el mensaje que se le envía',
@@ -1304,7 +1304,7 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
     for (const g of await DB.pagoTodos()) await DB.pagoBorrar(g.id);
     for (const r of await DB.todos()) await DB.borrar(r.id);
     const dias = []; for (let d = 1; d <= 26; d++) dias.push(`2026-07-${String(d).padStart(2, '0')}`);
-    await DB.perGuardar({ nombre: 'Subida', sueldoMensual: 900, diasMes: 26, horasJornada: 7.5, tramos: [], dias, tardes: [], faltas: [], descansos: [], notasDias: [], inicio: '2026-07-01', creado: new Date().toISOString() });
+    await DB.perGuardar({ nombre: 'Subida', sueldoMensual: 900, diasMes: 26, modelo: 'dias', horasJornada: 7.5, tramos: [], dias, tardes: [], faltas: [], descansos: [], notasDias: [], inicio: '2026-07-01', creado: new Date().toISOString() });
     const t = (await DB.perTodos())[0];
     await DB.pagoGuardar({ trabajadorSid: t.sid, fecha: '2026-07-31', importe: 900, notas: 'julio', creado: new Date().toISOString() });
   });
@@ -1393,7 +1393,7 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
     const libres = [9, 16, 22, 30];
     const dias = ['2026-08-31']; const descansos = [];
     for (let d = 1; d <= 30; d++) (libres.includes(d) ? descansos : dias).push(`2026-09-${String(d).padStart(2, '0')}`);
-    await DB.perGuardar({ nombre: 'Jefferson', sueldoMensual: 900, diasMes: 26, horasJornada: 7.5, tramos: [{ objetivo: 13500, porcentaje: 1 }], dias, tardes: [], faltas: [], descansos, notasDias: [], inicio: '2026-08-31', creado: new Date().toISOString() });
+    await DB.perGuardar({ nombre: 'Jefferson', sueldoMensual: 900, diasMes: 26, modelo: 'dias', horasJornada: 7.5, tramos: [{ objetivo: 13500, porcentaje: 1 }], dias, tardes: [], faltas: [], descansos, notasDias: [], inicio: '2026-08-31', creado: new Date().toISOString() });
     const t = (await DB.perTodos())[0];
     await DB.pagoGuardar({ trabajadorSid: t.sid, fecha: '2026-08-31', importe: 16, notas: '', creado: new Date().toISOString() });
   });
@@ -1447,7 +1447,7 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
     for (const g of await DB.pagoTodos()) await DB.pagoBorrar(g.id);
     for (const r of await DB.todos()) await DB.borrar(r.id);
     const dias = []; for (let d = 1; d <= 20; d++) dias.push(`2026-09-${String(d).padStart(2, '0')}`);
-    await DB.perGuardar({ nombre: 'Bonificado', sueldoMensual: 900, diasMes: 26, horasJornada: 7.5, tramos: [], dias, tardes: [], faltas: [], descansos: [], notasDias: [], inicio: '2026-09-01', creado: new Date().toISOString() });
+    await DB.perGuardar({ nombre: 'Bonificado', sueldoMensual: 900, diasMes: 26, modelo: 'dias', horasJornada: 7.5, tramos: [], dias, tardes: [], faltas: [], descansos: [], notasDias: [], inicio: '2026-09-01', creado: new Date().toISOString() });
   });
   let txtBono = await verMes('2026-09');
   chk('bonos', 'Sin bono: 20 días = 692,31 y ningún apartado de bono',
@@ -1506,6 +1506,96 @@ const cerca = (a, b, tol = 0.011) => typeof a === 'number' && Math.abs(a - b) < 
   const envBonoL = await leerEnvio();
   chk('bonos', 'El texto de toda su etapa lleva el bono en su mes',
     /Septiembre 2026: 20 días · fijo 692,31 € \+ comisión 0,00 € \+ bono 25,00 € = 717,31 €/.test(envBonoL) && /Bono \(buen mes\): 25,00 €/.test(envBonoL), envBonoL.slice(0, 600));
+
+  // ══════════════ 6o. EL SUELDO ES POR EL MES ENTERO ══════════════
+  // Lo pidió el dueño: el sueldo pactado es por el mes (del 1 al último día) con su
+  // día libre semanal. Por día trabajado pagaba de más en un mes de 31 días con 4
+  // libres y de menos con 5 libres.
+  console.log('\n═══ 6o. SUELDO POR MES ENTERO ═══');
+  const sembrarMes = async (ficha) => page.evaluate(async (ficha) => {
+    for (const t of await DB.perTodos()) await DB.perBorrar(t.id);
+    for (const g of await DB.pagoTodos()) await DB.pagoBorrar(g.id);
+    for (const r of await DB.todos()) await DB.borrar(r.id);
+    await DB.perGuardar(Object.assign({ sueldoMensual: 1200, diasMes: 26, horasJornada: 7.5, tramos: [], dias: [], tardes: [], faltas: [], descansos: [], notasDias: [], creado: new Date().toISOString() }, ficha));
+  }, ficha);
+  const diasDe = (mes, libres) => { const [a, m] = mes.split('-').map(Number); const n = new Date(a, m, 0).getDate(); const d = [], l = []; for (let x = 1; x <= n; x++) (libres.includes(x) ? l : d).push(`${mes}-${String(x).padStart(2, '0')}`); return { dias: d, descansos: l }; };
+  // Octubre 2026: 31 días, 4 domingos libres → 27 trabajados. Por día habría cobrado 1246,15.
+  const oct = diasDe('2026-10', [4, 11, 18, 25]);
+  await sembrarMes({ nombre: 'MesEntero', modelo: 'mes', modeloDesde: '', inicio: '2026-10-01', fin: '2026-10-31', ...oct });
+  let txtMesE = await verMes('2026-10');
+  chk('mes entero', 'Mes de 31 días con 4 libres (27 trabajados): cobra el sueldo justo, 1200,00, y no 1246,15',
+    /el mes completo \(31 días\)/.test(txtMesE) && /1200,00 € ÷ 31 × 31/.test(txtMesE) && /Finiquito: 1200,00/.test(txtMesE) && !/1246,15/.test(txtMesE), txtMesE.slice(0, 500));
+  chk('mes entero', 'Se dice que el día sale a 38,71 (1200 ÷ 31 días de octubre) y que los libres van dentro del sueldo',
+    /El día sale a 38,71 € \(1200,00 € ÷ 31 días de octubre\)/.test(txtMesE) && /Los días libres van dentro del sueldo/.test(txtMesE), txtMesE.slice(0, 600));
+  // Junio 2026: 30 días con 5 lunes libres → 25 trabajados. Por día habría cobrado 1153,85.
+  const jun = diasDe('2026-06', [1, 8, 15, 22, 29]);
+  await sembrarMes({ nombre: 'CincoLibres', modelo: 'mes', modeloDesde: '', inicio: '2026-06-01', fin: '2026-06-30', ...jun });
+  txtMesE = await verMes('2026-06');
+  chk('mes entero', 'Mes de 30 días con 5 libres (25 trabajados): también el sueldo justo, 1200,00, y no 1153,85',
+    /1200,00 € ÷ 30 × 30/.test(txtMesE) && /Finiquito: 1200,00/.test(txtMesE) && !/1153,85/.test(txtMesE), txtMesE.slice(0, 400));
+  // Empieza el 10: del 10 al 31 son 22 días naturales → 1200 ÷ 31 × 22 = 851,61
+  const parcial = diasDe('2026-10', [4, 11, 18, 25]);
+  await sembrarMes({ nombre: 'Parcial', modelo: 'mes', modeloDesde: '', inicio: '2026-10-10', fin: '2026-10-31', dias: parcial.dias.filter(d => d >= '2026-10-10'), descansos: parcial.descansos.filter(d => d >= '2026-10-10') });
+  txtMesE = await verMes('2026-10');
+  chk('mes entero', 'Empieza el 10: del 10 al 31 son 22 días naturales (con sus libres) → 1200 ÷ 31 × 22 = 851,61',
+    /del 10 al 31: 22 días naturales de 31/.test(txtMesE) && /1200,00 € ÷ 31 × 22/.test(txtMesE) && /Finiquito: 851,61/.test(txtMesE), txtMesE.slice(0, 500));
+  // Una falta y un retraso de 2 h en un mes completo
+  const conFalta = diasDe('2026-10', [4, 11, 18, 25]);
+  await sembrarMes({ nombre: 'FaltaYTarde', modelo: 'mes', modeloDesde: '', inicio: '2026-10-01', fin: '2026-10-31',
+    dias: conFalta.dias.filter(d => d !== '2026-10-14' && d !== '2026-10-20'), descansos: conFalta.descansos,
+    faltas: ['2026-10-14'], tardes: [{ fecha: '2026-10-20', horas: 2 }] });
+  txtMesE = await verMes('2026-10');
+  chk('mes entero', 'Una falta descuenta un día: 38,71 (1200 ÷ 31)', /DESCONTADO POR NO VENIR.*−38,71 €/.test(txtMesE), txtMesE.slice(0, 900));
+  chk('mes entero', 'Un retraso de 2 h descuenta 2 ÷ 7,5 × 38,71 = 10,32', /2 h ÷ 7,5 h × 38,71 € = 10,32 €/.test(txtMesE), txtMesE.slice(0, 1200));
+  chk('mes entero', 'Fijo del mes: 1200 − 38,71 − 10,32 = 1150,97', /FIJO DEL MES.*1200,00 € − 38,71 € − 10,32 € = 1150,97 €/.test(txtMesE) && /Finiquito: 1150,97/.test(txtMesE), txtMesE.slice(0, 900));
+  const envMesE = await leerEnvio();
+  chk('mes entero', 'El mensaje explica el sueldo por mes entero con la cuenta que cuadra a mano',
+    /Sueldo: 1200,00 € por el mes entero/.test(envMesE) && /Octubre 2026, el mes completo \(31 días\): 1200,00 € ÷ 31 × 31 = 1200,00 €/.test(envMesE), envMesE.slice(0, 500));
+  chk('mes entero', 'Y el día que no vino con su descuento, y la resta final',
+    /Descontado por los días que no vino \(14\/10\/2026\): 1 × 38,71 € = −38,71 €/.test(envMesE) && /Fijo: 1200,00 € − 38,71 € por no venir − 10,32 € por llegar tarde = 1150,97 €/.test(envMesE), envMesE.slice(0, 900));
+  chk('mes entero', 'El mensaje sigue sin la jornada ni el nombre del negocio, y sin la frase de que los días no trabajados no se pagan',
+    !/jornada|WanderContable|no se pagan/i.test(envMesE), envMesE.slice(0, 900));
+  // El mes en curso: se cuenta hasta hoy
+  const hoyD = new Date();
+  const mesHoy = `${hoyD.getFullYear()}-${String(hoyD.getMonth() + 1).padStart(2, '0')}`;
+  const diasMesHoy = new Date(hoyD.getFullYear(), hoyD.getMonth() + 1, 0).getDate();
+  const esperadoHoy = Math.round(1200 * hoyD.getDate() / diasMesHoy * 100) / 100;
+  await sembrarMes({ nombre: 'EnCurso', modelo: 'mes', modeloDesde: '', inicio: `${mesHoy}-01` });
+  txtMesE = await verMes(mesHoy);
+  chk('mes entero', `El mes en curso se cuenta hasta hoy: 1200 ÷ ${diasMesHoy} × ${hoyD.getDate()} = ${esperadoHoy}`,
+    txtMesE.includes(`1200,00 € ÷ ${diasMesHoy} × ${hoyD.getDate()}`) && txtMesE.includes((esperadoHoy.toFixed(2).replace('.', ',') + ' €')), txtMesE.slice(0, 500));
+  chk('mes entero', 'Sin ningún día marcado avisa: se le cuenta entero, y si ya no trabaja hay que ponerle la baja',
+    /no tiene ningún día marcado y se le cuenta entero/.test(txtMesE), txtMesE.slice(0, 600));
+  // Sin el campo guardado (los trabajadores de antes): por día hasta octubre y por mes entero desde noviembre
+  await sembrarMes({ nombre: 'SinCampo', inicio: '2026-10-01', ...oct });
+  txtMesE = await verMes('2026-10');
+  chk('mes entero', 'Un trabajador de antes sigue por día trabajado en los meses ya pagados (octubre: 27 × 46,15 = 1246,15)',
+    /1200,00 € ÷ 26 × 27/.test(txtMesE) && /1246,15/.test(txtMesE), txtMesE.slice(0, 400));
+  chk('mes entero', 'Y la ficha enseña cuánto fue de más con la regla antigua: octubre 1246,15 → 1200,00, +46,15',
+    /Lo pagado con la regla antigua \(por día\) frente al mes entero: 46,15 € de más/.test(txtMesE) && /Octubre 2026.*1246,15 € → 1200,00 € \+46,15 €/.test(txtMesE), txtMesE.slice(-1200));
+  txtMesE = await verMes(mesHoy);
+  chk('mes entero', 'Pero desde noviembre ya va por mes entero', /Sueldo por el mes entero/.test(txtMesE), txtMesE.slice(0, 400));
+  // La ficha: el desplegable y el "desde"
+  await page.click('#per-lista .per-editar');
+  await page.waitForTimeout(400);
+  const formMesE = await page.evaluate(() => ({
+    modelo: document.querySelector('#pe-modelo').value,
+    desde: document.querySelector('#pe-modelo-desde').value,
+    diasOculto: document.querySelector('#pe-modelo-dias-wrap').classList.contains('hidden')
+  }));
+  chk('mes entero', 'La ficha de uno de antes sale "por mes entero desde noviembre de 2026" y sin el campo de días', formMesE.modelo === 'mes' && formMesE.desde === '2026-11' && formMesE.diasOculto, JSON.stringify(formMesE));
+  await page.selectOption('#pe-modelo', 'dias');
+  await page.waitForTimeout(200);
+  chk('mes entero', 'Al elegir "por día trabajado" aparece el campo de días pactados',
+    await page.evaluate(() => !document.querySelector('#pe-modelo-dias-wrap').classList.contains('hidden')));
+  await page.selectOption('#pe-modelo', 'mes');
+  await page.fill('#pe-modelo-desde', '');
+  await page.click('#per-guardar');
+  await page.waitForTimeout(900);
+  const guardadoM = await page.evaluate(async () => { const t = (await DB.perTodos())[0]; return { modelo: t.modelo, desde: t.modeloDesde }; });
+  txtMesE = await verMes('2026-10');
+  chk('mes entero', 'Con "desde" en blanco se aplica a todo su historial: octubre pasa a 1200,00 y desaparece la comparación',
+    guardadoM.modelo === 'mes' && guardadoM.desde === '' && /Finiquito: 1200,00|Le debes/.test(txtMesE) && /1200,00 € ÷ 31 × 31/.test(txtMesE) && !/regla antigua/.test(txtMesE), JSON.stringify(guardadoM) + ' ' + txtMesE.slice(0, 300));
 
   // ══════════════ 7. LECTURA DE FACTURAS (OCR) ══════════════
   console.log('\n═══ 7. DETECCIÓN AUTOMÁTICA DE FACTURAS ═══');
@@ -1708,7 +1798,8 @@ TARJETA 450,00`)]);
     await DB.guardar({ tipo: 'factura', fecha: `${mes}-02`, proveedor: 'Endesa', total: 200, categoria: 'Luz', creado: new Date().toISOString() });
     await DB.guardar({ tipo: 'factura', fecha: `${mes}-02`, proveedor: 'Alquiler casa', total: 100, categoria: 'Alquiler', personal: true, creado: new Date().toISOString() });
     // Empleado: 2 días a 900/26 = 69,23 devengado
-    await DB.perGuardar({ nombre: 'Juan', sueldoMensual: 900, diasMes: 26, horasJornada: 7.5, tramos: [], dias: [`${mes}-01`, `${mes}-02`], tardes: [], faltas: [], notasDias: [], creado: new Date().toISOString() });
+    // Por día trabajado a propósito: así las cifras del cuadro no dependen del día de hoy
+    await DB.perGuardar({ nombre: 'Juan', sueldoMensual: 900, diasMes: 26, modelo: 'dias', horasJornada: 7.5, tramos: [], dias: [`${mes}-01`, `${mes}-02`], tardes: [], faltas: [], notasDias: [], creado: new Date().toISOString() });
   });
   await page.click('.tab[data-tab="informe"]');
   await page.waitForTimeout(900);

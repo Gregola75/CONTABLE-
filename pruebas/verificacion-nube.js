@@ -11,7 +11,7 @@ const chk = (n, c, d = '') => {
 };
 
 const URL = process.env.URL_PRUEBAS_NUBE || 'http://localhost:8903/index.html';
-const CHROME = process.env.CHROME_PATH || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const CHROME = process.env.CHROME_PATH || '/opt/pw-browsers/chromium';
 
 (async () => {
   const browser = await chromium.launch({ executablePath: CHROME });

@@ -114,9 +114,25 @@ restaurar). `window.APP` expone `inicio`, `recientes` y `miniaturas` para la ver
   sin desglose de IVA y deuda total con el equipo.
 
 **Personal** (pestaña privada, tampoco sale en el informe de la gestoría)
-- Sueldo mensual pactado con ~1 día libre a la semana → **precio del día =
-  sueldo ÷ días de trabajo al mes** (26 por defecto, configurable por persona).
-  Se paga por día trabajado; el día que no viene, no se paga.
+- **El sueldo pactado es por el MES ENTERO** (`modelo: 'mes'`, el de todos desde
+  `MES_SUELDO_POR_MES = '2026-11'`): del 1 al último día, con su día libre semanal pagado.
+  Mes completo → sueldo completo, tenga 28, 30 o 31 días y caigan 4 o 5 libres (los libres
+  son **semanales**, no mensuales). Alta o baja a mitad de mes → `sueldo ÷ días del mes ×
+  días naturales del periodo` (los libres cuentan); en el mes en curso, hasta hoy. **Una
+  falta descuenta un día** (`sueldo ÷ días del mes`) y un retraso la parte proporcional
+  de ese mismo día. Los días marcados como trabajados ya no deciden el fijo: sirven para
+  la base de ventas de su objetivo y como constancia. Un mes sin ningún día marcado se
+  cuenta entero y la ficha avisa ("si ya no trabaja, ponle la baja").
+- **La regla antigua ("por día trabajado": `sueldo ÷ 26 × días marcados`) pagaba mal**: en
+  un mes de 31 días con 4 libres son 27 días y cobraba 934,62 por un sueldo de 900; en
+  febrero o con 5 libres, de menos. Lo detectó el dueño ("creo que he estado pagando de
+  más"). Se conserva **solo** para los meses anteriores a `modeloDesde` (los ya pagados no
+  se reabren) y como opción `modelo: 'dias'` en la ficha para quien cobre de verdad por día
+  (un refuerzo). `modeloDe(t, mes)` decide la regla de cada mes; un trabajador sin campo
+  `modelo` va por mes entero desde 2026-11 y por día antes. La ficha del activo enseña
+  **"📐 Lo pagado con la regla antigua frente al mes entero"** (`comparativaReglaAntiguaHTML`)
+  con la diferencia mes a mes, sin cambiar nada; para recalcular el historial se deja en
+  blanco "Por mes entero desde" en su ficha.
 - Estados de cada día en el calendario: trabajó · 🛌 descansó · ⏰ llegó tarde (pregunta
   cuántas horas) · 🚫 faltó (pregunta el motivo) · sin marcar. **Un toque abre un menú**
   (`abrirMenuDia`, en el modal de la app) y se elige el estado directamente: nada de dar
@@ -136,7 +152,8 @@ restaurar). `window.APP` expone `inicio`, `recientes` y `miniaturas` para la ver
   como descanso: a un empleado le salían 3 descansos cuando solo había descansado 2.
   Un día sin marcar **no cuenta como nada**.
 - **Retrasos**: descuentan del fijo la parte proporcional
-  (`horas de retraso ÷ horas de jornada × precio del día`). Jornada por
+  (`horas de retraso ÷ horas de jornada × precio del día`; el precio del día es
+  `sueldo ÷ días del mes` por mes entero, o `sueldo ÷ 26` por día trabajado). Jornada por
   defecto 7,5 h (el local abre de 20:00 a 3:30). El descuento se calcula con el
   **precio del día ya redondeado** y **día a día**, no sobre la suma del mes, para
   que el desglose que se le enseña al trabajador cuadre al céntimo si lo comprueba
@@ -175,8 +192,11 @@ restaurar). `window.APP` expone `inicio`, `recientes` y `miniaturas` para la ver
   (`venta del día ÷ horas de jornada × horas trabajadas`). Sus días libres o
   de falta no cuentan nada.
 - **Los días que no vino** se enseñan con su fecha, no solo el número, en la ficha
-  (activo y liquidado) y en los dos textos que se le envían. Una falta no descuenta
-  dinero: simplemente ese día no está entre los trabajados.
+  (activo y liquidado) y en los dos textos que se le envían. Por mes entero, cada falta
+  descuenta un día (`sueldo ÷ días del mes`) y se escribe como una resta concreta ("no vino
+  el 14/10: −38,71 €"), nunca como la frase general de que los días no trabajados no se
+  pagan. Por día trabajado (regla antigua) una falta no descuenta: ese día simplemente no
+  está entre los trabajados.
 - **Motivo de cada ausencia**: al pasar un día a "faltó" se pregunta por qué (opcional).
   Se guarda como nota de ese día con `motivoFalta: true` y sale junto a la fecha en la
   ficha ("sin motivo apuntado" si se dejó en blanco). Si el día deja de ser ausencia, el
@@ -288,7 +308,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 337 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 355 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.
 
