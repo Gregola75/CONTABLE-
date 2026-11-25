@@ -1596,18 +1596,20 @@
     for (const { t } of equipo.filas) {
       const deMas = semanasConDescansoDeMas(t, mes);
       if (deMas.length) {
-        const rangos = deMas.map(s => `${rangoSemanaTexto(s)} (${s.libres.length} libres: días ${s.libres.map(f => +f.slice(8)).join(' y ')})`).join('; ');
+        const diasDe = (l) => l.map(f => +f.slice(8)).join(' y ');
+        const rangos = deMas.map(s => `${rangoSemanaTexto(s)} (${s.cerrados.length
+          ? `el local cerró el ${diasDe(s.cerrados)}, que es su libre, y además descansó el ${diasDe(s.libres)}`
+          : `${s.libres.length} libres: días ${diasDe(s.libres)}`})`).join('; ');
         // Si todo lo que sobra compensa una semana que trabajó entera, no hay día
         // de más: se dice, en vez de mandarle marcar una falta que no lo es.
         const hayDeMas = deMas.some(s => s.deMas.length);
-        const noPagados = deMas.flatMap(s => s.deMas);
+        const noPagados = deMas.flatMap(s => s.deMas).filter(f => f.startsWith(mes));
+        const enOtroMes = [...new Set(deMas.flatMap(s => s.deMas).filter(f => !f.startsWith(mes)).map(nombreMes))];
         const consejo = !hayDeMas
-          ? (mes >= MES_UN_LIBRE_POR_SEMANA
-            ? 'El segundo compensa la semana que trabajó entera y se le paga.'
-            : 'Puede ser el libre que no cogió la semana que trabajó entera: si fue así, no hay nada que cambiar.')
-          : (mes >= MES_UN_LIBRE_POR_SEMANA
-            ? `Se paga 1 libre a la semana: ${noPagados.length === 1 ? `el día ${+noPagados[0].slice(8)} no se le paga` : `los días ${noPagados.map(f => +f.slice(8)).join(' y ')} no se le pagan`}. Si ese día el local no abrió, márcalo como «local cerrado» y se le paga.`
-            : 'Le toca 1 a la semana y se le pagan todos: si alguno no era su libre, márcalo como «faltó».');
+          ? 'El segundo compensa la semana que trabajó entera y se le paga.'
+          : `Se paga 1 libre a la semana: ${noPagados.length
+            ? `${noPagados.length === 1 ? `el día ${+noPagados[0].slice(8)} no se le paga` : `los días ${noPagados.map(f => +f.slice(8)).join(' y ')} no se le pagan`}.`
+            : `el que sobra cae en ${enOtroMes.join(' y ')} y se descuenta en ese mes.`} Si en realidad trabajó, márcalo como trabajado.`;
         alertas.push(`<div class="alerta"><span>🛌 <strong>${escapar(t.nombre)}</strong> tiene <strong>más de un día libre</strong> ${deMas.length === 1 ? 'la semana' : 'las semanas'} ${rangos}. ${consejo}</span></div>`);
       }
     }
@@ -2046,7 +2048,9 @@
      domingo) no se paga, salvo que compense una semana de al lado que trabajó
      entera. Octubre de 2026 se pagó con todos los descansos y no se reescribe.
      Los días que el local no abre (Nochebuena, Navidad…) se marcan como
-     «local cerrado»: se pagan y NO cuentan como su libre de la semana. */
+     «local cerrado»: se pagan y SON su libre de esa semana (decidido por el
+     dueño: "los días de cierre son su libre, no puede volver a librar"), así
+     que un descanso además del cierre no se paga. Ver semanasConDescansoDeMas. */
   const MES_UN_LIBRE_POR_SEMANA = '2026-11';
   function diasDelMesNatural(mes) {
     const [a, m] = mes.split('-').map(Number);
@@ -2091,8 +2095,12 @@
     // un día que se olvide marcar es un día sin marcar, no un descanso.
     const descansos = (t.descansos || []).filter(d => delMes(d) && dentroDelPeriodo(d));
     const descanso = descansos.length;
-    // Días que el local no abrió (Nochebuena, Navidad…): se pagan y no son su libre.
-    const cerrados = (t.cerrados || []).filter(d => delMes(d) && dentroDelPeriodo(d));
+    // Días que el local no abrió (Nochebuena, Navidad…): se pagan, y son su libre de esa semana.
+    // Si un día llegara repetido en dos listas (otro móvil con una versión vieja),
+    // manda el mismo orden que el calendario: trabajó > descansó > local cerrado.
+    // En los meses de la cuenta antigua (antes de octubre de 2026) el cierre no cuenta.
+    const cerrados = mes < MES_SUELDO_POR_MES ? [] : (t.cerrados || [])
+      .filter(d => delMes(d) && dentroDelPeriodo(d) && !dias.includes(d) && !descansos.includes(d));
     const fueraDePeriodo = [...new Set([...(t.dias || []), ...fechasTardes(t), ...(t.faltas || []), ...(t.descansos || []), ...(t.cerrados || [])])]
       .filter(d => delMes(d) && !dentroDelPeriodo(d)).length;
     // Sueldo POR MES (acordado con el dueño, desde MES_SUELDO_POR_MES): el día
@@ -2221,8 +2229,8 @@
       }
     }
     const pie = soloLectura
-      ? 'En claro los días que trabajó, 🛌 los de descanso (tachado: un segundo libre de la semana, que no se paga), 🔒 los que el local estuvo cerrado, ⏰ los que llegó tarde y en rojo los que faltó. Su cuenta ya está liquidada: no se pueden cambiar.'
-      : 'Toca un día y elige: trabajó · 🛌 descansó · 🔒 local cerrado · ⏰ llegó tarde · 🚫 faltó · sin marcar. Un libre tachado es el segundo de esa semana: no se paga. En negro: aún no trabajaba.';
+      ? 'En claro los días que trabajó, 🛌 los de descanso (tachado: un libre de más esa semana, que no se paga), 🔒 los que el local estuvo cerrado, ⏰ los que llegó tarde y en rojo los que faltó. Su cuenta ya está liquidada: no se pueden cambiar.'
+      : 'Toca un día y elige: trabajó · 🛌 descansó · 🔒 local cerrado · ⏰ llegó tarde · 🚫 faltó · sin marcar. Un libre tachado no se paga: es el segundo de esa semana, o esa semana el libre ya fue el cierre del local. En negro: aún no trabajaba.';
     return `<div class="cal${soloLectura ? ' cal-lectura' : ''}">${cab}${celdas}</div>
       <p class="hint" style="margin:0 0 8px">${pie}</p>`;
   }
@@ -2300,7 +2308,7 @@
     const opciones = [
       ['trabajo', '✅ Trabajó'],
       ['descanso', '🛌 Descansó (su libre de la semana)'],
-      ['cerrado', '🔒 Local cerrado (se paga y no cuenta como su libre)'],
+      ['cerrado', '🔒 Local cerrado (se paga; es su libre de esa semana)'],
       ['tarde', actual === 'tarde' ? `⏰ Llegó tarde · cambiar las horas (ahora ${numH(horasActuales)} h)` : '⏰ Llegó tarde'],
       ['falta', actual === 'falta' ? `🚫 Faltó · cambiar el motivo${motivoActual ? ` (${escapar(motivoActual)})` : ''}` : '🚫 Faltó'],
       ['nada', '⬜ Sin marcar']
@@ -2358,7 +2366,7 @@
     if (estado === 'cerrado') {
       const otros = (await DB.perTodos()).filter(x => x.sid !== sid && !x.esRRPP && !x.liquidado &&
         (!x.inicio || f >= x.inicio) && (!x.fin || f <= x.fin) && ['nada', 'descanso'].includes(estadoDelDia(x, f)));
-      if (otros.length && confirm(`El ${fmtFecha(f)} queda como «local cerrado» para ${t.nombre}: se le paga y no cuenta como su libre.\n\n¿Marcarlo igual para el resto del equipo (${otros.map(x => x.nombre).join(', ')})?`)) {
+      if (otros.length && confirm(`El ${fmtFecha(f)} queda como «local cerrado» para ${t.nombre}: se le paga y es su libre de esa semana.\n\n¿Marcarlo igual para el resto del equipo (${otros.map(x => x.nombre).join(', ')})?`)) {
         for (const x of otros) await DB.perGuardar(ponerEstadoDia(x, f, 'cerrado'));
         toast(`🔒 ${fmtFecha(f)} marcado como local cerrado para todo el equipo.`);
       }
@@ -2429,26 +2437,37 @@
     return semanas;
   }
 
-  /* Semanas (de lunes a domingo) con MÁS de un día de descanso marcado. A cada
-     trabajador le toca 1 día libre a la semana, no un número fijo al mes (hay
-     meses con 5 semanas y meses con 4). Con el sueldo por mes se pagan todos los
-     descansos marcados, así que un segundo descanso en la misma semana se está
-     pagando de más. No cambia la cuenta: es un aviso solo para el dueño, que
-     decide si el otro día era en realidad una falta. Entran las semanas que
-     tocan el mes (también la que empieza a finales del mes anterior), siempre
-     que al menos uno de sus descansos caiga en ese mes. */
+  /* UN LIBRE PAGADO POR SEMANA (decidido por el dueño). Semanas de lunes a
+     domingo, desde la del lunes 2 de noviembre de 2026 (las anteriores se pagaron
+     con todos los descansos y no se reescriben; la semana es del mes de su lunes,
+     así que el domingo 1 de noviembre aún va con la cuenta de octubre).
+     - Sin cierres, el primer descanso de la semana es su libre y se paga; los
+       demás descansos de esa semana no.
+     - Si esa semana el local cerró algún día («local cerrado», p. ej. 24 y 25 de
+       diciembre), el cierre ES su libre: los días de cierre se pagan y ningún
+       descanso de esa semana se paga ("no puede volver a librar").
+     - Un libre que compensa una semana de al lado trabajada entera (los 7 días)
+       sí se paga. Cada semana entera compensa UN solo libre: primero se mira la
+       de antes (si no la gastó ya la semana de dos antes) y luego la de después.
+     Devuelve las semanas que tocan el mes y tienen algo que decir, con sus
+     `libres`, `cerrados`, `compensan` y `deMas` (los descansos que NO se pagan).
+     No se aplica a quien no tiene sueldo fijo ese mes ni a una cuenta ya
+     liquidada antes de existir la regla (su foto se cerró con la cuenta de antes). */
+  const PRIMER_LUNES_UN_LIBRE = '2026-11-02';
+  const DIA_REGLA_UN_LIBRE = '2026-11-25';
   function semanasConDescansoDeMas(t, mes) {
-    if (mes < MES_SUELDO_POR_MES) return [];   // antes los descansos no se pagaban
-    // Sin sueldo fijo ese mes, un descanso de más no cuesta nada: no hay qué avisar
+    if (mes < MES_UN_LIBRE_POR_SEMANA) return [];
     if (!(trabajadorEn(t, mes).sueldoMensual > 0)) return [];
+    if (t.cuadreLiquidacion && (t.cuadreLiquidacion.fecha || '') < DIA_REGLA_UN_LIBRE) return [];
     const enPeriodo = (d) => (!t.inicio || d >= t.inicio) && (!t.fin || d <= t.fin);
-    // Solo cuentan los descansos que de verdad se pagan: los de octubre de 2026 en
-    // adelante. En la semana del 28 de septiembre al 4 de octubre, un descanso de
-    // septiembre no se pagó (cuenta antigua) y no puede contar como "de más".
-    const primerDiaPagado = MES_SUELDO_POR_MES + '-01';
-    const descansos = new Set((t.descansos || []).filter(d => enPeriodo(d) && d >= primerDiaPagado));
-    if (descansos.size < 2) return [];
-    const trabajados = new Set([...(t.dias || []), ...fechasTardes(t)]);
+    const yaTrabajados = new Set([...(t.dias || []), ...fechasTardes(t)]);
+    const descansos = new Set((t.descansos || []).filter(d => enPeriodo(d) && d >= PRIMER_LUNES_UN_LIBRE && !yaTrabajados.has(d)));
+    if (!descansos.size) return [];
+    // Solo cuentan como trabajados los días de su etapa (los de fuera no se pagan y
+    // no pueden compensar nada), y un día repetido en dos listas vale por el mismo
+    // orden que el calendario: trabajó > descansó > local cerrado.
+    const trabajados = new Set([...(t.dias || []), ...fechasTardes(t)].filter(enPeriodo));
+    const cerrados = new Set((t.cerrados || []).filter(d => enPeriodo(d) && d >= PRIMER_LUNES_UN_LIBRE && !trabajados.has(d) && !descansos.has(d)));
     const [a, m] = mes.split('-').map(Number);
     const nDias = new Date(a, m, 0).getDate();
     const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -2457,23 +2476,39 @@
       for (let i = 0; i < 7; i++) s.push(iso(new Date(lunes.getFullYear(), lunes.getMonth(), lunes.getDate() + desp + i)));
       return s;
     };
+    const entera = (s) => s.every(f => trabajados.has(f));
+    const hechas = new Map();
+    const repartoDe = (lunes) => {
+      const siete = semanaDesde(lunes, 0);
+      if (hechas.has(siete[0])) return hechas.get(siete[0]);
+      const libres = siete.filter(f => descansos.has(f));
+      const cierre = siete.filter(f => cerrados.has(f));
+      // Con algún día de cierre, el cierre es su libre: sobran todos los descansos.
+      // Sin cierre, el primer descanso es el suyo y sobran los demás.
+      const sobran = siete[0] < PRIMER_LUNES_UN_LIBRE ? [] : (cierre.length ? libres : libres.slice(1));
+      const compensan = [];
+      if (sobran.length) {
+        const antes = semanaDesde(lunes, -7);
+        if (entera(antes)) {
+          const dosAntes = repartoDe(new Date(lunes.getFullYear(), lunes.getMonth(), lunes.getDate() - 14));
+          if (!dosAntes.compensan.some(x => x.desde === antes[0])) compensan.push({ desde: antes[0], hasta: antes[6] });
+        }
+        const despues = semanaDesde(lunes, 7);
+        if (compensan.length < sobran.length && entera(despues)) compensan.push({ desde: despues[0], hasta: despues[6] });
+      }
+      const r = { desde: siete[0], hasta: siete[6], libres, cerrados: cierre, compensan, deMas: sobran.slice(compensan.length) };
+      hechas.set(siete[0], r);
+      return r;
+    };
     const semanas = [];
     // El lunes de la semana en la que cae el día 1 (puede ser del mes anterior)
     const lunes = new Date(a, m - 1, 1);
     lunes.setDate(lunes.getDate() - ((lunes.getDay() + 6) % 7));
     for (; lunes <= new Date(a, m - 1, nDias); lunes.setDate(lunes.getDate() + 7)) {
-      const siete = semanaDesde(lunes, 0);
-      const libres = siete.filter(f => descansos.has(f));
-      if (!(libres.length > 1 && libres.some(f => f.startsWith(mes)))) continue;
-      // Si la semana de antes o la de después la trabajó entera (no libró), un libre
-      // de esta puede ser el que no cogió entonces: ese no es un día de más.
-      const compensan = [-7, 7].map(desp => semanaDesde(lunes, desp))
-        .filter(s => s.every(f => trabajados.has(f)))
-        .map(s => ({ desde: s[0], hasta: s[6] }));
-      // El primer libre de la semana es el suyo; los siguientes, quitando los que
-      // compensan una semana sin librar, son los que se pagan de más.
-      const deMas = libres.slice(1).slice(compensan.length);
-      semanas.push({ desde: siete[0], hasta: siete[6], libres, compensan, deMas });
+      const r = repartoDe(new Date(lunes.getFullYear(), lunes.getMonth(), lunes.getDate()));
+      if (r.desde < PRIMER_LUNES_UN_LIBRE) continue;
+      const hayDeMas = r.cerrados.length ? r.libres.length >= 1 : r.libres.length > 1;
+      if (hayDeMas && r.libres.some(f => f.startsWith(mes))) semanas.push(r);
     }
     return semanas;
   }
@@ -2486,44 +2521,49 @@
       : `del ${+s.desde.slice(8)} al ${+s.hasta.slice(8)}`;
   }
 
-  /* El aviso de la ficha: qué semanas tienen más de un libre, con sus días.
-     Desde MES_UN_LIBRE_POR_SEMANA el segundo libre de una semana NO se paga: se
-     dice cuál es y cuánto supone, y cómo corregirlo si ese día el local no abrió
-     (se marca «local cerrado») o si en realidad trabajó. En octubre de 2026, que
-     se pagó con todos los descansos, solo se avisa. Cada día de más se valora
-     UNA vez y en el mes en que cae (una semana a caballo de dos meses sale en las
-     dos fichas, pero cada una valora solo sus días, al precio de su mes).
-     soloLectura: en la ficha de un liquidado no se dice cómo cambiarlo. */
+  /* Cómo se cuenta una de esas semanas, con palabras:
+     "la semana del 9 al 15 tiene 2 (días 10 y 13)" ·
+     "la semana del 21 al 27 el local cerró los días 24 y 25, que son su libre, y
+      además tiene un descanso (día 21)" */
+  function semanaLibresTexto(s) {
+    const dias = (l) => l.map(f => +f.slice(8)).join(' y ');
+    const que = s.cerrados.length
+      ? `la semana ${rangoSemanaTexto(s)} el local cerró ${s.cerrados.length === 1 ? 'el día' : 'los días'} ${dias(s.cerrados)}, que ${s.cerrados.length === 1 ? 'es' : 'son'} su libre, y además tiene ${s.libres.length === 1 ? 'un descanso' : `${s.libres.length} descansos`} (${s.libres.length === 1 ? 'día' : 'días'} ${dias(s.libres)})`
+      : `la semana ${rangoSemanaTexto(s)} tiene ${s.libres.length} (días ${dias(s.libres)})`;
+    const comp = s.compensan.length
+      ? `, aunque la semana ${s.compensan.map(rangoSemanaTexto).join(' y la ')} la trabajó entera: ${s.compensan.length === 1 ? 'ese libre compensa' : 'esos libres compensan'} el que no cogió entonces y se le paga`
+      : '';
+    return que + comp;
+  }
+
+  /* El aviso de la ficha: qué semanas tienen más de un libre (o un libre además
+     del cierre del local), cuál no se paga y cuánto supone. Cada día se cuenta
+     UNA vez y en el mes en que cae, al precio del día de ese mes; una semana a
+     caballo de dos meses sale en las dos fichas y la que no tiene el día dice en
+     qué mes se descuenta. soloLectura: en la ficha de un liquidado no se dice
+     cómo cambiarlo. */
   function descansoDeMasHTML(t, c, soloLectura = false) {
     if (!(c.precioDia > 0)) return '';
     const semanas = semanasConDescansoDeMas(t, c.mes);
     if (!semanas.length) return '';
-    const unoPorSemana = c.mes >= MES_UN_LIBRE_POR_SEMANA;
-    const filas = semanas.map(s => `la semana ${rangoSemanaTexto(s)} tiene ${s.libres.length} (días ${s.libres.map(f => +f.slice(8)).join(' y ')})${s.compensan.length ? `, aunque la semana ${s.compensan.map(rangoSemanaTexto).join(' y la ')} la trabajó entera: ${unoPorSemana ? 'ese libre compensa el que no cogió entonces y se le paga' : 'puede ser el libre que no cogió entonces'}` : ''}`).join('; ');
     const deMas = semanas.flatMap(s => s.deMas);
     const aqui = deMas.filter(f => f.startsWith(c.mes));
     const fuera = deMas.filter(f => !f.startsWith(c.mes));
-    const importeDe = (n) => INFORME.eur(Math.round(c.precioDia * n * 100) / 100);
-    const enOtroMes = fuera.length
-      ? ` ${aqui.length ? 'Otro' : 'El'} día de más cae en ${[...new Set(fuera.map(nombreMes))].join(' y ')}: ${unoPorSemana ? 'se descuenta' : 'su importe sale'} en la ficha de ese mes.`
-      : '';
     let cierre;
     if (!deMas.length) {
-      cierre = unoPorSemana ? 'No hay ningún libre sin pagar.' : 'Si fue así, no hay ningún día pagado de más y no hace falta cambiar nada.';
-    } else if (unoPorSemana) {
-      const cuales = aqui.length
-        ? `${aqui.length === 1 ? `El día ${+aqui[0].slice(8)} no se le paga` : `Los días ${aqui.map(f => +f.slice(8)).join(' y ')} no se le pagan`}: ${importeDe(aqui.length)} menos.`
-        : '';
-      const comoCambiarlo = soloLectura ? '' : ' Si ese día el local no abrió, márcalo como «🔒 local cerrado» y se le paga; si en realidad trabajó, márcalo como trabajado.';
-      cierre = `${cuales}${enOtroMes}${comoCambiarlo}`.trim();
+      cierre = 'No hay ningún libre sin pagar.';
     } else {
-      const importe = aqui.length
-        ? `: ${aqui.length === 1 ? 'ese día de más son' : `esos ${aqui.length} días de más son`} ${importeDe(aqui.length)}`
+      const cuales = aqui.length
+        ? `${aqui.length === 1 ? `El día ${+aqui[0].slice(8)} no se le paga` : `Los días ${aqui.map(f => +f.slice(8)).join(' y ')} no se le pagan`}: ${INFORME.eur(Math.round(c.precioDia * aqui.length * 100) / 100)} menos.`
         : '';
-      cierre = `Con el sueldo por mes se le pagan todos los descansos marcados${importe}.${enOtroMes}${soloLectura ? '' : ' Si el otro día no era su libre, márcalo como «🚫 faltó» y no se le paga.'}`;
+      const enOtroMes = fuera.length
+        ? ` ${aqui.length ? 'Otro' : 'El'} día de más cae en ${[...new Set(fuera.map(nombreMes))].join(' y ')}: se descuenta en la ficha de ese mes.`
+        : '';
+      const comoCambiarlo = soloLectura ? '' : ' Si en realidad trabajó ese día, márcalo como trabajado.';
+      cierre = `${cuales}${enOtroMes}${comoCambiarlo}`.trim();
     }
     return `
-            <p class="hint txt-bad" style="margin:6px 0 0">🛌 ${unoPorSemana ? 'Se paga' : 'Le toca'} <strong>1 día libre a la semana</strong> y ${filas}. ${cierre}</p>`;
+            <p class="hint txt-bad" style="margin:6px 0 0">🛌 Se paga <strong>1 día libre a la semana</strong> y ${semanas.map(semanaLibresTexto).join('; ')}. ${cierre}</p>`;
   }
 
   /* Antes de pasar al sueldo por mes se pagaba "sueldo ÷ días pactados × días
@@ -3079,7 +3119,8 @@
      "× 12 días (10 trabajados + 2 de descanso)" de la línea del fijo. Sin la
      frase de que los días no trabajados no se pagan (lo pidió el dueño). */
   function descansoQueCuenta(c) {
-    return c.porMes && c.descansosPagados < c.descanso ? ` (cuentan ${c.descansosPagados}: uno por semana)` : '';
+    if (!(c.porMes && c.descansosPagados < c.descanso)) return '';
+    return ` (cuentan ${c.descansosPagados}: uno por semana${(c.cerrados || []).length ? '; la semana que el local cierra, el libre es el cierre' : ''})`;
   }
 
   /* Las horas, escritas como en español: 2,5 h y no 2.5 h */
@@ -3119,7 +3160,7 @@
       const n = (m.calc.dias || []).length;
       const p = m.calc.diasPagados != null ? m.calc.diasPagados : n;
       const partes = [m.calc.porMes
-        ? `${fijoCuenta(m.calc)} (${m.calc.divisor} días que tiene ${nombreMes(m.mes)}; ${p} pagados: ${n} trabajado${n === 1 ? '' : 's'}${p - n ? ` + ${p - n} de descanso` : ''}) = ${INFORME.eur(m.calc.fijoBruto)}`
+        ? `${fijoCuenta(m.calc)} (${m.calc.divisor} días que tiene ${nombreMes(m.mes)}; ${p} pagados: ${n} trabajado${n === 1 ? '' : 's'}${p - n - (m.calc.cerrados || []).length ? ` + ${p - n - (m.calc.cerrados || []).length} de descanso` : ''}${(m.calc.cerrados || []).length ? ` + ${m.calc.cerrados.length} con el local cerrado` : ''}) = ${INFORME.eur(m.calc.fijoBruto)}`
         : `${fijoCuenta(m.calc)} día${n === 1 ? '' : 's'} que vino = ${INFORME.eur(m.calc.fijoBruto)}`];
       if (m.calc.descuentoTardes > 0) partes.push(`− ${INFORME.eur(m.calc.descuentoTardes)} por llegar tarde`);
       if (m.calc.comision > 0) partes.push(`+ comisión ${INFORME.eur(m.calc.comision)}`);
@@ -5390,7 +5431,7 @@
           entregado_este_mes: c.entregado,
           pendiente_total_a_dia_de_hoy: deuda.total,
           semanas_sin_dia_libre: semanasSinDescanso(t, mes).map(s => `${s.desde} a ${s.hasta}`),
-          semanas_con_mas_de_un_dia_libre: semanasConDescansoDeMas(t, mes).map(s => `${s.desde} a ${s.hasta}: libres ${s.libres.join(', ')}${s.deMas.length ? `; de más (se pagan): ${s.deMas.join(', ')}` : '; ninguno de más: compensa una semana que trabajó entera'}`)
+          semanas_con_mas_de_un_dia_libre: semanasConDescansoDeMas(t, mes).map(s => `${s.desde} a ${s.hasta}: libres ${s.libres.join(', ')}${s.cerrados.length ? `; local cerrado (es su libre): ${s.cerrados.join(', ')}` : ''}${s.deMas.length ? `; NO se pagan: ${s.deMas.join(', ')}` : '; se pagan todos: compensa una semana que trabajó entera'}`)
         });
       }
       const promotores = rrpps.map(r => {
@@ -5415,7 +5456,7 @@
         notas: [
           'pendiente_total_a_dia_de_hoy arrastra todos los meses: lo que le corresponde desde que empezó menos todas las entregas.',
           'Un pendiente negativo significa que se le ha adelantado de más.',
-          'Desde octubre de 2026 el sueldo es por mes: el día vale sueldo ÷ los días que tiene el mes, y se pagan los días trabajados y los de descanso marcados.'
+          'Desde octubre de 2026 el sueldo es por mes: el día vale sueldo ÷ los días que tiene el mes, y se pagan los días trabajados, un día de descanso por semana (desde la semana del 2 de noviembre de 2026) y los días que el local está cerrado. La semana que el local cierra algún día, ese cierre es su libre: un descanso además no se paga. Un libre que compensa una semana de al lado trabajada entera sí se paga.'
         ]
       };
     },
@@ -5460,6 +5501,7 @@
         sueldos: periodosSueldo(t).map(p => ({ sueldo_al_mes: p.sueldo, desde: p.desde || 'desde que empezó', hasta: p.hasta || 'hoy' })),
         meses: deuda.meses.map(m => ({
           mes: m.mes, dias_trabajados: m.calc.dias.length, dias_de_descanso: m.calc.descanso, dias_que_no_vino: m.calc.faltas.length,
+          dias_con_el_local_cerrado: (m.calc.cerrados || []).length, libres_que_no_se_pagan: m.calc.libresNoPagados || [], dias_pagados: m.calc.diasPagados,
           fijo: m.calc.fijo, comision: m.calc.comision, bonos: m.calc.bono, le_correspondio: m.devengado,
           entregado_ese_mes: m.entregado, queda_sin_cubrir: m.pendiente
         })),
@@ -5673,7 +5715,7 @@
       if (t.esRRPP) return { valido: false, motivo: `${t.nombre} es RRPP: no tiene días de trabajo, sino lo que factura cada noche. Eso se apunta en la pestaña RRPP.` };
       if (t.liquidado) return { valido: false, motivo: `${t.nombre} ya está liquidado y su cuenta está cerrada: no se le pueden marcar días. Para corregir algo hay que reabrir antes su ficha en Personal.` };
 
-      const ESTADOS = { trabajo: 'trabajó', descanso: 'descansó', cerrado: 'local cerrado (se paga y no cuenta como su libre)', falta: 'faltó (no vino)', tarde: 'llegó tarde', sin_marcar: 'sin marcar (se quita la marca)' };
+      const ESTADOS = { trabajo: 'trabajó', descanso: 'descansó', cerrado: 'local cerrado (se paga y es su libre de esa semana)', falta: 'faltó (no vino)', tarde: 'llegó tarde', sin_marcar: 'sin marcar (se quita la marca)' };
       if (!ESTADOS[estado]) return { valido: false, motivo: 'Falta qué pasó esos días: trabajo, descanso, cerrado, falta, tarde o sin_marcar. Pregúntaselo al dueño.' };
       const interno = estado === 'sin_marcar' ? 'nada' : estado;
       let horas = 0;
@@ -5721,6 +5763,11 @@
         const cierresMes = regs.filter(r => r.tipo === 'cierre' && (r.fecha || '').startsWith(mes));
         return calcularMes(quien, ventasParaTrabajador(quien, cierresMes, mes, false, rrpps), [], mes).devengado;
       };
+      // Con un libre pagado por semana, marcar un día puede cambiar lo que se paga
+      // en el mes de al lado (la semana cruza de mes, o completa una semana entera
+      // que compensa un libre de la siguiente): esos meses también se enseñan.
+      const mesesVecinos = [...new Set(aCambiar.flatMap(f => [sumarDiasISO(f, -13).slice(0, 7), sumarDiasISO(f, 13).slice(0, 7)]))]
+        .filter(m => !meses.includes(m) && Math.abs(leCorresponde(t, m) - leCorresponde(copia, m)) >= 0.005).sort();
       const porMes = (lista2) => meses.map(m => `${mesEnLetras(m + '-01').toLowerCase()}: ${lista2.filter(f => f.startsWith(m)).map(f => +f.slice(8)).join(', ')}`).join(' · ');
       const lineas = [
         ['Para', t.nombre],
@@ -5731,6 +5778,9 @@
       meses.forEach(m => {
         const antes = leCorresponde(t, m), despues = leCorresponde(copia, m);
         lineas.push([`Le corresponde en ${mesEnLetras(m + '-01').toLowerCase()}`, Math.abs(antes - despues) < 0.005 ? `${INFORME.eur(despues)} (no cambia)` : `${INFORME.eur(despues)} (ahora ${INFORME.eur(antes)})`]);
+      });
+      mesesVecinos.forEach(m => {
+        lineas.push([`Y cambia ${mesEnLetras(m + '-01').toLowerCase()}`, `${INFORME.eur(leCorresponde(copia, m))} (ahora ${INFORME.eur(leCorresponde(t, m))}), por el día libre de esa semana`]);
       });
       if (yaAsi.length) avisos.push(`${yaAsi.length === 1 ? 'El ' + fmtFecha(yaAsi[0]) + ' ya estaba' : yaAsi.length + ' de esos días ya estaban'} así: no se toca${yaAsi.length === 1 ? '' : 'n'}.`);
       return {
