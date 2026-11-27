@@ -321,6 +321,10 @@
   });
 
   $('#prov-guardar').addEventListener('click', guardarConAviso(async () => {
+    if (provEditando && !(await DB.provTodos()).some(x => x.id === provEditando.id && x.sid === provEditando.sid)) {
+      if (!confirm('Este proveedor se eliminó mientras lo corregías (aquí o en otro dispositivo).\n\n¿Guardarlo como un proveedor nuevo?')) return;
+      provEditando = null;
+    }
     const nombre = $('#p-nombre').value.trim();
     const nif = $('#p-nif').value.trim().toUpperCase();
     if (!nombre) { toast('⚠️ El nombre es obligatorio.'); return; }
@@ -598,8 +602,18 @@
   $('#factura-guardar').addEventListener('click', guardarConAviso(async () => {
     // Lo que se está corrigiendo y su foto se leen UNA vez, al pulsar: lo que pase
     // en otra pestaña mientras se guarda no cambia qué se guarda aquí
-    const editando = facturaEditando;
+    let editando = facturaEditando;
     const pendiente = facturaPendiente;
+    // Si lo que se corrige ya no existe (se eliminó en otro dispositivo con el
+    // formulario abierto), guardarlo con su identidad lo haría volver un momento y
+    // desaparecer solo. Se pregunta y, si acaso, se guarda como apunte nuevo.
+    if (editando) {
+      const sigue = await DB.obtener(editando.id);
+      if (!sigue || sigue.sid !== editando.sid) {
+        if (!confirm('Este apunte se eliminó mientras lo corregías (aquí o en otro dispositivo).\n\n¿Guardarlo como un apunte nuevo?')) return;
+        editando = null;
+      }
+    }
     const total = parseFloat($('#f-total').value);
     const esTrimestral = $('#f-alcance').value === 'trimestre';
     const fecha = esTrimestral
@@ -783,8 +797,15 @@
 
   $('#cierre-guardar').addEventListener('click', guardarConAviso(async () => {
     // Igual que en la factura: se lee una vez, al pulsar
-    const editando = cierreEditando;
+    let editando = cierreEditando;
     const pendiente = cierrePendiente;
+    if (editando) {
+      const sigue = await DB.obtener(editando.id);
+      if (!sigue || sigue.sid !== editando.sid) {
+        if (!confirm('Este apunte se eliminó mientras lo corregías (aquí o en otro dispositivo).\n\n¿Guardarlo como un apunte nuevo?')) return;
+        editando = null;
+      }
+    }
     const total = parseFloat($('#c-total').value);
     const esMes = $('#c-alcance').value === 'mes';
     if (isNaN(total) || total < 0) { toast('⚠️ Pon el total de ventas.'); return; }
@@ -1578,8 +1599,10 @@
         ('creado') y tienen distinto sid. Se queda la última que se guardó.
      2) Gemelos: el mismo apunte (mismo sid) guardado dos veces en este móvil, por
         ejemplo al restaurar una copia mientras la nube bajaba. En la nube es uno
-        solo, así que el que sobra se quita SOLO del móvil ({ gemelo: true }). */
-  function repetidosPorCorreccion(lista) {
+        solo, así que el que sobra se quita SOLO del móvil ({ gemelo: true }).
+        Con soloGemelos se mira solo esto (entregas y fichas del equipo, que no se
+        corrigen por un formulario que les cambiara la identidad). */
+  function repetidosPorCorreccion(lista, soloGemelos = false) {
     const masNuevoPrimero = (a, b) => String(b.mod || '').localeCompare(String(a.mod || ''));
     const repetidos = [];
     // 2) gemelos: de cada sid se queda uno, y con ese se sigue
@@ -1595,6 +1618,7 @@
       unicos.push(orden[0]);
       if (orden.length > 1) repetidos.push({ vale: orden[0], sobran: orden.slice(1), gemelo: true });
     }
+    if (soloGemelos) return repetidos;
     // 1) por una corrección
     const grupos = new Map();
     for (const r of unicos) {
@@ -1603,18 +1627,26 @@
       if (!grupos.has(clave)) grupos.set(clave, []);
       grupos.get(clave).push(r);
     }
+    const mismoImporte = (a, b) => Math.abs((a.total || 0) - (b.total || 0)) < 0.005;
+    const seParecen = (a, b) => a.tipo === 'cierre'
+      ? (a.fecha === b.fecha || mismoImporte(a, b))
+      : (normalizarNombre(a.proveedor) === normalizarNombre(b.proveedor) || (a.fecha === b.fecha && mismoImporte(a, b)));
     for (const g of grupos.values()) {
       if (g.length < 2) continue;
-      // Dos apuntes dictados al asesor en una misma frase nacen en el mismo instante
-      // y se guardan segundos después: son dos apuntes buenos, no una corrección
-      // (el formulario antiguo no conservaba 'origen', así que una corrección de
-      // verdad de un apunte del asesor sí se sigue viendo)
+      // Hasta la v86 el asesor fechaba el apunte al preparar la tarjeta: dos apuntes
+      // dictados en una misma frase nacían en el mismo instante. Son dos apuntes
+      // buenos, no una corrección…
       if (g.every(r => r.origen === 'asesor')) continue;
       const orden = [...g].sort((a, b) => masNuevoPrimero(a, b) || (b.id - a.id));
       // Una corrección se hace, como pronto, unos segundos después de apuntar. Dos
       // apuntes distintos nacidos en el mismo instante y sin tocar no son esto.
       if (!(Date.parse(orden[0].mod) - Date.parse(orden[0].creado) >= 2000)) continue;
-      repetidos.push({ vale: orden[0], sobran: orden.slice(1) });
+      // …y si uno de aquellos dos se corrigió después (el formulario de entonces le
+      // quitaba la marca del asesor), siguen siendo dos apuntes: con el asesor por
+      // medio, solo es «la versión de antes» la que se parece a la que se queda.
+      const conAsesor = g.some(r => r.origen === 'asesor');
+      const sobran = orden.slice(1).filter(x => !conAsesor || seParecen(orden[0], x));
+      if (sobran.length) repetidos.push({ vale: orden[0], sobran });
     }
     return repetidos;
   }
@@ -1628,46 +1660,86 @@
   /* En qué se diferencian dos versiones del mismo apunte, en palabras: solo los
      datos que cambian, escritos «la que sobra → la que se queda». Sin esto, dos
      versiones que solo cambian en el IVA se verían idénticas en la pantalla. */
-  function enQueCambian(vale, sobra) {
+  function enQueCambian(vale, sobra, almacen = 'registros') {
     const eur = (v) => typeof v === 'number' ? INFORME.eur(v) : 'sin poner';
     const txt = (v) => (v == null || v === '') ? 'vacío' : String(v);
     const siNo = (v) => v ? 'sí' : 'no';
     const iva = (v) => v == null || v === '' ? 'sin desglosar' : (v === 'varios' ? 'varios tipos' : v + ' %');
     const ret = (v) => v == null || v === '' ? 'sin retención' : v + ' %';
     const fecha = (v) => v ? fmtFecha(v) : 'sin fecha';
-    const campos = vale.tipo === 'factura' ? [
-      ['Proveedor', 'proveedor', txt], ['NIF', 'nif', txt], ['Fecha', 'fecha', fecha], ['Total', 'total', eur],
-      ['Categoría', 'categoria', txt], ['Base', 'baseImponible', eur], ['IVA', 'ivaTipo', iva], ['Cuota de IVA', 'ivaCuota', eur],
-      ['Retención', 'retTipo', ret], ['Cuota de retención', 'retCuota', eur], ['Gasto de casa', 'personal', siNo],
-      ['Total de un trimestre', 'trimestral', siNo], ['Notas', 'notas', txt]
+    const cuantos = (v) => String((v || []).length);
+    const des = (k) => (r) => (r.ivaDesglose || {})[k];
+    const campos = almacen === 'proveedores' ? [
+      ['Nombre', 'nombre', txt], ['NIF', 'nif', txt], ['Categoría', 'categoria', txt], ['Contacto', 'quien', txt],
+      ['Teléfono', 'telefono', txt], ['Correo', 'email', txt], ['Dirección', 'direccion', txt]
+    ] : almacen === 'pagos' ? [
+      ['Fecha', 'fecha', fecha], ['Importe', 'importe', eur], ['Nota', 'notas', txt]
+    ] : almacen === 'personal' ? [
+      ['Nombre', 'nombre', txt], ['Sueldo', 'sueldoMensual', eur], ['Empezó', 'inicio', fecha], ['Baja', 'fin', fecha],
+      ['Días trabajados marcados', 'dias', cuantos], ['Descansos marcados', 'descansos', cuantos], ['Faltas marcadas', 'faltas', cuantos],
+      ['Retrasos marcados', 'tardes', cuantos], ['Bonos', 'bonos', cuantos], ['Noches apuntadas', 'noches', cuantos]
     ] : vale.tipo === 'cierre' ? [
       ['Fecha', 'fecha', fecha], ['Total del mes', 'mensual', siNo], ['Total', 'total', eur], ['Efectivo', 'efectivo', eur],
       ['Tarjeta', 'tarjeta', eur], ['SumUp', 'sumup', eur], ['Notas', 'notas', txt]
     ] : [
-      ['Nombre', 'nombre', txt], ['NIF', 'nif', txt], ['Categoría', 'categoria', txt], ['Contacto', 'quien', txt],
-      ['Teléfono', 'telefono', txt], ['Correo', 'email', txt], ['Dirección', 'direccion', txt]
+      ['Proveedor', 'proveedor', txt], ['NIF', 'nif', txt], ['Fecha', 'fecha', fecha], ['Total', 'total', eur],
+      ['Categoría', 'categoria', txt], ['Base', 'baseImponible', eur], ['IVA', 'ivaTipo', iva], ['Cuota de IVA', 'ivaCuota', eur],
+      ['IVA al 21 %', des('v21'), eur], ['IVA al 10 %', des('v10'), eur], ['IVA al 4 %', des('v4'), eur],
+      ['Retención', 'retTipo', ret], ['Cuota de retención', 'retCuota', eur], ['Gasto de casa', 'personal', siNo],
+      ['Total de un trimestre', 'trimestral', siNo], ['Notas', 'notas', txt]
     ];
-    const igual = (a, b) => (a == null || a === '' || a === false ? '' : String(a)) === (b == null || b === '' || b === false ? '' : String(b));
-    const cambios = campos.filter(([, k]) => !igual(vale[k], sobra[k])).map(([n, k, f]) => `${n}: ${f(sobra[k])} → ${f(vale[k])}`);
-    if (vale.tipo && (vale.imagen instanceof Blob) !== (sobra.imagen instanceof Blob)) cambios.push(`Foto: ${siNo(sobra.imagen instanceof Blob)} → ${siNo(vale.imagen instanceof Blob)}`);
+    const valor = (r, k) => typeof k === 'function' ? k(r) : r[k];
+    const plano = (v) => v == null || v === '' || v === false ? '' : (Array.isArray(v) ? String(v.length) : String(v));
+    const cambios = campos.filter(([, k]) => plano(valor(vale, k)) !== plano(valor(sobra, k)))
+      .map(([n, k, f]) => `${n}: ${f(valor(sobra, k))} → ${f(valor(vale, k))}`);
+    if (almacen === 'registros') {
+      const [fv, fs] = [vale.imagen instanceof Blob, sobra.imagen instanceof Blob];
+      if (fv !== fs) cambios.push(`Foto: ${siNo(fs)} → ${siNo(fv)}`);
+      else if (fv && vale.imagen.size !== sobra.imagen.size) cambios.push('Foto: distinta');
+    }
     return cambios.length ? cambios.join(' · ') : 'iguales en todo';
+  }
+
+  /* Todo lo repetido que hay ahora mismo, leído de la base de datos: las parejas de
+     cada almacén y, en una lista, cada versión que sobra con lo necesario para
+     enseñarla y para comprobar, antes de quitarla, que sigue siendo la que sobra. */
+  async function leerRepetidos() {
+    const [regs, provs, personas, pagos] = await Promise.all([DB.todos(), DB.provTodos(), DB.perTodos(), DB.pagoTodos()]);
+    const nombreDe = (sid) => (personas.find(t => t.sid === sid) || {}).nombre || 'alguien que ya no está en la lista';
+    const clases = [
+      { almacen: 'registros', titulo: 'Facturas y cierres', nota: 'mientras estén las dos, ese dinero cuenta de más', grupos: repetidosPorCorreccion(regs), texto: queEsApunte },
+      { almacen: 'pagos', titulo: 'Entregas al equipo', nota: 'la misma entrega guardada dos veces: descuenta el doble de lo que se le debe', grupos: repetidosPorCorreccion(pagos, true),
+        texto: (x) => `Entrega a ${nombreDe(x.trabajadorSid)} · ${fmtFecha(x.fecha)} · ${INFORME.eur(x.importe || 0)}` },
+      { almacen: 'personal', titulo: 'Fichas del equipo', nota: 'la misma persona guardada dos veces: su coste cuenta doble', grupos: repetidosPorCorreccion(personas, true),
+        texto: (x) => `${x.nombre || 'Sin nombre'}${x.esRRPP ? ' (RRPP)' : ''}` },
+      { almacen: 'proveedores', titulo: 'Proveedores', nota: 'no cambian ninguna cuenta, solo salen dos veces en la lista', grupos: repetidosPorCorreccion(provs), texto: queEsProveedor }
+    ].filter(c => c.grupos.length);
+    const sobrantes = clases.flatMap(c => c.grupos.flatMap(g => g.sobran.map(x => ({
+      almacen: c.almacen, id: x.id, mod: x.mod || '', valeId: g.vale.id, valeMod: g.vale.mod || '', reg: x, gemelo: !!g.gemelo,
+      texto: c.texto(x), vale: c.texto(g.vale), cambia: enQueCambian(g.vale, x, c.almacen)
+    }))));
+    return { regs, personas, clases, sobrantes };
+  }
+
+  /* Cuántos sobran, para el aviso: los que tocan dinero (facturas, cierres, entregas
+     y fichas del equipo) y los proveedores, que no cambian ninguna cuenta. */
+  async function cuantosRepetidos(regs) {
+    const sobran = (g) => g.reduce((n, x) => n + x.sobran.length, 0);
+    const [personas, pagos] = await Promise.all([DB.perTodos(), DB.pagoTodos()]);
+    const dinero = sobran(repetidosPorCorreccion(regs)) + sobran(repetidosPorCorreccion(pagos, true)) + sobran(repetidosPorCorreccion(personas, true));
+    return { dinero, proveedores: dinero ? 0 : sobran(repetidosPorCorreccion(await DB.provTodos())) };
   }
 
   /* La pantalla para revisarlos: se ven las dos versiones y en qué cambian, y se
      quita la que sobra, de una en una o todas, siempre con una pregunta antes. */
   async function abrirRepetidos() {
-    const [regs, provs, personas] = await Promise.all([DB.todos(), DB.provTodos(), DB.perTodos()]);
-    const apuntes = repetidosPorCorreccion(regs);
-    const proveedores = repetidosPorCorreccion(provs);
-    if (!apuntes.length && !proveedores.length) {
+    const { regs, personas, clases, sobrantes } = await leerRepetidos();
+    if (!sobrantes.length) {
       cerrarModal();
       toast('✅ No queda nada repetido.');
       return;
     }
-    const sobrantes = [
-      ...apuntes.flatMap(g => g.sobran.map(x => ({ almacen: 'registros', id: x.id, reg: x, gemelo: !!g.gemelo, texto: queEsApunte(x), vale: queEsApunte(g.vale), cambia: enQueCambian(g.vale, x) }))),
-      ...proveedores.flatMap(g => g.sobran.map(x => ({ almacen: 'proveedores', id: x.id, reg: x, gemelo: !!g.gemelo, texto: queEsProveedor(x), vale: queEsProveedor(g.vale), cambia: enQueCambian(g.vale, x) })))
-    ];
+    const apuntes = (clases.find(c => c.almacen === 'registros') || { grupos: [] }).grupos;
 
     // Trimestres ya cerrados que llevaban una versión que sobra
     const hoyTri = triDe(hoyISO());
@@ -1682,7 +1754,7 @@
     const equipoDe = (quitados) => {
       const fuera = new Set(quitados.filter(x => x.almacen === 'registros' && x.reg.tipo === 'cierre').map(x => x.id));
       if (!fuera.size) return [];
-      const meses = [...new Set(quitados.filter(x => fuera.has(x.id)).map(x => (x.reg.fecha || '').slice(0, 7)))].filter(Boolean).sort();
+      const meses = [...new Set(quitados.filter(x => x.almacen === 'registros' && fuera.has(x.id)).map(x => (x.reg.fecha || '').slice(0, 7)))].filter(Boolean).sort();
       return meses.map(mes => {
         const cierresMes = regs.filter(r => r.tipo === 'cierre' && (r.fecha || '').startsWith(mes));
         const antes = costePersonalDe(personas, cierresMes, mes);
@@ -1695,36 +1767,46 @@
       : '';
     const equipoTodos = fraseEquipo(equipoDe(sobrantes));
 
-    const bloque = (g, almacen, texto) => `
+    const bloque = (c, g) => `
       <div class="repetido">
-        <div class="repetido-vale">✓ Se queda (la última que se guardó, el ${cuandoSeToco(g.vale)}): <strong>${escapar(texto(g.vale))}</strong></div>
-        ${g.sobran.map(x => `<div class="repetido-sobra"><span>✗ Sobra (${g.gemelo ? 'está guardada dos veces en este móvil' : 'guardada el ' + cuandoSeToco(x)}): ${escapar(texto(x))}
-          <small class="repetido-cambia">Lo que cambia: ${escapar(enQueCambian(g.vale, x))}</small></span>
-          <button class="btn btn-small btn-danger rep-quitar" data-almacen="${almacen}" data-id="${x.id}">Quitar</button></div>`).join('')}
+        <div class="repetido-vale">✓ Se queda (la última que se guardó, el ${cuandoSeToco(g.vale)}): <strong>${escapar(c.texto(g.vale))}</strong></div>
+        ${g.sobran.map(x => `<div class="repetido-sobra"><span>✗ Sobra (${g.gemelo ? 'está guardada dos veces en este móvil' : 'guardada el ' + cuandoSeToco(x)}): ${escapar(c.texto(x))}
+          <small class="repetido-cambia">Lo que cambia: ${escapar(enQueCambian(g.vale, x, c.almacen))}</small></span>
+          <button class="btn btn-small btn-danger rep-quitar" data-almacen="${c.almacen}" data-id="${x.id}">Quitar</button></div>`).join('')}
       </div>`;
+    const hayGemelos = sobrantes.some(x => x.gemelo);
     $('#modal-body').innerHTML = `
       <h2 style="margin-bottom:8px">♻️ Apuntes repetidos</h2>
-      <p class="hint">Al corregir un apunte se quedaban guardadas las dos versiones: la de antes y la corregida. Ya no pasa, pero estas siguen ahí. Mira cada pareja y quita la que sobra. Si en alguna la buena fuera la otra, no la quites aquí: búscala en Consultar y elimina la que no quieras.${[...apuntes, ...proveedores].some(g => g.gemelo) ? ' Las que dicen «guardada dos veces en este móvil» son el mismo apunte repetido: quita la que sobra desde aquí.' : ''}</p>
-      ${apuntes.length ? `<p class="hint"><strong>Facturas y cierres</strong> (mientras estén las dos, ese dinero cuenta de más):</p>${apuntes.map(g => bloque(g, 'registros', queEsApunte)).join('')}` : ''}
-      ${cerrados.length ? `<div class="alerta"><span>⚠️ Hay repetidos del <strong>${cerrados.join(' y del ')}</strong>, que ya ${varios ? 'cerraron' : 'cerró'}. Si ya enviaste ${varios ? 'esos informes' : 'ese informe'} a la gestoría, ${varios ? 'llevaban' : 'llevaba'} la versión que sobra: avísale después de quitarlos.</span></div>` : ''}
-      ${equipoTodos ? `<div class="alerta"><span>${escapar(equipoTodos)}</span></div>` : ''}
-      ${proveedores.length ? `<p class="hint"><strong>Proveedores</strong> (no cambian ninguna cuenta, solo salen dos veces en la lista):</p>${proveedores.map(g => bloque(g, 'proveedores', queEsProveedor)).join('')}` : ''}
+      <p class="hint">Al corregir un apunte se quedaban guardadas las dos versiones: la de antes y la corregida. Ya no pasa, pero estas siguen ahí. Mira cada pareja, <strong>lee «Lo que cambia»</strong> y quita la que sobra. Si en alguna la buena fuera la otra, no la quites aquí: búscala en Consultar y elimina la que no quieras.${hayGemelos ? ' Las que dicen «guardada dos veces en este móvil» son el mismo apunte repetido: quita la que sobra desde aquí.' : ''}</p>
+      ${clases.map(c => `<p class="hint"><strong>${c.titulo}</strong> (${c.nota}):</p>${c.grupos.map(g => bloque(c, g)).join('')}${c.almacen === 'registros' ? `
+        ${cerrados.length ? `<div class="alerta"><span>⚠️ Hay repetidos del <strong>${cerrados.join(' y del ')}</strong>, que ya ${varios ? 'cerraron' : 'cerró'}. Si ya enviaste ${varios ? 'esos informes' : 'ese informe'} a la gestoría, ${varios ? 'llevaban' : 'llevaba'} la versión que sobra: avísale después de quitarlos.</span></div>` : ''}
+        ${equipoTodos ? `<div class="alerta"><span>${escapar(equipoTodos)}</span></div>` : ''}` : ''}`).join('')}
       ${sobrantes.length > 1 ? `<div class="form-actions"><button class="btn btn-danger" id="rep-quitar-todos">Quitar los ${sobrantes.length} que sobran</button></div>` : ''}`;
     $('#modal').classList.remove('hidden');
 
-    // Con la nube sin conectar en este móvil, lo quitado podría volver al conectarla
-    const avisoNube = () => {
+    // Con la nube sin conectar en este móvil, una versión quitada volvería al
+    // conectarla. (Un gemelo no: se quita solo de este móvil, haya nube o no.)
+    const avisoNube = (lista) => {
       const est = (typeof NUBE !== 'undefined' && NUBE.estado) ? NUBE.estado() : null;
-      return est && est.disponible && !est.conectado
+      return est && est.disponible && !est.conectado && lista.some(x => !x.gemelo)
         ? '\n\n⚠️ La nube no está conectada en este móvil. Si la usas, conéctala antes en Ajustes: si no, lo que quites aquí volverá cuando la conectes.'
         : '';
     };
+    const BORRAR = { registros: DB.borrar, proveedores: DB.provBorrar, pagos: DB.pagoBorrar, personal: DB.perBorrar };
     const quitar = async (lista) => {
+      // Antes de borrar se vuelve a mirar: si mientras la pantalla estaba abierta
+      // cambió algo (llegó una corrección de otro móvil), lo que se enseñó ya no vale
+      const ahora = (await leerRepetidos()).sobrantes;
+      const sigueIgual = (x) => ahora.some(y => y.almacen === x.almacen && y.id === x.id && y.mod === x.mod &&
+        y.valeId === x.valeId && y.valeMod === x.valeMod && y.gemelo === x.gemelo);
+      if (!lista.every(sigueIgual)) {
+        toast('⚠️ Ha cambiado algo mientras lo mirabas (quizá desde otro dispositivo). No se ha quitado nada: vuelve a revisarlo.', 8000);
+        await abrirRepetidos();
+        return;
+      }
       for (const x of lista) {
         // Un gemelo se quita solo de este móvil: en la nube es el mismo apunte que se queda
-        const opciones = x.gemelo ? { remoto: true } : {};
-        if (x.almacen === 'proveedores') await DB.provBorrar(x.id, opciones);
-        else await DB.borrar(x.id, opciones);
+        await BORRAR[x.almacen](x.id, x.gemelo ? { remoto: true } : {});
       }
       toast(lista.length === 1 ? '🗑️ Quitado el repetido.' : `🗑️ Quitados los ${lista.length} repetidos.`);
       // Un informe ya generado se hizo con el repetido dentro: hay que volver a sacarlo
@@ -1737,12 +1819,12 @@
       const x = sobrantes.find(s => s.almacen === b.dataset.almacen && s.id === +b.dataset.id);
       if (!x) return;
       const equipo = fraseEquipo(equipoDe([x]));
-      if (!confirm(`Se va a quitar esta versión:\n\n   ${x.texto}\n\nSe queda la última que se guardó:\n\n   ${x.vale}\n\nLo que cambia: ${x.cambia}${equipo ? '\n\n' + equipo : ''}${avisoNube()}\n\n¿Quitarla?`)) return;
+      if (!confirm(`Se va a quitar esta versión:\n\n   ${x.texto}\n\nSe queda la última que se guardó:\n\n   ${x.vale}\n\nLo que cambia: ${x.cambia}${equipo ? '\n\n' + equipo : ''}${avisoNube([x])}\n\n¿Quitarla?`)) return;
       await quitar([x]);
     })));
     const todos = $('#rep-quitar-todos');
     if (todos) todos.addEventListener('click', guardarConAviso(async () => {
-      if (!confirm(`Se van a quitar estas ${sobrantes.length} versiones:\n\n${sobrantes.map(x => `   ✗ ${x.texto}  (${x.cambia})`).join('\n')}\n\nSe queda de cada una la última que se guardó.${equipoTodos ? '\n\n' + equipoTodos : ''}${avisoNube()}\n\n¿Quitarlas todas?`)) return;
+      if (!confirm(`Se van a quitar estas ${sobrantes.length} versiones:\n\n${sobrantes.map(x => `   ✗ ${x.texto}  (${x.cambia})`).join('\n')}\n\nSe queda de cada una la última que se guardó.${equipoTodos ? '\n\n' + equipoTodos : ''}${avisoNube(sobrantes)}\n\n¿Quitarlas todas?`)) return;
       await quitar(sobrantes);
     }));
   }
@@ -1752,10 +1834,10 @@
     const alertas = [];
     const hoy = hoyISO();
     // Lo primero: apuntes repetidos por una corrección (se cuentan dos veces)
-    const repApuntes = repetidosPorCorreccion(regs).reduce((n, g) => n + g.sobran.length, 0);
-    const repProvs = repApuntes ? 0 : repetidosPorCorreccion(await DB.provTodos()).reduce((n, g) => n + g.sobran.length, 0);
+    const rep = await cuantosRepetidos(regs);
+    const repApuntes = rep.dinero, repProvs = rep.proveedores;
     if (repApuntes) alertas.push(`<div class="alerta"><span>♻️ <strong>${repApuntes === 1 ? 'Hay 1 apunte repetido' : `Hay ${repApuntes} apuntes repetidos`}</strong> (se quedó guardada una versión de más): ese dinero <strong>se está contando dos veces</strong>.</span><button class="btn btn-small rep-revisar">Revisar</button></div>`);
-    else if (repProvs) alertas.push(`<div class="alerta"><span>♻️ ${repProvs === 1 ? 'Hay 1 proveedor repetido' : `Hay ${repProvs} proveedores repetidos`} por una corrección. No cambia ninguna cuenta, pero conviene quitar${repProvs === 1 ? 'lo' : 'los'}.</span><button class="btn btn-small rep-revisar">Revisar</button></div>`);
+    else if (repProvs) alertas.push(`<div class="alerta"><span>♻️ ${repProvs === 1 ? 'Hay 1 proveedor repetido' : `Hay ${repProvs} proveedores repetidos`}. No cambia ninguna cuenta, pero conviene quitar${repProvs === 1 ? 'lo' : 'los'}.</span><button class="btn btn-small rep-revisar">Revisar</button></div>`);
     const tri = ultimoTrimestreCerrado();
     const claveTri = `${tri.anio}-T${tri.t}`;
     if (localStorage.getItem(CLAVE_TRIMESTRE) !== claveTri) {
@@ -5357,11 +5439,12 @@
       await DB.pagoGuardar({ trabajadorSid: r.sid, fecha: hoyISO(), importe: r2(importe), notas: 'RRPP', creado: new Date().toISOString() });
       toast('💶 Entrega apuntada.');
       // Al pagar es cuando se le explica la cuenta: semanas, bonos y pendiente
-      if (confirm('¿Le envías la cuenta explicada (semanas, bonos y lo pendiente)?')) {
-        const pagosR = (await DB.pagoTodos()).filter(p => p.trabajadorSid === r.sid);
-        await compartirTextoRRPP(textoCuentaRRPP(r, pagosR));
-      }
+      const enviar = confirm('¿Le envías la cuenta explicada (semanas, bonos y lo pendiente)?');
+      const pagosR = enviar ? (await DB.pagoTodos()).filter(p => p.trabajadorSid === r.sid) : [];
       pintarRRPPTab();
+      // No se espera a que el móvil termine de compartir: si esa ventana no contesta,
+      // el botón de apuntar entregas se quedaba sin responder
+      if (enviar) Promise.resolve(compartirTextoRRPP(textoCuentaRRPP(r, pagosR))).catch((e) => console.error(e));
     })));
     div.querySelectorAll('.rrpp-cuenta').forEach(btn => btn.addEventListener('click', async () => {
       const r = (await DB.perTodos()).find(x => x.sid === btn.dataset.sid);

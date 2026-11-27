@@ -3775,6 +3775,124 @@ TARJETA 450,00`)]);
   chk('repetidos', 'Renombrar un proveedor y restaurar una copia anterior no lo deja dos veces (sigue uno, con el nombre nuevo)',
     provRen.length === 1 && provRen[0] === 'Makro Autoservicio', JSON.stringify(provRen));
 
+  // 7b) Lo que salió en la segunda revisión de la pantalla de repetidos
+  await limpiar();
+  const asesorPar = await page.evaluate(async () => {
+    const R = { remoto: true };
+    // Dos gastos dictados juntos al asesor (mismo instante); después uno se corrigió con el
+    // formulario de entonces, que le quitaba la marca del asesor. Siguen siendo DOS gastos.
+    await DB.guardar({ sid: 'dic-a', tipo: 'factura', fecha: '2025-04-10', proveedor: 'Movistar', total: 45, origen: 'asesor', creado: '2025-04-10T20:00:00.000Z', mod: '2025-04-10T20:00:07.000Z' }, R);
+    await DB.guardar({ sid: 'dic-b', tipo: 'factura', fecha: '2025-04-10', proveedor: 'Luz del Sur', total: 85, creado: '2025-04-10T20:00:00.000Z', mod: '2025-04-14T11:00:00.000Z' }, R);
+    const distintos = APP.repetidos(await DB.todos()).length;
+    // En cambio, la versión de antes de un apunte del asesor que sí se corrigió (mismo proveedor) se sigue viendo
+    await DB.guardar({ sid: 'cor-a', tipo: 'factura', fecha: '2025-04-12', proveedor: 'Gas Sur', total: 60, origen: 'asesor', creado: '2025-04-12T20:00:00.000Z', mod: '2025-04-12T20:00:06.000Z' }, R);
+    await DB.guardar({ sid: 'cor-b', tipo: 'factura', fecha: '2025-04-12', proveedor: 'Gas Sur', total: 66, creado: '2025-04-12T20:00:00.000Z', mod: '2025-04-13T09:00:00.000Z' }, R);
+    const g = APP.repetidos(await DB.todos());
+    return { distintos, grupos: g.map(x => [x.vale.sid, x.sobran.map(y => y.sid).join()]) };
+  });
+  chk('repetidos', 'Dos gastos distintos dictados juntos al asesor NO salen como repetidos aunque uno se corrigiera después (no se ofrece quitar un gasto bueno)',
+    asesorPar.distintos === 0, JSON.stringify(asesorPar));
+  chk('repetidos', 'Pero la versión de antes de un apunte del asesor que sí se corrigió (mismo proveedor) se sigue detectando',
+    asesorPar.grupos.length === 1 && asesorPar.grupos[0][0] === 'cor-b' && asesorPar.grupos[0][1] === 'cor-a', JSON.stringify(asesorPar));
+
+  // La pantalla abierta con datos que cambian por debajo: no se quita nada a ciegas
+  await page.evaluate(() => APP.inicio());
+  await page.click('.tab[data-tab="inicio"]');
+  await page.waitForTimeout(600);
+  await page.click('#ini-alertas .rep-revisar');
+  await page.waitForTimeout(400);
+  await page.evaluate(async () => {
+    // llega de otro móvil una corrección de la que aquí se enseña como «sobra»
+    const vieja = (await DB.todos()).find(r => r.sid === 'cor-a');
+    await DB.guardar({ ...vieja, total: 70, mod: new Date().toISOString() }, { remoto: true });
+  });
+  await page.click('#modal-body .rep-quitar');
+  await page.waitForTimeout(900);
+  const rancio = await page.evaluate(async () => ({
+    quedan: (await DB.todos()).filter(r => /^cor-/.test(r.sid)).map(r => [r.sid, r.total]),
+    aviso: document.querySelector('#toast').textContent,
+    modal: document.querySelector('#modal-body').textContent.replace(/\s+/g, ' ')
+  }));
+  chk('repetidos', 'Si un apunte cambia mientras la revisión está abierta (llega una corrección de otro móvil), «Quitar» no borra nada: avisa y vuelve a enseñar cómo están ahora',
+    rancio.quedan.length === 2 && /Ha cambiado algo/.test(rancio.aviso) && /Se queda \(la última que se guardó[^)]*\): Gas Sur · 12\/04\/2025 · 70,00 €/.test(rancio.modal),
+    JSON.stringify(rancio).slice(0, 600));
+  await page.evaluate(() => document.querySelector('#modal').classList.add('hidden'));
+
+  // Una entrega guardada dos veces (mismo sid): descuenta doble; se avisa y se quita solo aquí
+  await limpiar();
+  const entregaDoble = await page.evaluate(async () => {
+    await DB.perGuardar({ nombre: 'Entrega Doble', inicio: '2026-11-02', sueldoMensual: 900, diasMes: 26, horasJornada: 7.5, tramos: [],
+      dias: ['2026-11-02', '2026-11-03', '2026-11-04', '2026-11-05', '2026-11-06', '2026-11-07'], tardes: [], faltas: [], descansos: [], notasDias: [], creado: new Date().toISOString() });
+    const t = (await DB.perTodos())[0];
+    const d = await new Promise((ok, no) => { const q = indexedDB.open('contable-db'); q.onsuccess = () => ok(q.result); q.onerror = () => no(q.error); });
+    await new Promise((ok, no) => {
+      const tx = d.transaction('pagos', 'readwrite');
+      const entrega = { sid: 'pago-gemelo', trabajadorSid: t.sid, fecha: '2026-11-05', importe: 100, notas: 'adelanto', creado: '2026-11-05T22:00:00.000Z', mod: '2026-11-05T22:00:00.000Z' };
+      tx.objectStore('pagos').add({ ...entrega }); tx.objectStore('pagos').add({ ...entrega });
+      tx.oncomplete = ok; tx.onerror = () => no(tx.error);
+    });
+    d.close();
+    return { alertas: await APP.alertas('2026-11'), pagos: (await DB.pagoTodos()).length };
+  });
+  chk('repetidos', 'Una entrega guardada dos veces en el móvil (mismo sid) también se avisa: «Hay 1 apunte repetido»',
+    entregaDoble.pagos === 2 && /Hay 1 apunte repetido/.test(entregaDoble.alertas[0] || ''), JSON.stringify(entregaDoble).slice(0, 300));
+  await page.evaluate(() => APP.inicio());
+  await page.waitForTimeout(500);
+  await page.click('#ini-alertas .rep-revisar');
+  await page.waitForTimeout(400);
+  const entregaModal = await page.evaluate(() => document.querySelector('#modal-body').textContent.replace(/\s+/g, ' '));
+  await page.click('#modal-body .rep-quitar');
+  await page.waitForTimeout(800);
+  const trasEntrega = await page.evaluate(async () => ({ pagos: (await DB.pagoTodos()).map(x => x.importe), alertas: await APP.alertas('2026-11') }));
+  chk('repetidos', 'La revisión la enseña con su nombre ("Entrega a Entrega Doble · 05/11/2026 · 100,00 €") y al quitarla queda UNA entrega de 100 €',
+    /Entregas al equipo/.test(entregaModal) && /Entrega a Entrega Doble · 05\/11\/2026 · 100,00 €/.test(entregaModal) && /está guardada dos veces en este móvil/.test(entregaModal) &&
+    trasEntrega.pagos.join() === '100' && !trasEntrega.alertas.some(a => /repetid/.test(a)), entregaModal.slice(0, 400) + JSON.stringify(trasEntrega).slice(0, 200));
+
+  // Corregir un apunte que se eliminó mientras el formulario estaba abierto
+  await limpiar();
+  await page.evaluate(async () => {
+    await DB.guardar({ tipo: 'factura', fecha: '2025-03-05', proveedor: 'Borrada Mientras', categoria: 'Otros', total: 100, creado: new Date(Date.now() - 86400000).toISOString() });
+    await APP.recientes();
+  });
+  const borradaAntes = await page.evaluate(async () => (await DB.todos()).find(r => r.proveedor === 'Borrada Mientras'));
+  await page.click('.tab[data-tab="facturas"]');
+  await page.waitForTimeout(400);
+  await page.evaluate((id) => [...document.querySelectorAll('.item[data-id], .foto[data-id]')].find(e => +e.dataset.id === id).click(), borradaAntes.id);
+  await page.waitForTimeout(300);
+  await page.click('#detalle-editar');
+  await page.waitForTimeout(400);
+  await page.fill('#f-total', '150');
+  await page.evaluate((id) => DB.borrar(id), borradaAntes.id);     // se elimina en otro dispositivo
+  aceptarDialogos = false;
+  await page.click('#factura-guardar');
+  await page.waitForTimeout(600);
+  aceptarDialogos = true;
+  const trasCancelar = await page.evaluate(async () => (await DB.todos()).filter(r => r.proveedor === 'Borrada Mientras').length);
+  const preguntaBorrada = ultimoDialogo;
+  await page.click('#factura-guardar');
+  await page.waitForTimeout(800);
+  const trasAceptar = await page.evaluate(async () => (await DB.todos()).filter(r => r.proveedor === 'Borrada Mientras').map(r => [r.total, r.sid, r.id]));
+  chk('repetidos', 'Corregir un apunte que se eliminó con el formulario abierto: se pregunta, y cancelar no guarda nada',
+    trasCancelar === 0 && /se eliminó mientras lo corregías/.test(preguntaBorrada) && /apunte nuevo/.test(preguntaBorrada), `${trasCancelar} · ${preguntaBorrada}`);
+  chk('repetidos', 'Y al aceptar se guarda como apunte NUEVO (otra identidad), no con la del que se eliminó',
+    trasAceptar.length === 1 && trasAceptar[0][0] === 150 && trasAceptar[0][1] !== borradaAntes.sid, JSON.stringify(trasAceptar));
+
+  // El reparto de una factura con varios tipos de IVA también se compara
+  await limpiar();
+  await page.evaluate(async () => {
+    const R = { remoto: true };
+    await DB.guardar({ sid: 'des-vieja', tipo: 'factura', fecha: '2025-02-10', proveedor: 'Makro', total: 115, ivaTipo: 'varios', ivaCuota: 15, ivaDesglose: { v21: 10, v10: 5, v4: null }, creado: '2025-02-10T18:00:00.000Z', mod: '2025-02-10T18:00:00.040Z' }, R);
+    await DB.guardar({ sid: 'des-buena', tipo: 'factura', fecha: '2025-02-10', proveedor: 'Makro', total: 115, ivaTipo: 'varios', ivaCuota: 15, ivaDesglose: { v21: 5, v10: 10, v4: null }, creado: '2025-02-10T18:00:00.000Z', mod: '2025-02-11T09:00:00.000Z' }, R);
+    await APP.inicio();
+  });
+  await page.click('.tab[data-tab="inicio"]');
+  await page.waitForTimeout(500);
+  await page.click('#ini-alertas .rep-revisar');
+  await page.waitForTimeout(400);
+  const desgloseModal = await page.evaluate(() => { const t = document.querySelector('#modal-body').textContent.replace(/\s+/g, ' '); document.querySelector('#modal').classList.add('hidden'); return t; });
+  chk('repetidos', 'Dos versiones que solo cambian en el reparto del IVA lo dicen: "IVA al 21 %: 10,00 € → 5,00 € · IVA al 10 %: 5,00 € → 10,00 €"',
+    /Lo que cambia: IVA al 21 %: 10,00 € → 5,00 € · IVA al 10 %: 5,00 € → 10,00 €/.test(desgloseModal), desgloseModal.slice(0, 700));
+
   // 8) Restaurar cuenta solo lo que de verdad añade
   const cuentaRest = await page.evaluate(async () => {
     const copia = await DB.exportarTodo();

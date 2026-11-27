@@ -597,7 +597,7 @@ a JPEG para caber en un documento de Firestore.
 La app **debe seguir funcionando igual sin nube y sin conexión**: Firebase se
 carga aparte y si falta, todo sigue en local.
 
-**Un apunte, una sola vez** (v86–v87; todo salió de un fallo real y de su revisión). Reglas
+**Un apunte, una sola vez** (v86–v88; todo salió de un fallo real y de su revisión). Reglas
 que ya no se pueden romper:
 - **Corregir conserva el `sid`.** `poner` en `js/db.js` (el guardado único de los cuatro
   almacenes): lo que ya existe, por su `id`, mantiene su `sid` aunque quien guarda no lo pase
@@ -641,9 +641,22 @@ que ya no se pueden romper:
 
 **Lo que ya quedó repetido** lo detecta `repetidosPorCorreccion` (`APP.repetidos`), dos casos:
 por una corrección (mismo `tipo` y mismo `creado`, distinto `sid`, la más nueva tocada al menos
-2 s después de crearse, y no todos del asesor) y **gemelos** (mismo `sid` dos veces en el móvil;
-`gemelo: true`, se quitan solo del móvil con `{ remoto: true }`). Se queda la de `mod` más
-reciente. Sale como **primer aviso** en el Inicio y el cuadro de mando y en el "Repaso antes de
+2 s después de crearse) y **gemelos** (mismo `sid` dos veces en el móvil; `gemelo: true`, se
+quitan solo del móvil con `{ remoto: true }`; se buscan también en **entregas y fichas del
+equipo**, con `soloGemelos`). Se queda la de `mod` más reciente. **Con el asesor por medio hay
+que ir con cuidado**: hasta la v86 fechaba el apunte al preparar la tarjeta, así que dos gastos
+dictados en una frase comparten `creado`; si todos los del grupo son del asesor no es una
+corrección, y si alguno lo es, solo cuenta como «versión de antes» la que **se parece** a la
+que se queda (`seParecen`: mismo proveedor, o misma fecha y total; en un cierre, misma fecha o
+mismo total). Si no, la app ofrecería quitar un gasto bueno.
+- **Antes de quitar se vuelve a mirar** (`leerRepetidos` dentro de `quitar`): si mientras la
+  pantalla estaba abierta cambió algo (una corrección que llega de otro móvil), no se quita
+  nada, se avisa y se repinta.
+- **Corregir algo que ya no existe** (se eliminó en otro dispositivo con el formulario
+  abierto): se pregunta y, si acaso, se guarda como apunte nuevo; con su identidad de antes
+  volvía un momento y desaparecía solo.
+- Un manejador envuelto en `guardarConAviso` **no espera a nada que dependa de fuera** (el
+  «compartir» del móvil): si esa promesa no termina, el botón se quedaría sin responder. Sale como **primer aviso** en el Inicio y el cuadro de mando y en el "Repaso antes de
 enviarlo" del informe, con «Revisar» (`abrirRepetidos`): cada pareja con **en qué cambian**
 (`enQueCambian`: "IVA: sin desglosar → 21 %"), el aviso de trimestres ya cerrados (hay que
 decírselo a la gestoría), **cuánto cambia la comisión del equipo** si lo que sobra es un cierre,
@@ -666,7 +679,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 610 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 618 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad, el asesor (con un Claude
 simulado: no gasta saldo ni necesita clave), los avisos del móvil y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.

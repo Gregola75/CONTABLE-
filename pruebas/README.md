@@ -12,7 +12,7 @@ bash pruebas/ejecutar.sh
 
 Al final dice `✅ TODO CORRECTO` o lista los fallos encontrados.
 
-## Qué se comprueba (610 comprobaciones)
+## Qué se comprueba (618 comprobaciones)
 
 **Avisos en el móvil** — qué dice la notificación diaria (falta el cierre de ayer, días sin
 marcar), que no reclama el cierre de un día en que el local no abre, que por defecto no
@@ -173,7 +173,10 @@ guarda una vez y una versión vieja no pisa la del móvil; que la miniatura en s
 devuelve una factura a su importe anterior ni resucita una borrada; y que renombrar un
 proveedor y restaurar una copia anterior no lo duplica. Y lo que ya quedó repetido: que se
 detecta (versiones de antes y apuntes guardados dos veces en el móvil) sin confundirlo con dos
-apuntes distintos hechos a la vez ni con dos dictados al asesor; que el Inicio y el repaso del
+apuntes distintos hechos a la vez ni con dos dictados al asesor (tampoco si uno se corrigió
+después); que una entrega guardada dos veces también se avisa y se quita; que si un apunte
+cambia con la revisión abierta no se borra nada a ciegas; que corregir un apunte eliminado
+mientras tanto pregunta y lo guarda como nuevo; que el Inicio y el repaso del
 informe avisan; que la revisión enseña la que se queda, la que sobra y **en qué cambian**
 (también si solo cambia el IVA), avisa de los trimestres ya cerrados y de cuánto cambia la
 comisión del equipo; que cancelar la pregunta no quita nada; y que al quitarlas las cuentas del
