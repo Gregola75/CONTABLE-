@@ -951,6 +951,25 @@ select { appearance: none; -webkit-appearance: none; }
 }
 .alerta .btn { flex-shrink: 0; }
 
+/* Repetidos por una corrección: la versión que se queda y la que sobra */
+.repetido {
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border-radius: 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--borde);
+  font-size: .86rem;
+}
+.repetido-vale { color: var(--texto); margin-bottom: 6px; }
+.repetido-sobra {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--texto-sec);
+}
+.repetido-sobra .btn { flex-shrink: 0; }
+
 /* Estadísticas ajustes */
 .stat-linea { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--borde); font-size: .9rem; }
 

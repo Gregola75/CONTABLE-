@@ -597,6 +597,20 @@ a JPEG para caber en un documento de Firestore.
 La app **debe seguir funcionando igual sin nube y sin conexión**: Firebase se
 carga aparte y si falta, todo sigue en local.
 
+**Corregir un apunte conserva su `sid`** (`ponerSid` en `js/db.js`: lo que ya existe, por
+su `id`, mantiene el `sid` aunque quien guarda no lo pase; los formularios además lo pasan).
+Hasta la v85, corregir una factura, un cierre o un proveedor le daba un `sid` nuevo: con la
+nube conectada el documento viejo se quedaba en Firestore, volvía a bajar al móvil y el gasto
+o el ingreso **se contaba dos veces** (también en el informe de la gestoría). Lo que ya quedó
+repetido se detecta con `repetidosPorCorreccion` (`APP.repetidos`): mismo `tipo` y mismo
+`creado` al milisegundo, distinto `sid`, y la versión más nueva tocada al menos 2 s después de
+crearse (así dos apuntes distintos nacidos a la vez no cuentan). Vale la de `mod` más
+reciente. Sale como **primer aviso** en el Inicio y en el cuadro de mando y en el "Repaso antes
+de enviarlo" del informe, con el botón «Revisar» (`abrirRepetidos`): enseña cada pareja, avisa
+si son de un trimestre ya cerrado (hay que decírselo a la gestoría) y quita la de antes **solo
+si el dueño lo confirma**, de una en una o todas; al quitar se retira el informe que estuviera
+generado. Nunca se borra nada solo. Solo interno: no va en el CSV ni en la impresión.
+
 **Restaurar una copia de seguridad conserva la fecha de modificación (`mod`) de cada
 registro** (`importarTodo` guarda con `conservarMod`). Si se le pusiera la de hoy, al
 conectar la nube lo restaurado pisaría datos más nuevos que hubiera allí (al estrenar
@@ -611,7 +625,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 563 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 587 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad, el asesor (con un Claude
 simulado: no gasta saldo ni necesita clave), los avisos del móvil y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.

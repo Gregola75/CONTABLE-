@@ -12,7 +12,7 @@ bash pruebas/ejecutar.sh
 
 Al final dice `✅ TODO CORRECTO` o lista los fallos encontrados.
 
-## Qué se comprueba (563 comprobaciones)
+## Qué se comprueba (587 comprobaciones)
 
 **Avisos en el móvil** — qué dice la notificación diaria (falta el cierre de ayer, días sin
 marcar), que no reclama el cierre de un día en que el local no abre, que por defecto no
@@ -164,6 +164,14 @@ compensa una semana trabajada entera sí se paga, pero cada semana entera compen
 que una semana a caballo de dos meses descuenta una vez y en su mes; y que no se tocan
 octubre, la semana del 26 de octubre al 1 de noviembre ni una cuenta liquidada antes de la
 regla.
+
+**Repetidos por una corrección** — que corregir una factura, un cierre o un proveedor los deja
+con la misma identidad (uno solo, también en la nube); que las versiones de antes que ya
+quedaron guardadas se detectan (y no se confunden con dos apuntes distintos hechos a la vez),
+que el Inicio y el repaso del informe avisan de que ese dinero se cuenta dos veces, que la
+revisión enseña la que se queda y la que sobra, avisa si es de un trimestre ya cerrado, no
+quita nada si se cancela la pregunta, y que al quitarlas las cuentas del mes vuelven a su
+sitio y el borrado llega a los demás dispositivos.
 
 **Seguridad** — que el PIN no se guarda en claro, que uno incorrecto no abre la
 app, y que las copias cifradas no se pueden leer sin su contraseña.

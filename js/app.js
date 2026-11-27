@@ -331,7 +331,7 @@
     }
 
     await DB.provGuardar({
-      ...(provEditando ? { id: provEditando.id, creado: provEditando.creado } : { creado: new Date().toISOString() }),
+      ...(provEditando ? { id: provEditando.id, sid: provEditando.sid, creado: provEditando.creado } : { creado: new Date().toISOString() }),
       nombre,
       nif,
       categoria: $('#p-categoria').value,
@@ -650,7 +650,7 @@
 
     await DB.guardar({
       ...(registroEditando && registroEditando.tipo === 'factura'
-        ? { id: registroEditando.id, creado: registroEditando.creado }
+        ? { id: registroEditando.id, sid: registroEditando.sid, creado: registroEditando.creado }
         : { creado: new Date().toISOString() }),
       tipo: 'factura',
       fecha,
@@ -817,7 +817,7 @@
 
     await DB.guardar({
       ...(registroEditando && registroEditando.tipo === 'cierre'
-        ? { id: registroEditando.id, creado: registroEditando.creado }
+        ? { id: registroEditando.id, sid: registroEditando.sid, creado: registroEditando.creado }
         : { creado: new Date().toISOString() }),
       tipo: 'cierre',
       fecha,
@@ -1545,10 +1545,109 @@
     return async (m) => regs.filter(r => r.tipo === 'cierre' && (r.fecha || '').startsWith(m));
   }
 
+  /* Apuntes repetidos por una corrección. Hasta noviembre de 2026, corregir una
+     factura, un cierre o un proveedor con la nube conectada dejaba la versión
+     antigua además de la corregida (se le daba otra identidad y la nube devolvía
+     la vieja). Las dos nacieron del mismo apunte, así que comparten al milisegundo
+     su fecha de registro ('creado') y tienen distinto sid. Vale la que se tocó la
+     última vez; las demás sobran. Aquí solo se detectan: quitarlas lo decide el
+     dueño, viéndolas, porque un gasto o un ingreso repetido se cuenta dos veces. */
+  function repetidosPorCorreccion(lista) {
+    const grupos = new Map();
+    for (const r of lista) {
+      if (!r || !r.creado || !r.sid) continue;
+      const clave = (r.tipo || '') + '|' + r.creado;
+      if (!grupos.has(clave)) grupos.set(clave, []);
+      grupos.get(clave).push(r);
+    }
+    const repetidos = [];
+    for (const g of grupos.values()) {
+      if (new Set(g.map(r => r.sid)).size < 2) continue;
+      const orden = [...g].sort((a, b) => String(b.mod || '').localeCompare(String(a.mod || '')) || (b.id - a.id));
+      // Una corrección se hace, como pronto, unos segundos después de apuntar. Dos
+      // apuntes distintos nacidos en el mismo instante y sin tocar no son esto.
+      if (!(Date.parse(orden[0].mod) - Date.parse(orden[0].creado) >= 2000)) continue;
+      repetidos.push({ vale: orden[0], sobran: orden.slice(1) });
+    }
+    return repetidos;
+  }
+
+  const queEsApunte = (r) => r.tipo === 'factura'
+    ? `${r.proveedor || 'Factura'} · ${fmtFecha(r.fecha)} · ${INFORME.eur(r.total || 0)}`
+    : `${r.mensual ? 'Ventas de ' + mesEnLetras(r.fecha) : 'Cierre del ' + fmtFecha(r.fecha)} · ${INFORME.eur(r.total || 0)}`;
+  const queEsProveedor = (p) => [p.nombre, p.nif, p.categoria].filter(Boolean).join(' · ');
+  const cuandoSeToco = (x) => x.mod ? new Date(x.mod).toLocaleDateString('es-ES') : 'fecha desconocida';
+
+  /* La pantalla para revisarlos: se ven las dos versiones y se quita la antigua,
+     de una en una o todas, siempre con una pregunta antes. */
+  async function abrirRepetidos() {
+    const [regs, provs] = await Promise.all([DB.todos(), DB.provTodos()]);
+    const apuntes = repetidosPorCorreccion(regs);
+    const proveedores = repetidosPorCorreccion(provs);
+    if (!apuntes.length && !proveedores.length) {
+      cerrarModal();
+      toast('✅ No queda nada repetido.');
+      return;
+    }
+    const hoyTri = triDe(hoyISO());
+    const cerrados = [...new Set(apuntes.flatMap(g => g.sobran)
+      .map(r => triDe(r.fecha || ''))
+      .filter(t => t.anio && (t.anio < hoyTri.anio || (t.anio === hoyTri.anio && t.t < hoyTri.t)))
+      .map(t => `${t.t}º trimestre de ${t.anio}`))];
+    const bloque = (g, almacen, texto) => `
+      <div class="repetido">
+        <div class="repetido-vale">✓ Se queda (corregida el ${cuandoSeToco(g.vale)}): <strong>${escapar(texto(g.vale))}</strong></div>
+        ${g.sobran.map(x => `<div class="repetido-sobra"><span>✗ Sobra (la de antes): ${escapar(texto(x))}</span>
+          <button class="btn btn-small btn-danger rep-quitar" data-almacen="${almacen}" data-id="${x.id}">Quitar</button></div>`).join('')}
+      </div>`;
+    const cuantos = apuntes.reduce((s, g) => s + g.sobran.length, 0) + proveedores.reduce((s, g) => s + g.sobran.length, 0);
+    $('#modal-body').innerHTML = `
+      <h2 style="margin-bottom:8px">♻️ Repetidos por una corrección</h2>
+      <p class="hint">Al corregir un apunte se quedaban guardadas las dos versiones: la de antes y la corregida. Ya no pasa, pero estas siguen ahí. Mira cada pareja y quita la que sobra. Si en alguna la buena fuera la de antes, no la quites aquí: búscala en Consultar y elimina la otra.</p>
+      ${apuntes.length ? `<p class="hint"><strong>Facturas y cierres</strong> (mientras estén las dos, ese dinero se cuenta dos veces):</p>${apuntes.map(g => bloque(g, 'registros', queEsApunte)).join('')}` : ''}
+      ${cerrados.length ? `<div class="alerta"><span>⚠️ Hay repetidos del <strong>${cerrados.join(' y del ')}</strong>, que ya cerró. Si ya enviaste ese informe a la gestoría, ese importe fue dos veces: avísale después de quitarlos.</span></div>` : ''}
+      ${proveedores.length ? `<p class="hint"><strong>Proveedores</strong> (no cambian ninguna cuenta, solo salen dos veces en la lista):</p>${proveedores.map(g => bloque(g, 'proveedores', queEsProveedor)).join('')}` : ''}
+      ${cuantos > 1 ? `<div class="form-actions"><button class="btn btn-danger" id="rep-quitar-todos">Quitar los ${cuantos} que sobran</button></div>` : ''}`;
+    $('#modal').classList.remove('hidden');
+
+    const quitar = async (lista) => {
+      for (const { almacen, id } of lista) {
+        if (almacen === 'proveedores') await DB.provBorrar(id);
+        else await DB.borrar(id);
+      }
+      toast(lista.length === 1 ? '🗑️ Quitado el repetido.' : `🗑️ Quitados los ${lista.length} repetidos.`);
+      // Un informe ya generado se hizo con el repetido dentro: hay que volver a sacarlo
+      informeActual = null;
+      ['#informe-resultado', '#faltan-card', '#prevision-card'].forEach(c => $(c).classList.add('hidden'));
+      await abrirRepetidos();
+      refrescarPantalla();
+    };
+    const sobrantes = [
+      ...apuntes.flatMap(g => g.sobran.map(x => ({ almacen: 'registros', id: x.id, texto: queEsApunte(x), vale: queEsApunte(g.vale) }))),
+      ...proveedores.flatMap(g => g.sobran.map(x => ({ almacen: 'proveedores', id: x.id, texto: queEsProveedor(x), vale: queEsProveedor(g.vale) })))
+    ];
+    $('#modal-body').querySelectorAll('.rep-quitar').forEach(b => b.addEventListener('click', guardarConAviso(async () => {
+      const x = sobrantes.find(s => s.almacen === b.dataset.almacen && s.id === +b.dataset.id);
+      if (!x) return;
+      if (!confirm(`Se va a quitar la versión de antes:\n\n   ${x.texto}\n\nSe queda la corregida:\n\n   ${x.vale}\n\n¿Quitarla?`)) return;
+      await quitar([x]);
+    })));
+    const todos = $('#rep-quitar-todos');
+    if (todos) todos.addEventListener('click', guardarConAviso(async () => {
+      if (!confirm(`Se van a quitar las ${sobrantes.length} versiones de antes:\n\n${sobrantes.map(x => '   ✗ ' + x.texto).join('\n')}\n\nSe quedan las corregidas. ¿Quitarlas todas?`)) return;
+      await quitar(sobrantes);
+    }));
+  }
+
   /* Los avisos de un mes, iguales en el inicio y en el cuadro de mando. */
   async function alertasDelMes(mes, d, regs, equipo) {
     const alertas = [];
     const hoy = hoyISO();
+    // Lo primero: apuntes repetidos por una corrección (se cuentan dos veces)
+    const repApuntes = repetidosPorCorreccion(regs).reduce((n, g) => n + g.sobran.length, 0);
+    const repProvs = repApuntes ? 0 : repetidosPorCorreccion(await DB.provTodos()).reduce((n, g) => n + g.sobran.length, 0);
+    if (repApuntes) alertas.push(`<div class="alerta"><span>♻️ <strong>${repApuntes === 1 ? 'Hay 1 apunte repetido' : `Hay ${repApuntes} apuntes repetidos`}</strong> por una corrección (se quedó la versión de antes además de la corregida): ese dinero <strong>se está contando dos veces</strong>.</span><button class="btn btn-small rep-revisar">Revisar</button></div>`);
+    else if (repProvs) alertas.push(`<div class="alerta"><span>♻️ ${repProvs === 1 ? 'Hay 1 proveedor repetido' : `Hay ${repProvs} proveedores repetidos`} por una corrección. No cambia ninguna cuenta, pero conviene quitarlo.</span><button class="btn btn-small rep-revisar">Revisar</button></div>`);
     const tri = ultimoTrimestreCerrado();
     const claveTri = `${tri.anio}-T${tri.t}`;
     if (localStorage.getItem(CLAVE_TRIMESTRE) !== claveTri) {
@@ -1625,6 +1724,7 @@
   }
 
   function conectarAlertas(contenedor) {
+    contenedor.querySelectorAll('.rep-revisar').forEach(b => b.addEventListener('click', guardarConAviso(abrirRepetidos)));
     contenedor.querySelectorAll('.tri-hecho').forEach(b => b.addEventListener('click', () => {
       localStorage.setItem(CLAVE_TRIMESTRE, b.dataset.clave);
       toast('📦 Trimestre marcado como guardado.');
@@ -1940,6 +2040,13 @@
     $('#faltan-contenido').innerHTML = faltan.length
       ? faltan.map(f => `<div class="alerta"><span>${textoGastoQueFalta(f)} <small class="txt-sec">· el trimestre anterior: ${INFORME.eur(f.totalAnterior)}</small></span></div>`).join('')
       : '<p class="hint txt-ok" style="margin:0">✅ No falta nada respecto al trimestre anterior: están todos los gastos habituales.</p>';
+    // Y lo que sobra: apuntes de este trimestre repetidos por una corrección
+    const repTri = repetidosPorCorreccion(await DB.todos()).flatMap(g => g.sobran)
+      .filter(r => { const t = triDe(r.fecha || ''); return t.anio === anio && t.t === trimestre; });
+    if (repTri.length) {
+      $('#faltan-contenido').insertAdjacentHTML('afterbegin', `<div class="alerta"><span>♻️ <strong>${repTri.length === 1 ? 'Hay 1 apunte repetido' : `Hay ${repTri.length} apuntes repetidos`} en este trimestre</strong> por una corrección: ${repTri.slice(0, 3).map(r => escapar(queEsApunte(r))).join('; ')}${repTri.length > 3 ? '…' : ''}. Este informe los está contando dos veces: quítalos antes de enviarlo.</span><button class="btn btn-small rep-revisar">Revisar</button></div>`);
+      conectarAlertas($('#faltan-contenido'));
+    }
     $('#faltan-card').classList.remove('hidden');
 
     // Previsión interna de impuestos (no va en el CSV ni en la impresión)
@@ -5839,6 +5946,7 @@
       const equipo = await deudaConElEquipo(cierresDesde(regs));
       return (await alertasDelMes(mes, datosMesDe(regs, trabajadores, mes), regs, equipo)).map(textoPlano);
     },
+    repetidos: repetidosPorCorreccion,
     inicio: pintarInicio, recientes: pintarRecientes, miniaturas: crearMiniaturasQueFaltan, semanas: semanasSinDescanso, semanasDeMas: semanasConDescansoDeMas,
     rrppSemana: calcularSemanaRRPP, rrppNoche: guardarNocheRRPP, datosMes,
     rrppCuenta: async (nombre) => {

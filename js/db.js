@@ -66,6 +66,19 @@ const DB = (() => {
 
   const nuevoSid = () => Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
 
+  /* Lo que ya estaba guardado (trae su id) conserva SIEMPRE su sid, aunque quien
+     lo guarda no lo pase. Si al corregir una factura se le diera un sid nuevo, la
+     nube la tomaría por otra distinta: quedarían la antigua y la corregida, y ese
+     gasto se contaría dos veces. */
+  async function ponerSid(almacen, obj) {
+    if (obj.sid) return;
+    if (obj.id != null) {
+      const antes = await pedir(almacen, 'readonly', s => s.get(obj.id));
+      if (antes && antes.sid) { obj.sid = antes.sid; return; }
+    }
+    obj.sid = nuevoSid();
+  }
+
   let alCambioFn = null;
   const alCambio = (fn) => { alCambioFn = fn; };
   function avisar(evento, dato) {
@@ -88,7 +101,7 @@ const DB = (() => {
        imagen: Blob|null, ocrTexto, creado: ISOString } */
 
   async function guardar(registro, opts = {}) {
-    if (!registro.sid) registro.sid = nuevoSid();
+    await ponerSid('registros', registro);
     if (!opts.remoto && !opts.conservarMod) registro.mod = new Date().toISOString();
     const id = await pedir('registros', 'readwrite', s => s.put(registro));
     if (!opts.remoto) avisar('registro', { ...registro, id });
@@ -121,7 +134,7 @@ const DB = (() => {
      { id, nombre, nif, categoria, creado } */
 
   async function provGuardar(p, opts = {}) {
-    if (!p.sid) p.sid = nuevoSid();
+    await ponerSid('proveedores', p);
     if (!opts.remoto && !opts.conservarMod) p.mod = new Date().toISOString();
     const id = await pedir('proveedores', 'readwrite', s => s.put(p));
     if (!opts.remoto) avisar('proveedor', { ...p, id });
@@ -150,7 +163,7 @@ const DB = (() => {
      Entrega:    { id, sid, mod, trabajadorSid, fecha, importe, notas, creado } */
 
   async function perGuardar(t, opts = {}) {
-    if (!t.sid) t.sid = nuevoSid();
+    await ponerSid('personal', t);
     if (!opts.remoto && !opts.conservarMod) t.mod = new Date().toISOString();
     const id = await pedir('personal', 'readwrite', s => s.put(t));
     if (!opts.remoto) avisar('personal', { ...t, id });
@@ -165,7 +178,7 @@ const DB = (() => {
     .then(r => (r || []).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')));
 
   async function pagoGuardar(p, opts = {}) {
-    if (!p.sid) p.sid = nuevoSid();
+    await ponerSid('pagos', p);
     if (!opts.remoto && !opts.conservarMod) p.mod = new Date().toISOString();
     const id = await pedir('pagos', 'readwrite', s => s.put(p));
     if (!opts.remoto) avisar('pago', { ...p, id });

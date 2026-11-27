@@ -19,6 +19,7 @@ const CHROME = [process.env.CHROME_PATH, '/opt/pw-browsers/chromium', '/opt/pw-b
   const page = await browser.newPage({ viewport: { width: 390, height: 900 } });
   const errores = [];
   page.on('pageerror', e => errores.push(e.message));
+  page.on('dialog', d => d.accept());
   await page.goto(URL);
   await page.waitForTimeout(900);
 
@@ -93,6 +94,103 @@ const CHROME = [process.env.CHROME_PATH, '/opt/pw-browsers/chromium', '/opt/pw-b
   await page.waitForTimeout(1600);
   chk('Si se edita en dos sitios, gana la versión más nueva',
     await page.evaluate(async () => (await DB.todos()).some(r => r.total === 999)));
+
+  // ── Corregir un apunte con la nube conectada: tiene que seguir siendo UNO ──
+  // (antes se le daba otra identidad: la nube devolvía la versión vieja y el gasto
+  //  o el ingreso se contaba dos veces)
+  await page.evaluate(async () => {
+    await DB.guardar({ tipo: 'factura', fecha: '2026-09-10', proveedor: 'Corregible S.L.', total: 100, creado: new Date().toISOString() });
+    await DB.guardar({ tipo: 'cierre', fecha: '2026-09-11', total: 640, proveedor: '', creado: new Date().toISOString() });
+    await DB.provGuardar({ nombre: 'Corregible S.L.', nif: 'B22222222', categoria: 'Mercancía', creado: new Date().toISOString() });
+  });
+  await page.waitForTimeout(1400);
+  const sidsAntes = await page.evaluate(async () => ({
+    factura: (await DB.todos()).find(r => r.proveedor === 'Corregible S.L.').sid,
+    cierre: (await DB.todos()).find(r => r.tipo === 'cierre' && r.total === 640).sid,
+    prov: (await DB.provTodos()).find(x => x.nombre === 'Corregible S.L.').sid
+  }));
+  const abrirApunte = async (tab, busca) => {
+    await page.click(`.tab[data-tab="${tab}"]`);
+    await page.waitForTimeout(500);
+    await page.evaluate(async (b) => {
+      const r = (await DB.todos()).find(x => b === 'factura' ? x.proveedor === 'Corregible S.L.' : (x.tipo === 'cierre' && x.total === 640));
+      [...document.querySelectorAll('.item[data-id], .foto[data-id]')].find(e => +e.dataset.id === r.id).click();
+    }, busca);
+    await page.waitForTimeout(300);
+    await page.click('#detalle-editar');
+    await page.waitForTimeout(400);
+  };
+  await abrirApunte('facturas', 'factura');
+  await page.fill('#f-total', '120');
+  await page.click('#factura-guardar');
+  await page.waitForTimeout(1500);
+  await abrirApunte('cierres', 'cierre');
+  await page.fill('#c-total', '700');
+  await page.click('#cierre-guardar');
+  await page.waitForTimeout(1500);
+  // El proveedor, por su formulario (la lista está en la pestaña de facturas)
+  await page.click('.tab[data-tab="facturas"]');
+  await page.waitForTimeout(400);
+  await page.evaluate(async () => {
+    const pr = (await DB.provTodos()).find(x => x.nombre === 'Corregible S.L.');
+    [...document.querySelectorAll('.item[data-pid]')].find(e => +e.dataset.pid === pr.id).click();
+  });
+  await page.waitForTimeout(300);
+  await page.fill('#p-nif', 'B33333333');
+  await page.click('#prov-guardar');
+  await page.waitForTimeout(1500);
+  const trasCorregir = await page.evaluate(async () => {
+    const regs = await DB.todos(), provs = await DB.provTodos();
+    const nubeR = Object.values(__stub.datos('registros')), nubeP = Object.values(__stub.datos('proveedores'));
+    return {
+      facturas: regs.filter(r => r.proveedor === 'Corregible S.L.').map(r => [r.total, r.sid]),
+      cierres: regs.filter(r => r.tipo === 'cierre' && r.fecha === '2026-09-11').map(r => [r.total, r.sid]),
+      provs: provs.filter(x => x.nombre === 'Corregible S.L.').map(x => [x.nif, x.sid]),
+      nubeFacturas: nubeR.filter(r => r.proveedor === 'Corregible S.L.').map(r => [r.total, r.sid]),
+      nubeCierres: nubeR.filter(r => r.tipo === 'cierre' && r.fecha === '2026-09-11').map(r => [r.total, r.sid]),
+      nubeProvs: nubeP.filter(x => x.nombre === 'Corregible S.L.').map(x => [x.nif, x.sid]),
+      repetidos: APP.repetidos(regs).length + APP.repetidos(provs).length
+    };
+  });
+  const unoSolo = (lista, valor, sid) => lista.length === 1 && lista[0][0] === valor && lista[0][1] === sid;
+  chk('Corregir una factura con la nube conectada deja UNA sola (120 €), con la misma identidad, aquí y en la nube',
+    unoSolo(trasCorregir.facturas, 120, sidsAntes.factura) && unoSolo(trasCorregir.nubeFacturas, 120, sidsAntes.factura), JSON.stringify(trasCorregir));
+  chk('Corregir un cierre deja UNO solo (700 €): el ingreso no se cuenta dos veces',
+    unoSolo(trasCorregir.cierres, 700, sidsAntes.cierre) && unoSolo(trasCorregir.nubeCierres, 700, sidsAntes.cierre), JSON.stringify(trasCorregir));
+  chk('Corregir un proveedor no lo duplica',
+    unoSolo(trasCorregir.provs, 'B33333333', sidsAntes.prov) && unoSolo(trasCorregir.nubeProvs, 'B33333333', sidsAntes.prov), JSON.stringify(trasCorregir));
+  chk('Un apunte bien corregido no sale como repetido', trasCorregir.repetidos === 0, String(trasCorregir.repetidos));
+
+  // ── Lo que ya quedó repetido de antes: se avisa y se quita en todos los dispositivos ──
+  await page.evaluate(async () => {
+    const f = (await DB.todos()).find(r => r.proveedor === 'Corregible S.L.');
+    // la versión de antes que la nube aún guarda: otra identidad, mismo 'creado'
+    __stub.inyectar('registros', 'version-vieja', {
+      sid: 'version-vieja', mod: f.creado, creado: f.creado, tipo: 'factura',
+      fecha: f.fecha, proveedor: f.proveedor, total: 100, imagenB64: null
+    });
+  });
+  await page.waitForTimeout(1600);
+  await page.click('.tab[data-tab="inicio"]');
+  await page.waitForTimeout(700);
+  const avisoRep = await page.evaluate(() => ({
+    texto: (document.querySelector('#ini-alertas') || document.body).textContent,
+    boton: !!document.querySelector('#ini-alertas .rep-revisar')
+  }));
+  chk('La versión de antes que aún guarda la nube se detecta y el Inicio avisa de que se cuenta dos veces',
+    avisoRep.boton && /1 apunte repetido/.test(avisoRep.texto) && /dos veces/.test(avisoRep.texto), avisoRep.texto.slice(0, 300));
+  await page.click('#ini-alertas .rep-revisar');
+  await page.waitForTimeout(400);
+  await page.click('#modal-body .rep-quitar');
+  await page.waitForTimeout(1600);
+  const trasQuitar = await page.evaluate(async () => ({
+    locales: (await DB.todos()).filter(r => r.proveedor === 'Corregible S.L.').map(r => r.total),
+    enNube: Object.values(__stub.datos('registros')).filter(r => r.proveedor === 'Corregible S.L.').map(r => r.total),
+    lapida: !!__stub.datos('borrados')['version-vieja']
+  }));
+  chk('Al quitarla se queda la corregida (120 €), desaparece de la nube y deja su marca para los demás dispositivos',
+    trasQuitar.locales.length === 1 && trasQuitar.locales[0] === 120 && trasQuitar.enNube.length === 1 && trasQuitar.enNube[0] === 120 && trasQuitar.lapida,
+    JSON.stringify(trasQuitar));
 
   const antes = await page.evaluate(async () => (await DB.todos()).length);
   await page.evaluate(() => NUBE.salir());
