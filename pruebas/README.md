@@ -12,7 +12,7 @@ bash pruebas/ejecutar.sh
 
 Al final dice `✅ TODO CORRECTO` o lista los fallos encontrados.
 
-## Qué se comprueba (608 comprobaciones)
+## Qué se comprueba (610 comprobaciones)
 
 **Avisos en el móvil** — qué dice la notificación diaria (falta el cierre de ayer, días sin
 marcar), que no reclama el cierre de un día en que el local no abre, que por defecto no
@@ -177,8 +177,10 @@ apuntes distintos hechos a la vez ni con dos dictados al asesor; que el Inicio y
 informe avisan; que la revisión enseña la que se queda, la que sobra y **en qué cambian**
 (también si solo cambia el IVA), avisa de los trimestres ya cerrados y de cuánto cambia la
 comisión del equipo; que cancelar la pregunta no quita nada; y que al quitarlas las cuentas del
-mes vuelven a su sitio. En la nube: que el borrado llega a los demás dispositivos y que lo
-borrado con la nube desconectada no vuelve al conectar.
+mes vuelven a su sitio; que restaurar una copia dice cuántos apuntes añadió de verdad; y que
+si el móvil no puede escribir un apunte, el guardado falla a la vista en vez de darse por
+bueno. En la nube: que el borrado llega a los demás dispositivos y que eliminar uno de dos
+apuntes guardados dos veces no borra el otro ni el de la nube.
 
 **Seguridad** — que el PIN no se guarda en claro, que uno incorrecto no abre la
 app, y que las copias cifradas no se pueden leer sin su contraseña.

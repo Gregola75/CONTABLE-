@@ -3775,6 +3775,35 @@ TARJETA 450,00`)]);
   chk('repetidos', 'Renombrar un proveedor y restaurar una copia anterior no lo deja dos veces (sigue uno, con el nombre nuevo)',
     provRen.length === 1 && provRen[0] === 'Makro Autoservicio', JSON.stringify(provRen));
 
+  // 8) Restaurar cuenta solo lo que de verdad añade
+  const cuentaRest = await page.evaluate(async () => {
+    const copia = await DB.exportarTodo();
+    const repetida = await DB.importarTodo(copia);                       // todo estaba ya: 0
+    copia.registros.push({ sid: 'nuevo-en-copia', tipo: 'cierre', fecha: '2025-06-09', proveedor: '', total: 10, creado: '2025-06-10T03:00:00.000Z', mod: '2025-06-10T03:00:00.000Z' },
+      { sid: 'nuevo-en-copia', tipo: 'cierre', fecha: '2025-06-09', proveedor: '', total: 10, creado: '2025-06-10T03:00:00.000Z', mod: '2025-06-10T03:00:00.000Z' });
+    const conDos = await DB.importarTodo(copia);                         // el mismo sid dos veces en la copia: 1
+    return { repetida, conDos, guardados: (await DB.todos()).filter(r => r.sid === 'nuevo-en-copia').length };
+  });
+  chk('repetidos', 'Restaurar una copia dice cuántos apuntes ha añadido DE VERDAD (0 si ya estaban; 1 si la copia trae el mismo dos veces)',
+    cuentaRest.repetida === 0 && cuentaRest.conDos === 1 && cuentaRest.guardados === 1, JSON.stringify(cuentaRest));
+
+  // 9) Sin sitio en el móvil: el guardado tiene que fallar a la vista, no decir «Guardado»
+  const sinSitio = await page.evaluate(async () => {
+    // Se imita lo que hace el navegador sin sitio: acepta el dato y luego cancela la transacción
+    const original = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (...a) { const r = original.apply(this, a); const tx = this.transaction; r.addEventListener('success', () => { try { tx.abort(); } catch (e) { /* ya cerrada */ } }); return r; };
+    let error = '';
+    try { await DB.guardar({ tipo: 'cierre', fecha: '2025-06-20', proveedor: '', total: 1840, creado: new Date().toISOString() }); }
+    catch (e) { error = e.message || String(e); }
+    IDBObjectStore.prototype.put = original;
+    const guardado = (await DB.todos()).some(r => r.fecha === '2025-06-20');
+    // y después se puede seguir guardando con normalidad
+    await DB.guardar({ tipo: 'cierre', fecha: '2025-06-21', proveedor: '', total: 900, creado: new Date().toISOString() });
+    return { error, guardado, despues: (await DB.todos()).filter(r => r.fecha === '2025-06-21').length };
+  });
+  chk('repetidos', 'Si el móvil no puede escribir el apunte, el guardado falla (se avisa) en vez de darse por bueno, y después se sigue pudiendo guardar',
+    !!sinSitio.error && !sinSitio.guardado && sinSitio.despues === 1, JSON.stringify(sinSitio));
+
   // ══════════════ 10. ERRORES DE JAVASCRIPT ══════════════
   console.log('\n═══ 10. ESTABILIDAD ═══');
   chk('estabilidad', 'Ningún error de JavaScript durante toda la verificación',

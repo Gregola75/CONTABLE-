@@ -608,7 +608,11 @@ que ya no se pueden romper:
 - **Un `sid`, un registro en el móvil.** Si llega algo sin `id` pero con un `sid` que ya está
   (la nube bajando mientras se restaura una copia), `poner` no añade otro: actualiza si lo que
   llega es más nuevo y si no lo deja. Lleva en memoria qué `id` tiene cada `sid` (`mapaSids`).
-  `importarTodo` salta también los proveedores por `sid`, no solo por nombre.
+  `importarTodo` salta también los proveedores por `sid`, no solo por nombre, y cuenta solo
+  lo que añade de verdad (`opts.anadido`). **Pendiente conocido:** el mapa es de cada pestaña;
+  con la app abierta dos veces a la vez (la instalada y una pestaña) puede volver a pasar, y
+  entonces lo recoge el aviso de repetidos. Cerrarlo del todo pide un índice `sid` (subir la
+  versión de la base de datos) para mirar y escribir en una sola transacción.
 - **Cada formulario, su corrección** (`facturaEditando`, `cierreEditando`): antes compartían
   una variable y guardar o cancelar en una pestaña convertía la corrección abierta en la otra
   en un apunte nuevo. El manejador lee una vez, al pulsar, qué corrige y qué foto lleva.
@@ -617,10 +621,21 @@ que ya no se pueden romper:
 - **Las miniaturas no pisan nada** (`DB.ponerMiniatura`, en una sola transacción): solo se
   pone si el registro sigue igual que cuando se leyó. Antes devolvían una factura corregida a
   su importe anterior y resucitaban una borrada.
-- **Lo borrado no vuelve.** `borrarRemoto` pide la marca de borrado y el borrado a la vez (sin
-  cobertura, la marca ya no espera al servidor), y lo borrado sin sesión iniciada se apunta en
-  `contable-nube-borrados-pendientes` y se envía al conectar (solo si el móvil usó la nube
-  alguna vez, `contable-nube-usada`).
+- **La marca de borrado no espera al servidor.** `borrarRemoto` pide la marca y el borrado a
+  la vez: sin cobertura, la marca se quedaba sin pedir si la app se cerraba, y otro móvil
+  volvía a subir lo borrado. **Pendiente conocido:** lo que se borra con la sesión de la nube
+  SIN iniciar no se borra de la nube y vuelve al conectar. Se probó una cola de borrados
+  pendientes y se retiró: podía borrar de todos los dispositivos una factura recuperada de
+  una copia, o pisar lo corregido después en otro móvil. Si se rehace, tiene que guardar
+  cuándo se borró, de qué cuenta, quitar de la cola lo que se vuelve a guardar y avisar antes
+  de enviar. Mientras, la pantalla de repetidos avisa si la nube no está conectada.
+- **Guardar es guardar** (`pedir` en `js/db.js`): una escritura no se da por buena hasta que
+  la transacción queda escrita (`tx.oncomplete`). Con el móvil sin sitio el navegador acepta
+  el dato y luego cancela: la app decía «Guardado» sin haber guardado nada. Ahora falla a la
+  vista ("No queda sitio en el móvil").
+- **Borrar uno de dos gemelos no borra el otro** (`quitar`): si queda en el móvil otro
+  registro con el mismo `sid`, el borrado no se avisa a la nube (allí son el mismo apunte, y
+  la marca de borrado se llevaría también el que queda).
 - **El asesor fecha el apunte al guardar**, no al preparar la tarjeta: dos apuntes dictados en
   una frase nacían en el mismo milisegundo.
 
@@ -651,7 +666,7 @@ cd pruebas && npm install     # solo la primera vez
 bash pruebas/ejecutar.sh
 ```
 
-Son 608 comprobaciones en un navegador real sobre los cálculos de dinero, las
+Son 610 comprobaciones en un navegador real sobre los cálculos de dinero, las
 copias de seguridad, el personal, el OCR, la seguridad, el asesor (con un Claude
 simulado: no gasta saldo ni necesita clave), los avisos del móvil y la sincronización.
 Debe terminar en `✅ TODO CORRECTO`. Ver `pruebas/README.md`.

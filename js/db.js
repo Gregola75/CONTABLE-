@@ -86,7 +86,14 @@ const DB = (() => {
     if (!idsPorSid[almacen]) {
       idsPorSid[almacen] = pedir(almacen, 'readonly', s => s.getAll()).then(lista => {
         const m = new Map();
-        (lista || []).forEach(x => { if (x.sid && !m.has(x.sid)) m.set(x.sid, x.id); });
+        // Los «gemelos» que ya hubiera (el mismo sid guardado más de una vez): sid → sus ids
+        m.gemelos = new Map();
+        (lista || []).forEach(x => {
+          if (!x.sid) return;
+          if (!m.has(x.sid)) { m.set(x.sid, x.id); return; }
+          if (!m.gemelos.has(x.sid)) m.gemelos.set(x.sid, [m.get(x.sid)]);
+          m.gemelos.get(x.sid).push(x.id);
+        });
         return m;
       });
       idsPorSid[almacen].catch(() => { delete idsPorSid[almacen]; });
@@ -109,12 +116,14 @@ const DB = (() => {
       try { idYa = await mapa.get(obj.sid); } catch (e) { /* aquel guardado falló: este sigue como nuevo */ }
       const ya = idYa != null ? await pedir(almacen, 'readonly', s => s.get(idYa)) : null;
       if (ya && ya.sid === obj.sid) {
+        opts.anadido = false;
         if (String(ya.mod || '') >= String(obj.mod || '')) return idYa;   // lo del móvil es igual o más nuevo
         obj.id = idYa;
       }
     }
     const escritura = pedir(almacen, 'readwrite', s => s.put(obj));
     const nuevo = obj.id == null;
+    opts.anadido = nuevo;
     if (nuevo) mapa.set(obj.sid, escritura);   // quien llegue con este sid mientras tanto, espera a este
     let id;
     try { id = await escritura; }
@@ -127,12 +136,24 @@ const DB = (() => {
   /* El borrado de los cuatro almacenes. */
   async function quitar(almacen, evento, id, opts = {}) {
     const antes = await pedir(almacen, 'readonly', s => s.get(id));
+    const mapa = await mapaSids(almacen);          // antes de borrar: todavía lo cuenta
     await pedir(almacen, 'readwrite', s => s.delete(id));
-    if (antes && antes.sid && idsPorSid[almacen]) {
-      const mapa = await mapaSids(almacen);
-      if (mapa.get(antes.sid) === id) mapa.delete(antes.sid);
+    if (!antes) return;
+    // ¿Queda en el móvil otro registro con el mismo sid (un «gemelo»)? Entonces en la
+    // nube son el mismo apunte: avisar de este borrado lo borraría allí y, de vuelta,
+    // borraría también el que queda. Se quita solo de este móvil.
+    let quedaGemelo = false;
+    if (antes.sid) {
+      const ids = (mapa.gemelos.get(antes.sid) || []).filter(x => x !== id);
+      quedaGemelo = ids.length > 0;
+      if (quedaGemelo) {
+        mapa.set(antes.sid, ids[0]);
+        if (ids.length > 1) mapa.gemelos.set(antes.sid, ids); else mapa.gemelos.delete(antes.sid);
+      } else if (mapa.get(antes.sid) === id) {
+        mapa.delete(antes.sid);
+      }
     }
-    if (!opts.remoto && antes) avisar(evento, antes);
+    if (!opts.remoto && !quedaGemelo) avisar(evento, antes);
   }
 
   let alCambioFn = null;
@@ -143,11 +164,28 @@ const DB = (() => {
     }
   }
 
+  /* Una petición a un almacén. Las LECTURAS contestan en cuanto llega el dato.
+     Las ESCRITURAS no se dan por buenas hasta que la transacción queda escrita de
+     verdad: con el móvil sin sitio, el navegador acepta el dato y después cancela
+     la transacción, y la app decía «Guardado» sin haber guardado nada. */
   function pedir(almacen, modo, fn) {
     return abrir().then(d => new Promise((resolve, reject) => {
-      const req = fn(d.transaction(almacen, modo).objectStore(almacen));
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error);
+      const tx = d.transaction(almacen, modo);
+      const req = fn(tx.objectStore(almacen));
+      if (modo !== 'readwrite') {
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+        return;
+      }
+      const fallo = (e) => {
+        const err = tx.error || req.error || (e && e.target && e.target.error);
+        const sinSitio = err && (err.name === 'QuotaExceededError' || /quota/i.test(err.message || ''));
+        reject(sinSitio ? new Error('No queda sitio en el móvil: no se ha guardado. Libera espacio y vuelve a intentarlo.')
+          : (err || new Error('No se pudo guardar en el dispositivo.')));
+      };
+      tx.oncomplete = () => resolve(req.result);
+      tx.onabort = fallo;
+      tx.onerror = fallo;
     }));
   }
 
@@ -293,7 +331,7 @@ const DB = (() => {
         copia.imagen = dataURLABlob(copia.imagen);
       }
       await guardar(conMod(copia), opciones);
-      n++;
+      if (opciones.anadido) n++;
     }
     if (Array.isArray(datos.proveedores)) {
       const actuales = await provTodos();
@@ -306,9 +344,9 @@ const DB = (() => {
         if (copia.sid && sidsProv.has(copia.sid)) continue;
         if (copia.nombre && !nombres.has(copia.nombre.trim().toLowerCase())) {
           await provGuardar(conMod(copia), opciones);
+          if (opciones.anadido) n++;
           nombres.add(copia.nombre.trim().toLowerCase());
           if (copia.sid) sidsProv.add(copia.sid);
-          n++;
         }
       }
     }
@@ -319,7 +357,7 @@ const DB = (() => {
         delete copia.id;
         if (copia.sid && sids.has(copia.sid)) continue;
         await perGuardar(conMod(copia), opciones);
-        n++;
+        if (opciones.anadido) n++;
       }
     }
     if (Array.isArray(datos.pagos)) {
@@ -329,7 +367,7 @@ const DB = (() => {
         delete copia.id;
         if (copia.sid && sids.has(copia.sid)) continue;
         await pagoGuardar(conMod(copia), opciones);
-        n++;
+        if (opciones.anadido) n++;
       }
     }
     return n;

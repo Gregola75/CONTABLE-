@@ -1704,7 +1704,7 @@
       </div>`;
     $('#modal-body').innerHTML = `
       <h2 style="margin-bottom:8px">♻️ Apuntes repetidos</h2>
-      <p class="hint">Al corregir un apunte se quedaban guardadas las dos versiones: la de antes y la corregida. Ya no pasa, pero estas siguen ahí. Mira cada pareja y quita la que sobra. Si en alguna la buena fuera la otra, no la quites aquí: búscala en Consultar y elimina la que no quieras.</p>
+      <p class="hint">Al corregir un apunte se quedaban guardadas las dos versiones: la de antes y la corregida. Ya no pasa, pero estas siguen ahí. Mira cada pareja y quita la que sobra. Si en alguna la buena fuera la otra, no la quites aquí: búscala en Consultar y elimina la que no quieras.${[...apuntes, ...proveedores].some(g => g.gemelo) ? ' Las que dicen «guardada dos veces en este móvil» son el mismo apunte repetido: quita la que sobra desde aquí.' : ''}</p>
       ${apuntes.length ? `<p class="hint"><strong>Facturas y cierres</strong> (mientras estén las dos, ese dinero cuenta de más):</p>${apuntes.map(g => bloque(g, 'registros', queEsApunte)).join('')}` : ''}
       ${cerrados.length ? `<div class="alerta"><span>⚠️ Hay repetidos del <strong>${cerrados.join(' y del ')}</strong>, que ya ${varios ? 'cerraron' : 'cerró'}. Si ya enviaste ${varios ? 'esos informes' : 'ese informe'} a la gestoría, ${varios ? 'llevaban' : 'llevaba'} la versión que sobra: avísale después de quitarlos.</span></div>` : ''}
       ${equipoTodos ? `<div class="alerta"><span>${escapar(equipoTodos)}</span></div>` : ''}
@@ -1716,7 +1716,7 @@
     const avisoNube = () => {
       const est = (typeof NUBE !== 'undefined' && NUBE.estado) ? NUBE.estado() : null;
       return est && est.disponible && !est.conectado
-        ? '\n\n⚠️ La nube no está conectada en este móvil. Si aquí la usas, conéctala antes en Ajustes: así lo que quites se quita también en tus otros dispositivos.'
+        ? '\n\n⚠️ La nube no está conectada en este móvil. Si la usas, conéctala antes en Ajustes: si no, lo que quites aquí volverá cuando la conectes.'
         : '';
     };
     const quitar = async (lista) => {

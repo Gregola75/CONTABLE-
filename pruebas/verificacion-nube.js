@@ -201,22 +201,39 @@ const CHROME = [process.env.CHROME_PATH, '/opt/pw-browsers/chromium', '/opt/pw-b
     await DB.guardar({ tipo: 'cierre', fecha: '2026-09-06', total: 111, proveedor: '', creado: new Date().toISOString() });
     return (await DB.todos()).some(r => r.total === 111);
   }));
-  // Lo que se borra en el móvil SIN la sesión iniciada no puede volver al conectar
-  const borradoFuera = await page.evaluate(async () => {
-    const r = (await DB.todos()).find(x => x.proveedor === 'Local S.L.');
-    await DB.borrar(r.id);
-    return { sid: r.sid, seguiaEnLaNube: !!__stub.datos('registros')[r.sid] };
-  });
+  // Dos registros con el mismo sid en el móvil (un «gemelo» de versiones anteriores): en
+  // la nube son UNO. Eliminar uno por el camino normal no puede borrar el otro ni el de la nube.
   await page.evaluate(() => NUBE.entrar());
-  await page.waitForTimeout(2400);
-  const trasVolver = await page.evaluate(async (sid) => ({
-    local: (await DB.todos()).some(r => r.sid === sid),
-    nube: !!__stub.datos('registros')[sid],
-    lapida: !!__stub.datos('borrados')[sid],
-    pendientes: localStorage.getItem('contable-nube-borrados-pendientes')
-  }), borradoFuera.sid);
-  chk('Una factura borrada con la nube desconectada NO vuelve al conectar: se borra también allí y deja su marca',
-    borradoFuera.seguiaEnLaNube && !trasVolver.local && !trasVolver.nube && trasVolver.lapida && !trasVolver.pendientes, JSON.stringify(trasVolver));
+  await page.waitForTimeout(2200);
+  const gemeloNube = await page.evaluate(async () => {
+    const sid = 'gemelo-nube';
+    __stub.inyectar('registros', sid, { sid, mod: '2026-09-20T10:00:00.000Z', creado: '2026-09-20T10:00:00.000Z', tipo: 'factura', fecha: '2026-09-20', proveedor: 'Bebidas S.A.', total: 500, imagenB64: null });
+    await new Promise(r => setTimeout(r, 1300));
+    // el gemelo, escrito por debajo como lo dejaban las versiones anteriores
+    const d = await new Promise((ok, no) => { const q = indexedDB.open('contable-db'); q.onsuccess = () => ok(q.result); q.onerror = () => no(q.error); });
+    await new Promise((ok, no) => {
+      const tx = d.transaction('registros', 'readwrite');
+      tx.objectStore('registros').add({ sid, mod: '2026-09-20T10:00:00.000Z', creado: '2026-09-20T10:00:00.000Z', tipo: 'factura', fecha: '2026-09-20', proveedor: 'Bebidas S.A.', total: 500 });
+      tx.oncomplete = ok; tx.onerror = () => no(tx.error);
+    });
+    d.close();
+    return (await DB.todos()).filter(r => r.sid === sid).map(r => r.id);
+  });
+  await page.reload();                      // la app arranca ya con los dos guardados
+  await page.waitForTimeout(900);
+  await page.evaluate(() => NUBE.entrar());
+  await page.waitForTimeout(2200);
+  const trasGemelo = await page.evaluate(async (ids) => {
+    await DB.borrar(ids[0]);                // lo que hace «Eliminar este registro»
+    await new Promise(r => setTimeout(r, 1500));
+    return {
+      locales: (await DB.todos()).filter(r => r.sid === 'gemelo-nube').length,
+      nube: !!__stub.datos('registros')['gemelo-nube'],
+      lapida: !!__stub.datos('borrados')['gemelo-nube']
+    };
+  }, gemeloNube);
+  chk('Eliminar uno de dos apuntes guardados dos veces (mismo sid) deja el otro: no se borra de la nube ni deja marca de borrado',
+    gemeloNube.length === 2 && trasGemelo.locales === 1 && trasGemelo.nube && !trasGemelo.lapida, JSON.stringify({ gemeloNube, trasGemelo }));
   chk('Sin errores de JavaScript', errores.length === 0, errores.join(' | '));
 
   await browser.close();
