@@ -201,6 +201,22 @@ const CHROME = [process.env.CHROME_PATH, '/opt/pw-browsers/chromium', '/opt/pw-b
     await DB.guardar({ tipo: 'cierre', fecha: '2026-09-06', total: 111, proveedor: '', creado: new Date().toISOString() });
     return (await DB.todos()).some(r => r.total === 111);
   }));
+  // Lo que se borra en el móvil SIN la sesión iniciada no puede volver al conectar
+  const borradoFuera = await page.evaluate(async () => {
+    const r = (await DB.todos()).find(x => x.proveedor === 'Local S.L.');
+    await DB.borrar(r.id);
+    return { sid: r.sid, seguiaEnLaNube: !!__stub.datos('registros')[r.sid] };
+  });
+  await page.evaluate(() => NUBE.entrar());
+  await page.waitForTimeout(2400);
+  const trasVolver = await page.evaluate(async (sid) => ({
+    local: (await DB.todos()).some(r => r.sid === sid),
+    nube: !!__stub.datos('registros')[sid],
+    lapida: !!__stub.datos('borrados')[sid],
+    pendientes: localStorage.getItem('contable-nube-borrados-pendientes')
+  }), borradoFuera.sid);
+  chk('Una factura borrada con la nube desconectada NO vuelve al conectar: se borra también allí y deja su marca',
+    borradoFuera.seguiaEnLaNube && !trasVolver.local && !trasVolver.nube && trasVolver.lapida && !trasVolver.pendientes, JSON.stringify(trasVolver));
   chk('Sin errores de JavaScript', errores.length === 0, errores.join(' | '));
 
   await browser.close();

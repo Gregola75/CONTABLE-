@@ -12,7 +12,7 @@ bash pruebas/ejecutar.sh
 
 Al final dice `✅ TODO CORRECTO` o lista los fallos encontrados.
 
-## Qué se comprueba (587 comprobaciones)
+## Qué se comprueba (608 comprobaciones)
 
 **Avisos en el móvil** — qué dice la notificación diaria (falta el cierre de ayer, días sin
 marcar), que no reclama el cierre de un día en que el local no abre, que por defecto no
@@ -165,13 +165,20 @@ que una semana a caballo de dos meses descuenta una vez y en su mes; y que no se
 octubre, la semana del 26 de octubre al 1 de noviembre ni una cuenta liquidada antes de la
 regla.
 
-**Repetidos por una corrección** — que corregir una factura, un cierre o un proveedor los deja
-con la misma identidad (uno solo, también en la nube); que las versiones de antes que ya
-quedaron guardadas se detectan (y no se confunden con dos apuntes distintos hechos a la vez),
-que el Inicio y el repaso del informe avisan de que ese dinero se cuenta dos veces, que la
-revisión enseña la que se queda y la que sobra, avisa si es de un trimestre ya cerrado, no
-quita nada si se cancela la pregunta, y que al quitarlas las cuentas del mes vuelven a su
-sitio y el borrado llega a los demás dispositivos.
+**Que nada se cuente dos veces** — que corregir una factura, un cierre o un proveedor los
+deja con la misma identidad (uno solo, también en la nube); que empezar a corregir una
+factura, apuntar un cierre en la otra pestaña y volver a guardar no crea otra; que tocar
+«Guardar» tres veces seguidas guarda una; que el mismo apunte llegando dos veces a la vez se
+guarda una vez y una versión vieja no pisa la del móvil; que la miniatura en segundo plano no
+devuelve una factura a su importe anterior ni resucita una borrada; y que renombrar un
+proveedor y restaurar una copia anterior no lo duplica. Y lo que ya quedó repetido: que se
+detecta (versiones de antes y apuntes guardados dos veces en el móvil) sin confundirlo con dos
+apuntes distintos hechos a la vez ni con dos dictados al asesor; que el Inicio y el repaso del
+informe avisan; que la revisión enseña la que se queda, la que sobra y **en qué cambian**
+(también si solo cambia el IVA), avisa de los trimestres ya cerrados y de cuánto cambia la
+comisión del equipo; que cancelar la pregunta no quita nada; y que al quitarlas las cuentas del
+mes vuelven a su sitio. En la nube: que el borrado llega a los demás dispositivos y que lo
+borrado con la nube desconectada no vuelve al conectar.
 
 **Seguridad** — que el PIN no se guarda en claro, que uno incorrecto no abre la
 app, y que las copias cifradas no se pueden leer sin su contraseña.

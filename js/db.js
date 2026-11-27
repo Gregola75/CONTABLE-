@@ -79,6 +79,62 @@ const DB = (() => {
     obj.sid = nuevoSid();
   }
 
+  /* Un mismo sid, un solo registro en el móvil. Qué id local tiene cada sid: se
+     lee una vez de cada almacén y se mantiene al día con cada guardado y borrado. */
+  const idsPorSid = {};
+  function mapaSids(almacen) {
+    if (!idsPorSid[almacen]) {
+      idsPorSid[almacen] = pedir(almacen, 'readonly', s => s.getAll()).then(lista => {
+        const m = new Map();
+        (lista || []).forEach(x => { if (x.sid && !m.has(x.sid)) m.set(x.sid, x.id); });
+        return m;
+      });
+      idsPorSid[almacen].catch(() => { delete idsPorSid[almacen]; });
+    }
+    return idsPorSid[almacen];
+  }
+
+  /* El guardado de los cuatro almacenes. Devuelve el id local.
+     Si llega algo SIN id pero con un sid que ya está en el móvil (la nube bajando
+     mientras se restaura una copia, por ejemplo) no se añade otro registro: se
+     actualiza el que hay si lo que llega es más nuevo, y si no, se deja como está.
+     Dos registros con el mismo sid se contarían dos veces, y al borrar uno la nube
+     borraría los dos. */
+  async function poner(almacen, evento, obj, opts = {}) {
+    await ponerSid(almacen, obj);
+    if (!opts.remoto && !opts.conservarMod) obj.mod = new Date().toISOString();
+    const mapa = await mapaSids(almacen);
+    if (obj.id == null && mapa.has(obj.sid)) {
+      let idYa = null;
+      try { idYa = await mapa.get(obj.sid); } catch (e) { /* aquel guardado falló: este sigue como nuevo */ }
+      const ya = idYa != null ? await pedir(almacen, 'readonly', s => s.get(idYa)) : null;
+      if (ya && ya.sid === obj.sid) {
+        if (String(ya.mod || '') >= String(obj.mod || '')) return idYa;   // lo del móvil es igual o más nuevo
+        obj.id = idYa;
+      }
+    }
+    const escritura = pedir(almacen, 'readwrite', s => s.put(obj));
+    const nuevo = obj.id == null;
+    if (nuevo) mapa.set(obj.sid, escritura);   // quien llegue con este sid mientras tanto, espera a este
+    let id;
+    try { id = await escritura; }
+    catch (e) { if (nuevo && mapa.get(obj.sid) === escritura) mapa.delete(obj.sid); throw e; }
+    if (nuevo || !mapa.has(obj.sid)) mapa.set(obj.sid, id);
+    if (!opts.remoto) avisar(evento, { ...obj, id });
+    return id;
+  }
+
+  /* El borrado de los cuatro almacenes. */
+  async function quitar(almacen, evento, id, opts = {}) {
+    const antes = await pedir(almacen, 'readonly', s => s.get(id));
+    await pedir(almacen, 'readwrite', s => s.delete(id));
+    if (antes && antes.sid && idsPorSid[almacen]) {
+      const mapa = await mapaSids(almacen);
+      if (mapa.get(antes.sid) === id) mapa.delete(antes.sid);
+    }
+    if (!opts.remoto && antes) avisar(evento, antes);
+  }
+
   let alCambioFn = null;
   const alCambio = (fn) => { alCambioFn = fn; };
   function avisar(evento, dato) {
@@ -100,18 +156,31 @@ const DB = (() => {
        proveedor, nif, categoria, total, efectivo, tarjeta, notas,
        imagen: Blob|null, ocrTexto, creado: ISOString } */
 
-  async function guardar(registro, opts = {}) {
-    await ponerSid('registros', registro);
-    if (!opts.remoto && !opts.conservarMod) registro.mod = new Date().toISOString();
-    const id = await pedir('registros', 'readwrite', s => s.put(registro));
-    if (!opts.remoto) avisar('registro', { ...registro, id });
-    return id;
+  const guardar = (registro, opts = {}) => poner('registros', 'registro', registro, opts);
+  const borrar = (id, opts = {}) => quitar('registros', 'borrar-registro', id, opts);
+  /* Pone la miniatura a un registro SOLO si sigue siendo el mismo que se leyó (no
+     se borró ni se corrigió mientras se hacía la miniatura). Va todo en una sola
+     transacción: entre mirar y escribir no puede colarse nada. No cambia 'mod' ni
+     se sube a la nube. */
+  function ponerMiniatura(id, sid, mod, miniatura) {
+    return abrir().then(d => new Promise((resolve, reject) => {
+      const tx = d.transaction('registros', 'readwrite');
+      const store = tx.objectStore('registros');
+      let puesta = false;
+      const lectura = store.get(id);
+      lectura.onsuccess = () => {
+        const r = lectura.result;
+        if (r && r.sid === sid && (r.mod || '') === (mod || '') && r.imagen instanceof Blob && !(r.miniatura instanceof Blob)) {
+          store.put({ ...r, miniatura });
+          puesta = true;
+        }
+      };
+      tx.oncomplete = () => resolve(puesta);
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('No se pudo guardar la miniatura.'));
+    }));
   }
-  async function borrar(id, opts = {}) {
-    const r = await obtener(id);
-    await pedir('registros', 'readwrite', s => s.delete(id));
-    if (!opts.remoto && r) avisar('borrar-registro', r);
-  }
+
   const obtener = (id) => pedir('registros', 'readonly', s => s.get(id)).then(r => r || null);
   const todos = () => pedir('registros', 'readonly', s => s.getAll()).then(r => r || []);
 
@@ -133,18 +202,8 @@ const DB = (() => {
   /* ==================== PROVEEDORES ====================
      { id, nombre, nif, categoria, creado } */
 
-  async function provGuardar(p, opts = {}) {
-    await ponerSid('proveedores', p);
-    if (!opts.remoto && !opts.conservarMod) p.mod = new Date().toISOString();
-    const id = await pedir('proveedores', 'readwrite', s => s.put(p));
-    if (!opts.remoto) avisar('proveedor', { ...p, id });
-    return id;
-  }
-  async function provBorrar(id, opts = {}) {
-    const p = await pedir('proveedores', 'readonly', s => s.get(id));
-    await pedir('proveedores', 'readwrite', s => s.delete(id));
-    if (!opts.remoto && p) avisar('borrar-proveedor', p);
-  }
+  const provGuardar = (p, opts = {}) => poner('proveedores', 'proveedor', p, opts);
+  const provBorrar = (id, opts = {}) => quitar('proveedores', 'borrar-proveedor', id, opts);
   const provTodos = () => pedir('proveedores', 'readonly', s => s.getAll())
     .then(r => (r || []).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')));
 
@@ -162,33 +221,13 @@ const DB = (() => {
                    dias: ['YYYY-MM-DD', …] (días trabajados), notas, creado }
      Entrega:    { id, sid, mod, trabajadorSid, fecha, importe, notas, creado } */
 
-  async function perGuardar(t, opts = {}) {
-    await ponerSid('personal', t);
-    if (!opts.remoto && !opts.conservarMod) t.mod = new Date().toISOString();
-    const id = await pedir('personal', 'readwrite', s => s.put(t));
-    if (!opts.remoto) avisar('personal', { ...t, id });
-    return id;
-  }
-  async function perBorrar(id, opts = {}) {
-    const t = await pedir('personal', 'readonly', s => s.get(id));
-    await pedir('personal', 'readwrite', s => s.delete(id));
-    if (!opts.remoto && t) avisar('borrar-personal', t);
-  }
+  const perGuardar = (t, opts = {}) => poner('personal', 'personal', t, opts);
+  const perBorrar = (id, opts = {}) => quitar('personal', 'borrar-personal', id, opts);
   const perTodos = () => pedir('personal', 'readonly', s => s.getAll())
     .then(r => (r || []).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')));
 
-  async function pagoGuardar(p, opts = {}) {
-    await ponerSid('pagos', p);
-    if (!opts.remoto && !opts.conservarMod) p.mod = new Date().toISOString();
-    const id = await pedir('pagos', 'readwrite', s => s.put(p));
-    if (!opts.remoto) avisar('pago', { ...p, id });
-    return id;
-  }
-  async function pagoBorrar(id, opts = {}) {
-    const p = await pedir('pagos', 'readonly', s => s.get(id));
-    await pedir('pagos', 'readwrite', s => s.delete(id));
-    if (!opts.remoto && p) avisar('borrar-pago', p);
-  }
+  const pagoGuardar = (p, opts = {}) => poner('pagos', 'pago', p, opts);
+  const pagoBorrar = (id, opts = {}) => quitar('pagos', 'borrar-pago', id, opts);
   const pagoTodos = () => pedir('pagos', 'readonly', s => s.getAll()).then(r => r || []);
 
   /* ==================== Copia de seguridad ==================== */
@@ -259,12 +298,16 @@ const DB = (() => {
     if (Array.isArray(datos.proveedores)) {
       const actuales = await provTodos();
       const nombres = new Set(actuales.map(p => p.nombre.trim().toLowerCase()));
+      const sidsProv = new Set(actuales.map(p => p.sid).filter(Boolean));
       for (const p of datos.proveedores) {
         const copia = { ...p };
         delete copia.id;
+        // El mismo proveedor (mismo sid) no se repite aunque ahora tenga otro nombre
+        if (copia.sid && sidsProv.has(copia.sid)) continue;
         if (copia.nombre && !nombres.has(copia.nombre.trim().toLowerCase())) {
           await provGuardar(conMod(copia), opciones);
           nombres.add(copia.nombre.trim().toLowerCase());
+          if (copia.sid) sidsProv.add(copia.sid);
           n++;
         }
       }
@@ -293,7 +336,7 @@ const DB = (() => {
   }
 
   return {
-    guardar, borrar, obtener, todos, buscar, proveedores,
+    guardar, borrar, obtener, todos, buscar, proveedores, ponerMiniatura,
     provGuardar, provBorrar, provTodos,
     perGuardar, perBorrar, perTodos,
     pagoGuardar, pagoBorrar, pagoTodos,

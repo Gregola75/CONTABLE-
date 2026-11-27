@@ -179,6 +179,8 @@ const NUBE = (() => {
     auth.onAuthStateChanged((u) => {
       usuario = u;
       if (u) {
+        try { localStorage.setItem(CLAVE_USADA, '1'); } catch (e) { /* no crítico */ }
+        enviarBorradosPendientes();   // lo borrado aquí mientras no había sesión
         empezarEscuchas();
       } else {
         pararEscuchas();
@@ -323,14 +325,57 @@ const NUBE = (() => {
   }
 
   async function borrarRemoto(nombre, sid) {
-    await col(nombre).doc(sid).delete();
-    await col('borrados').doc(sid).set({ de: nombre, mod: new Date().toISOString() });
+    // Las dos escrituras se piden a la vez, la marca de borrado primero. Sin
+    // cobertura, la promesa de una escritura no termina hasta que vuelve la
+    // conexión: si la marca esperase al borrado y la app se cerrara antes, no
+    // llegaría a pedirse, y otro móvil volvería a subir lo borrado.
+    const lapida = col('borrados').doc(sid).set({ de: nombre, mod: new Date().toISOString() });
+    const borrado = col(nombre).doc(sid).delete();
+    await Promise.all([lapida, borrado]);
+  }
+
+  /* Lo que se borra en este móvil SIN la sesión de la nube iniciada. Si no se
+     apuntara, al volver a conectar la nube lo devolvería (allí sigue, y no hay
+     marca de borrado). Se guarda la lista en el móvil y se envía al conectar.
+     Solo si este móvil ha usado la nube alguna vez: quien no la usa no acumula nada. */
+  const CLAVE_USADA = 'contable-nube-usada';
+  const CLAVE_PENDIENTES = 'contable-nube-borrados-pendientes';
+  const COLECCION_DE = { 'borrar-registro': 'registros', 'borrar-proveedor': 'proveedores', 'borrar-personal': 'personal', 'borrar-pago': 'pagos' };
+  function leerPendientes() {
+    try { const l = JSON.parse(localStorage.getItem(CLAVE_PENDIENTES) || '[]'); return Array.isArray(l) ? l : []; }
+    catch (e) { return []; }
+  }
+  function apuntarBorradoPendiente(nombre, sid) {
+    try {
+      if (localStorage.getItem(CLAVE_USADA) !== '1') return;
+      const lista = leerPendientes().filter(x => x.sid !== sid);
+      lista.push({ de: nombre, sid });
+      localStorage.setItem(CLAVE_PENDIENTES, JSON.stringify(lista.slice(-3000)));
+    } catch (e) { /* sin sitio para apuntarlo: se queda como antes */ }
+  }
+  function enviarBorradosPendientes() {
+    const lista = leerPendientes().filter(x => x && x.sid && Object.values(COLECCION_DE).includes(x.de));
+    if (!lista.length) return;
+    // No se espera a que el servidor conteste: quedan pedidas (y a la vista de las
+    // escuchas, que ya las cuentan) y la lista solo se vacía cuando todas llegan.
+    Promise.all(lista.map(x => borrarRemoto(x.de, x.sid))).then(() => {
+      try {
+        const enviados = new Set(lista.map(x => x.sid));
+        const quedan = leerPendientes().filter(x => !enviados.has(x.sid));
+        if (quedan.length) localStorage.setItem(CLAVE_PENDIENTES, JSON.stringify(quedan));
+        else localStorage.removeItem(CLAVE_PENDIENTES);
+      } catch (e) { /* se reintentará la próxima vez */ }
+    }).catch((e) => console.error('Borrados pendientes:', e));
   }
 
   /* ---------- Cambios locales → nube (avisados por db.js) ---------- */
 
   function alCambioLocal(evento, dato) {
-    if (!usuario || !dato || !dato.sid) return;
+    if (!dato || !dato.sid) return;
+    if (!usuario) {
+      if (COLECCION_DE[evento]) apuntarBorradoPendiente(COLECCION_DE[evento], dato.sid);
+      return;
+    }
     const tarea = (() => {
       switch (evento) {
         case 'registro': return subir('registros', dato);

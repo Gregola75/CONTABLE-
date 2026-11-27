@@ -969,6 +969,7 @@ select { appearance: none; -webkit-appearance: none; }
   color: var(--texto-sec);
 }
 .repetido-sobra .btn { flex-shrink: 0; }
+.repetido-cambia { display: block; margin-top: 3px; color: var(--oro); }
 
 /* Estadísticas ajustes */
 .stat-linea { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--borde); font-size: .9rem; }

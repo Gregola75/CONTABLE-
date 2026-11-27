@@ -3419,6 +3419,13 @@ TARJETA 450,00`)]);
     // Un proveedor corregido (se le puso el NIF): quedaron los dos
     await DB.provGuardar({ sid: 'rep-p-viejo', nombre: 'Luz y Fuerza', nif: '', categoria: 'Suministros', creado: '2025-08-01T10:00:00.000Z', mod: '2025-08-01T10:00:00.030Z' }, R);
     await DB.provGuardar({ sid: 'rep-p-bueno', nombre: 'Luz y Fuerza', nif: 'B99999999', categoria: 'Suministros', creado: '2025-08-01T10:00:00.000Z', mod: '2025-08-03T10:00:00.000Z' }, R);
+    // Dos apuntes dictados al asesor en una misma frase: nacen en el mismo instante y se
+    // guardan segundos después. Son dos apuntes buenos, NO una corrección.
+    await DB.guardar({ sid: 'ase-a', tipo: 'factura', fecha: '2025-08-23', proveedor: 'Taxi', total: 12, origen: 'asesor', creado: '2025-08-23T20:00:00.000Z', mod: '2025-08-23T20:00:06.000Z' }, R);
+    await DB.guardar({ sid: 'ase-b', tipo: 'factura', fecha: '2025-08-23', proveedor: 'Parking', total: 8, origen: 'asesor', creado: '2025-08-23T20:00:00.000Z', mod: '2025-08-23T20:00:09.000Z' }, R);
+    // Alguien del equipo con objetivo: trabajó el día del cierre repetido
+    await DB.perGuardar({ nombre: 'Con Objetivo', inicio: '2025-08-01', sueldoMensual: 900, diasMes: 26, horasJornada: 7.5,
+      tramos: [{ objetivo: 1000, porcentaje: 10 }], dias: ['2025-08-15'], tardes: [], faltas: [], notasDias: [], creado: '2025-08-01T10:00:00.000Z' });
   });
   const rep1 = await page.evaluate(async () => {
     const g = APP.repetidos(await DB.todos());
@@ -3437,8 +3444,10 @@ TARJETA 450,00`)]);
     !!grupoDe('rep-c-3') && grupoDe('rep-c-3').sobran.join() === 'rep-c-2,rep-c-1', JSON.stringify(rep1.grupos));
   chk('repetidos', 'Dos apuntes distintos guardados en el mismo instante NO se toman por repetidos, ni una factura y un cierre con la misma fecha de registro',
     !rep1.grupos.some(x => /par-|mix-/.test(x.vale + x.sobran.join())), JSON.stringify(rep1.grupos));
-  chk('repetidos', 'Mientras están, el mes cuenta el dinero de más (gastos 328 en vez de 228; ventas 2.830 en vez de 1.300)',
-    cerca(rep1.gastos, 328) && cerca(rep1.ingresos, 2830), `${rep1.gastos} / ${rep1.ingresos}`);
+  chk('repetidos', 'Mientras están, el mes cuenta el dinero de más (gastos 348 en vez de 248; ventas 2.830 en vez de 1.300)',
+    cerca(rep1.gastos, 348) && cerca(rep1.ingresos, 2830), `${rep1.gastos} / ${rep1.ingresos}`);
+  chk('repetidos', 'Dos apuntes dictados al asesor en una misma frase NO salen como repetidos',
+    !rep1.grupos.some(x => /ase-/.test(x.vale + x.sobran.join())), JSON.stringify(rep1.grupos));
   chk('repetidos', 'El aviso dice cuántos sobran (3) y que ese dinero se cuenta dos veces, y es el primero de la lista',
     /Hay 3 apuntes repetidos/.test(rep1.alertas[0] || '') && /dos veces/.test(rep1.alertas[0] || '') && !/Revisar/.test(rep1.alertas[0] || ''), (rep1.alertas[0] || '').slice(0, 200));
   chk('repetidos', 'El proveedor repetido también se detecta (vale el que tiene el NIF)',
@@ -3475,9 +3484,14 @@ TARJETA 450,00`)]);
     quitar: document.querySelectorAll('#modal-body .rep-quitar').length,
     todos: (document.querySelector('#rep-quitar-todos') || {}).textContent || ''
   }));
-  chk('repetidos', 'La revisión enseña cada pareja: la que se queda (120,00 €, corregida el 12/8/2025) y la que sobra (100,00 €)',
-    /Se queda \(corregida el 12\/8\/2025\): Luz y Fuerza · 10\/08\/2025 · 120,00 €/.test(repModal.texto) && /Sobra \(la de antes\): Luz y Fuerza · 10\/08\/2025 · 100,00 €/.test(repModal.texto) &&
+  chk('repetidos', 'La revisión enseña cada pareja: la que se queda (120,00 €, la última que se guardó, el 12/8/2025) y la que sobra (100,00 €, guardada el 10/8/2025)',
+    /Se queda \(la última que se guardó, el 12\/8\/2025\): Luz y Fuerza · 10\/08\/2025 · 120,00 €/.test(repModal.texto) && /Sobra \(guardada el 10\/8\/2025\): Luz y Fuerza · 10\/08\/2025 · 100,00 €/.test(repModal.texto) &&
     /Cierre del 15\/08\/2025 · 800,00 €/.test(repModal.texto) && /750,00 €/.test(repModal.texto) && /780,00 €/.test(repModal.texto), repModal.texto.slice(0, 700));
+  chk('repetidos', 'Y dice en qué cambian las dos versiones ("Total: 100,00 € → 120,00 €"; en el proveedor, "NIF: vacío → B99999999")',
+    /Lo que cambia: Total: 100,00 € → 120,00 €/.test(repModal.texto) && /Lo que cambia: Total: 750,00 € → 800,00 €/.test(repModal.texto) && /Lo que cambia: NIF: vacío → B99999999/.test(repModal.texto),
+    repModal.texto.slice(0, 900));
+  chk('repetidos', 'Avisa de que el cierre repetido contaba para la comisión del equipo y de cuánto baja al quitarlo (233,00 € en agosto 2025)',
+    /comisión del equipo/.test(repModal.texto) && /en agosto 2025 baja 233,00 €/.test(repModal.texto) && /repasa Personal/.test(repModal.texto), repModal.texto.slice(0, 1300));
   chk('repetidos', 'Avisa de que son de un trimestre ya cerrado (3º de 2025) y de que hay que decírselo a la gestoría si ya se envió',
     /3º trimestre de 2025/.test(repModal.texto) && /gestoría/.test(repModal.texto), repModal.texto.slice(0, 900));
   chk('repetidos', 'Hay un botón por cada versión que sobra (3 apuntes + 1 proveedor) y uno para quitarlas todas',
@@ -3490,8 +3504,11 @@ TARJETA 450,00`)]);
   aceptarDialogos = true;
   const repCancel = await page.evaluate(async () => (await DB.todos()).length);
   chk('repetidos', 'La pregunta dice qué se quita y qué se queda, y cancelarla no quita nada',
-    repCancel === 9 && /Se va a quitar la versión de antes/.test(ultimoDialogo) && /100,00 €/.test(ultimoDialogo) && /Se queda la corregida/.test(ultimoDialogo) && /120,00 €/.test(ultimoDialogo),
+    repCancel === 11 && /Se va a quitar esta versión/.test(ultimoDialogo) && /100,00 €/.test(ultimoDialogo) && /Se queda la última que se guardó/.test(ultimoDialogo) && /120,00 €/.test(ultimoDialogo) &&
+    /Lo que cambia: Total: 100,00 € → 120,00 €/.test(ultimoDialogo),
     `${repCancel} · ${ultimoDialogo}`);
+  chk('repetidos', 'Al quitar una factura, la pregunta no habla del equipo (no le cambia nada)',
+    !/comisión/.test(ultimoDialogo), ultimoDialogo);
 
   // Quitar una
   await page.click('#modal-body .rep-quitar');
@@ -3502,7 +3519,7 @@ TARJETA 450,00`)]);
     informeOculto: document.querySelector('#informe-resultado').classList.contains('hidden') && document.querySelector('#faltan-card').classList.contains('hidden') && document.querySelector('#prevision-card').classList.contains('hidden')
   }));
   chk('repetidos', 'Al aceptar se quita solo la versión de antes de esa factura; la corregida y todo lo demás siguen',
-    !repUna.sids.includes('rep-f-vieja') && repUna.sids.includes('rep-f-buena') && repUna.sids.length === 8 && repUna.quedan === 3, JSON.stringify(repUna));
+    !repUna.sids.includes('rep-f-vieja') && repUna.sids.includes('rep-f-buena') && repUna.sids.length === 10 && repUna.quedan === 3, JSON.stringify(repUna));
   chk('repetidos', 'El informe que estaba generado se retira (se hizo con el repetido dentro): hay que volver a sacarlo',
     repUna.informeOculto, JSON.stringify(repUna));
 
@@ -3520,10 +3537,14 @@ TARJETA 450,00`)]);
     };
   });
   chk('repetidos', '"Quitar los que sobran" deja una sola versión de cada cosa: las corregidas',
-    repFin.sids.join() === 'mix-c,mix-f,par-a,par-b,rep-c-3,rep-f-buena' && repFin.provs.join() === 'rep-p-bueno' && /750,00 €/.test(ultimoDialogo) && /780,00 €/.test(ultimoDialogo),
+    repFin.sids.join() === 'ase-a,ase-b,mix-c,mix-f,par-a,par-b,rep-c-3,rep-f-buena' && repFin.provs.join() === 'rep-p-bueno' && /750,00 €/.test(ultimoDialogo) && /780,00 €/.test(ultimoDialogo),
     JSON.stringify(repFin.sids) + ' ' + JSON.stringify(repFin.provs));
-  chk('repetidos', 'Y las cuentas del mes vuelven a su sitio: gastos 228,00 € y ventas 1.300,00 €',
-    cerca(repFin.gastos, 228) && cerca(repFin.ingresos, 1300), `${repFin.gastos} / ${repFin.ingresos}`);
+  chk('repetidos', 'La pregunta de quitarlas todas repite lo de la comisión del equipo (233,00 €)',
+    /comisión del equipo/.test(ultimoDialogo) && /baja 233,00 €/.test(ultimoDialogo), ultimoDialogo.slice(0, 900));
+  chk('repetidos', 'Y las cuentas del mes vuelven a su sitio: gastos 248,00 € y ventas 1.300,00 €',
+    cerca(repFin.gastos, 248) && cerca(repFin.ingresos, 1300), `${repFin.gastos} / ${repFin.ingresos}`);
+  chk('repetidos', 'La lista de proveedores de la pestaña de facturas ya solo enseña uno (no se puede tocar el que se quitó)',
+    await page.evaluate(() => document.querySelectorAll('#prov-lista .item[data-pid]').length === 1));
   chk('repetidos', 'Ya no queda aviso de repetidos y la revisión se cierra sola',
     !repFin.alertas.some(a => /repetid/i.test(a)) && repFin.modalCerrado, JSON.stringify(repFin.alertas).slice(0, 200));
 
@@ -3562,6 +3583,197 @@ TARJETA 450,00`)]);
   });
   chk('repetidos', 'Y el almacén lo garantiza por dentro: lo que ya existía conserva su identidad aunque se guarde sin ella',
     sidPorDentro.reg && sidPorDentro.prov, JSON.stringify(sidPorDentro));
+
+  // ── Las otras formas de acabar con un apunte de más (salieron en la revisión) ──
+  await limpiar();
+  // 1) Corregir una factura, pasar a la otra pestaña a apuntar un cierre y volver a guardar
+  await page.evaluate(async () => {
+    await DB.guardar({ tipo: 'factura', fecha: '2025-09-10', proveedor: 'Dos Pestañas', categoria: 'Otros', total: 100, creado: new Date(Date.now() - 86400000).toISOString() });
+    await APP.recientes();
+  });
+  const dosPest = await page.evaluate(async () => (await DB.todos()).find(r => r.proveedor === 'Dos Pestañas'));
+  await page.click('.tab[data-tab="facturas"]');
+  await page.waitForTimeout(400);
+  await page.evaluate((id) => [...document.querySelectorAll('.item[data-id], .foto[data-id]')].find(e => +e.dataset.id === id).click(), dosPest.id);
+  await page.waitForTimeout(300);
+  await page.click('#detalle-editar');
+  await page.waitForTimeout(400);
+  await page.fill('#f-total', '150');
+  await page.click('.tab[data-tab="cierres"]');          // sin guardar la factura
+  await page.waitForTimeout(300);
+  await page.click('#cierre-manual');
+  await page.waitForTimeout(400);
+  await page.fill('#c-fecha', '2025-09-11');
+  await page.fill('#c-total', '640');
+  await page.click('#cierre-guardar');
+  await page.waitForTimeout(700);
+  await page.click('.tab[data-tab="facturas"]');          // la corrección sigue ahí
+  await page.waitForTimeout(300);
+  await page.click('#factura-guardar');
+  await page.waitForTimeout(800);
+  const trasDosPest = await page.evaluate(async () => ({
+    facturas: (await DB.todos()).filter(r => r.proveedor === 'Dos Pestañas').map(r => [r.id, r.sid, r.total]),
+    cierres: (await DB.todos()).filter(r => r.tipo === 'cierre').length,
+    aviso: document.querySelector('#toast').textContent
+  }));
+  chk('repetidos', 'Empezar a corregir una factura, apuntar un cierre en la otra pestaña y volver a guardar: sigue siendo UNA factura (150 €), la misma',
+    trasDosPest.facturas.length === 1 && trasDosPest.facturas[0][0] === dosPest.id && trasDosPest.facturas[0][1] === dosPest.sid && trasDosPest.facturas[0][2] === 150 &&
+    trasDosPest.cierres === 1 && /corregida/.test(trasDosPest.aviso), JSON.stringify(trasDosPest));
+
+  // 2) Dos toques seguidos en «Guardar»
+  await page.click('.tab[data-tab="cierres"]');
+  await page.waitForTimeout(300);
+  await page.click('#cierre-manual');
+  await page.waitForTimeout(400);
+  await page.fill('#c-fecha', '2025-09-12');
+  await page.fill('#c-total', '500');
+  await page.evaluate(() => { const b = document.querySelector('#cierre-guardar'); b.click(); b.click(); b.click(); });
+  await page.waitForTimeout(900);
+  const dobleToque = await page.evaluate(async () => (await DB.todos()).filter(r => r.tipo === 'cierre' && r.fecha === '2025-09-12').length);
+  chk('repetidos', 'Tocar «Guardar» tres veces seguidas guarda el cierre UNA vez', dobleToque === 1, String(dobleToque));
+
+  // 3) Un mismo apunte (mismo sid) no puede guardarse dos veces en el móvil
+  const unSid = await page.evaluate(async () => {
+    const R = { remoto: true };
+    const base = { sid: 'mismo-sid', tipo: 'factura', fecha: '2025-09-15', proveedor: 'Mismo Sid', creado: '2025-09-15T10:00:00.000Z' };
+    // dos llegadas a la vez (la nube bajando y una copia restaurándose)
+    await Promise.all([
+      DB.guardar({ ...base, total: 50, mod: '2025-09-15T10:00:00.000Z' }, R),
+      DB.guardar({ ...base, total: 50, mod: '2025-09-15T10:00:00.000Z' }, R)
+    ]);
+    const tras2 = (await DB.todos()).filter(r => r.sid === 'mismo-sid').length;
+    await DB.guardar({ ...base, total: 40, mod: '2025-09-14T10:00:00.000Z' }, R);     // más vieja: no pisa
+    const trasVieja = (await DB.todos()).filter(r => r.sid === 'mismo-sid').map(r => r.total);
+    await DB.guardar({ ...base, total: 60, mod: '2025-09-16T10:00:00.000Z' }, R);     // más nueva: actualiza
+    const trasNueva = (await DB.todos()).filter(r => r.sid === 'mismo-sid').map(r => r.total);
+    // y con personal y entregas
+    await Promise.all([DB.pagoGuardar({ sid: 'pago-sid', trabajadorSid: 'x', fecha: '2025-09-15', importe: 10, mod: '2025-09-15T10:00:00.000Z' }, R),
+      DB.pagoGuardar({ sid: 'pago-sid', trabajadorSid: 'x', fecha: '2025-09-15', importe: 10, mod: '2025-09-15T10:00:00.000Z' }, R)]);
+    const pagos = (await DB.pagoTodos()).filter(x => x.sid === 'pago-sid').length;
+    return { tras2, trasVieja, trasNueva, pagos };
+  });
+  chk('repetidos', 'Si el mismo apunte llega dos veces a la vez (la nube bajando mientras se restaura una copia) se guarda UNA vez, también las entregas',
+    unSid.tras2 === 1 && unSid.pagos === 1, JSON.stringify(unSid));
+  chk('repetidos', 'Y si vuelve a llegar, una versión más vieja no pisa la del móvil (sigue 50) y una más nueva la actualiza (60), sin añadir otra',
+    unSid.trasVieja.join() === '50' && unSid.trasNueva.join() === '60', JSON.stringify(unSid));
+
+  // 4) Gemelos que ya estuvieran guardados (de antes): se detectan y se quitan solo del móvil
+  const gemelos = await page.evaluate(async () => {
+    const abrir = () => new Promise((ok, no) => { const q = indexedDB.open('contable-db'); q.onsuccess = () => ok(q.result); q.onerror = () => no(q.error); });
+    const d = await abrir();
+    // se escriben por debajo, como quedaron con la app antigua
+    await new Promise((ok, no) => {
+      const tx = d.transaction('registros', 'readwrite');
+      const st = tx.objectStore('registros');
+      st.add({ sid: 'gemelo', tipo: 'cierre', fecha: '2025-09-20', proveedor: '', total: 300, creado: '2025-09-21T03:00:00.000Z', mod: '2025-09-21T03:00:00.000Z' });
+      st.add({ sid: 'gemelo', tipo: 'cierre', fecha: '2025-09-20', proveedor: '', total: 300, creado: '2025-09-21T03:00:00.000Z', mod: '2025-09-21T03:00:00.000Z' });
+      tx.oncomplete = ok; tx.onerror = () => no(tx.error);
+    });
+    d.close();
+    const g = APP.repetidos(await DB.todos());
+    const mes = await APP.datosMes('2025-09');
+    return { grupos: g.map(x => ({ gemelo: !!x.gemelo, sobran: x.sobran.length })), ingresos: mes.ingresos, alertas: await APP.alertas('2025-09') };
+  });
+  chk('repetidos', 'Un apunte guardado dos veces en el móvil (mismo sid) se detecta y se avisa: mientras está, el ingreso va doble (1.740 en vez de 1.440)',
+    gemelos.grupos.length === 1 && gemelos.grupos[0].gemelo && gemelos.grupos[0].sobran === 1 && cerca(gemelos.ingresos, 1740) && /Hay 1 apunte repetido/.test(gemelos.alertas[0] || ''),
+    JSON.stringify(gemelos).slice(0, 400));
+  await page.click('.tab[data-tab="inicio"]');
+  await page.waitForTimeout(600);
+  await page.evaluate(() => APP.inicio());
+  await page.waitForTimeout(500);
+  await page.click('#ini-alertas .rep-revisar');
+  await page.waitForTimeout(400);
+  const gemeloModal = await page.evaluate(() => document.querySelector('#modal-body').textContent.replace(/\s+/g, ' '));
+  await page.click('#modal-body .rep-quitar');
+  await page.waitForTimeout(800);
+  const trasGemelo = await page.evaluate(async () => ({
+    quedan: (await DB.todos()).filter(r => r.sid === 'gemelo').length,
+    ingresos: (await APP.datosMes('2025-09')).ingresos,
+    repetidos: APP.repetidos(await DB.todos()).length
+  }));
+  chk('repetidos', 'La revisión dice que está guardado dos veces en este móvil y que son iguales en todo, y al quitarlo queda uno (ventas 1.440)',
+    /está guardada dos veces en este móvil/.test(gemeloModal) && /iguales en todo/.test(gemeloModal) && trasGemelo.quedan === 1 && cerca(trasGemelo.ingresos, 1440) && trasGemelo.repetidos === 0,
+    gemeloModal.slice(0, 300) + ' ' + JSON.stringify(trasGemelo));
+
+  // 5) Dos versiones que solo cambian en el IVA, y una corrección que cambió de trimestre
+  await limpiar();
+  await page.evaluate(async () => {
+    const R = { remoto: true };
+    await DB.guardar({ sid: 'iva-vieja', tipo: 'factura', fecha: '2025-05-10', proveedor: 'Makro', categoria: 'Mercancía', total: 121, ivaTipo: null, ivaCuota: null, creado: '2025-05-10T18:00:00.000Z', mod: '2025-05-10T18:00:00.040Z' }, R);
+    await DB.guardar({ sid: 'iva-buena', tipo: 'factura', fecha: '2025-05-10', proveedor: 'Makro', categoria: 'Mercancía', total: 121, ivaTipo: 21, ivaCuota: 21, baseImponible: 100, creado: '2025-05-10T18:00:00.000Z', mod: '2025-05-11T09:00:00.000Z' }, R);
+    // esta se corrigió de fecha: la de antes quedó en el 3.er trimestre y la buena en el 4.º
+    await DB.guardar({ sid: 'tri-vieja', tipo: 'factura', fecha: '2025-09-30', proveedor: 'Gestoría Sol', categoria: 'Otros', total: 80, creado: '2025-10-02T10:00:00.000Z', mod: '2025-10-02T10:00:00.040Z' }, R);
+    await DB.guardar({ sid: 'tri-buena', tipo: 'factura', fecha: '2025-10-01', proveedor: 'Gestoría Sol', categoria: 'Otros', total: 80, creado: '2025-10-02T10:00:00.000Z', mod: '2025-10-03T10:00:00.000Z' }, R);
+    // y un total de trimestre repetido
+    await DB.guardar({ sid: 'tt-vieja', tipo: 'factura', trimestral: true, fecha: '2025-07-01', proveedor: 'Asesoría', categoria: 'Otros', total: 300, creado: '2025-10-05T10:00:00.000Z', mod: '2025-10-05T10:00:00.040Z' }, R);
+    await DB.guardar({ sid: 'tt-buena', tipo: 'factura', trimestral: true, fecha: '2025-07-01', proveedor: 'Asesoría', categoria: 'Otros', total: 330, creado: '2025-10-05T10:00:00.000Z', mod: '2025-10-06T10:00:00.000Z' }, R);
+  });
+  await page.click('.tab[data-tab="informe"]');
+  await page.waitForTimeout(300);
+  const repasoDe = async (tri) => {
+    await page.evaluate((t) => {
+      const anio = document.querySelector('#i-anio');
+      if (![...anio.options].some(o => o.value === '2025')) anio.add(new Option('2025', '2025'));
+      anio.value = '2025';
+      document.querySelector('#i-trimestre').value = String(t);
+    }, tri);
+    await page.click('#i-generar');
+    await page.waitForTimeout(600);
+    return page.evaluate(() => document.querySelector('#faltan-contenido').textContent.replace(/\s+/g, ' '));
+  };
+  const repasoT2 = await repasoDe(2);
+  const repasoT3 = await repasoDe(3);
+  chk('repetidos', 'Con UN repetido en el trimestre, el repaso lo dice en singular ("lo está contando dos veces: quítalo")',
+    /Hay 1 apunte repetido en este trimestre/.test(repasoT2) && /Este informe lo está contando dos veces: quítalo antes de enviarlo/.test(repasoT2), repasoT2.slice(0, 300));
+  chk('repetidos', 'Si la corrección cambió la fecha a otro trimestre, el repaso no dice "dos veces": dice que lleva una versión que sobra',
+    /Hay 2 apuntes repetidos en este trimestre/.test(repasoT3) && /lleva una versión que sobra \(la buena puede estar en otro trimestre\): quítalos/.test(repasoT3) && !/dos veces/.test(repasoT3.split('Revisar')[0]),
+    repasoT3.slice(0, 400));
+  chk('repetidos', 'Un total de trimestre se nombra como tal ("3º trimestre 2025 · trimestre completo"), no con una fecha que nadie escribió',
+    /Asesoría · 3º trimestre 2025 · trimestre completo · 300,00 €/.test(repasoT3), repasoT3.slice(0, 400));
+  await page.click('#faltan-contenido .rep-revisar');
+  await page.waitForTimeout(400);
+  const soloIva = await page.evaluate(() => document.querySelector('#modal-body').textContent.replace(/\s+/g, ' '));
+  chk('repetidos', 'Dos versiones que solo cambian en el IVA no se ven iguales: "Base: sin poner → 100,00 € · IVA: sin desglosar → 21 % · Cuota de IVA: sin poner → 21,00 €"',
+    /Lo que cambia: Base: sin poner → 100,00 € · IVA: sin desglosar → 21 % · Cuota de IVA: sin poner → 21,00 €/.test(soloIva), soloIva.slice(0, 900));
+  chk('repetidos', 'Con repetidos de varios trimestres cerrados, el aviso va en plural ("ya cerraron… esos informes… llevaban")',
+    /que ya cerraron/.test(soloIva) && /esos informes/.test(soloIva) && /llevaban la versión que sobra/.test(soloIva), soloIva.slice(0, 1200));
+  await page.evaluate(() => document.querySelector('#modal').classList.add('hidden'));
+
+  // 6) La miniatura en segundo plano no pisa una corrección ni resucita un borrado
+  const miniSeg = await page.evaluate(async () => {
+    const lienzo = document.createElement('canvas'); lienzo.width = 400; lienzo.height = 400;
+    lienzo.getContext('2d').fillRect(0, 0, 400, 400);
+    const foto = await new Promise(r => lienzo.toBlob(r, 'image/jpeg'));
+    const chica = await new Promise(r => lienzo.toBlob(r, 'image/jpeg', 0.3));
+    const idA = await DB.guardar({ tipo: 'factura', fecha: '2025-06-01', proveedor: 'Con Foto A', total: 100, imagen: foto, creado: new Date().toISOString() });
+    const idB = await DB.guardar({ tipo: 'factura', fecha: '2025-06-02', proveedor: 'Con Foto B', total: 100, imagen: foto, creado: new Date().toISOString() });
+    const idC = await DB.guardar({ tipo: 'factura', fecha: '2025-06-03', proveedor: 'Con Foto C', total: 100, imagen: foto, creado: new Date().toISOString() });
+    const [a, b, c] = [await DB.obtener(idA), await DB.obtener(idB), await DB.obtener(idC)];   // lo que leyó la tarea
+    await DB.guardar({ ...a, total: 250 });      // mientras tanto: se corrige una…
+    await DB.borrar(idB);                         // …y se borra otra
+    const puestaA = await DB.ponerMiniatura(a.id, a.sid, a.mod, chica);
+    const puestaB = await DB.ponerMiniatura(b.id, b.sid, b.mod, chica);
+    const puestaC = await DB.ponerMiniatura(c.id, c.sid, c.mod, chica);
+    const [a2, b2, c2] = [await DB.obtener(idA), await DB.obtener(idB), await DB.obtener(idC)];
+    return { puestaA, puestaB, puestaC, totalA: a2.total, existeB: !!b2, miniC: c2.miniatura instanceof Blob, modC: c2.mod === c.mod };
+  });
+  chk('repetidos', 'La miniatura en segundo plano no devuelve una factura a su importe anterior (sigue 250) ni resucita la que se borró',
+    miniSeg.puestaA === false && miniSeg.totalA === 250 && miniSeg.puestaB === false && miniSeg.existeB === false, JSON.stringify(miniSeg));
+  chk('repetidos', 'Y a la que no se tocó sí le pone la miniatura, sin cambiarle la fecha de modificación',
+    miniSeg.puestaC === true && miniSeg.miniC && miniSeg.modC, JSON.stringify(miniSeg));
+
+  // 7) Restaurar una copia de antes de renombrar un proveedor no lo duplica
+  const provRen = await page.evaluate(async () => {
+    for (const x of await DB.provTodos()) await DB.provBorrar(x.id);
+    await DB.provGuardar({ nombre: 'Makro', nif: 'A28647451', categoria: 'Mercancía', creado: new Date().toISOString() });
+    const copia = await DB.exportarTodo();
+    const pr = (await DB.provTodos())[0];
+    await DB.provGuardar({ id: pr.id, creado: pr.creado, nombre: 'Makro Autoservicio', nif: pr.nif, categoria: pr.categoria });   // como el formulario
+    await DB.importarTodo(copia);
+    return (await DB.provTodos()).map(x => x.nombre);
+  });
+  chk('repetidos', 'Renombrar un proveedor y restaurar una copia anterior no lo deja dos veces (sigue uno, con el nombre nuevo)',
+    provRen.length === 1 && provRen[0] === 'Makro Autoservicio', JSON.stringify(provRen));
 
   // ══════════════ 10. ERRORES DE JAVASCRIPT ══════════════
   console.log('\n═══ 10. ESTABILIDAD ═══');
